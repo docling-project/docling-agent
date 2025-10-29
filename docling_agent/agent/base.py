@@ -9,8 +9,8 @@ import json
 
 from pydantic import BaseModel, Field, validator
 
-from smolagents import MCPClient, Tool, ToolCollection
-from smolagents.models import ChatMessage, MessageRole, Model
+# from smolagents import MCPClient, Tool, ToolCollection
+# from smolagents.models import ChatMessage, MessageRole, Model
 
 from mellea.backends import model_ids
 from mellea.backends.model_ids import ModelIdentifier
