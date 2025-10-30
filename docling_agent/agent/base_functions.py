@@ -41,20 +41,7 @@ from docling_core.types.doc.document import (
 )
 from docling_core.types.io import DocumentStream
 
-from examples.mellea.agent_models import setup_local_session
-
-# from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
-from examples.mellea.resources.prompts import (
-    SYSTEM_PROMPT_FOR_TASK_ANALYSIS,
-    SYSTEM_PROMPT_FOR_OUTLINE,
-    SYSTEM_PROMPT_FOR_EDITING_DOCUMENT,
-    SYSTEM_PROMPT_FOR_EDITING_TABLE,
-    SYSTEM_PROMPT_EXPERT_WRITER,
-    SYSTEM_PROMPT_EXPERT_TABLE_WRITER,
-)
 from abc import abstractmethod
-
-from examples.mellea.agent.base import DoclingAgentType, BaseDoclingAgent
 
 # Configure logging
 logging.basicConfig(

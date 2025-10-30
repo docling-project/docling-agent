@@ -39,10 +39,10 @@ from docling_core.types.doc.document import (
 )
 from docling_core.types.io import DocumentStream
 
-from examples.mellea.agent_models import setup_local_session
+from docling_agent.agent_models import setup_local_session
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
-from examples.mellea.resources.prompts import (
+from docling_agent.resources.prompts import (
     SYSTEM_PROMPT_FOR_TASK_ANALYSIS,
     SYSTEM_PROMPT_FOR_OUTLINE,
     SYSTEM_PROMPT_FOR_EDITING_DOCUMENT,
@@ -52,7 +52,7 @@ from examples.mellea.resources.prompts import (
 )
 from abc import abstractmethod
 
-from examples.mellea.agent.base import DoclingAgentType, BaseDoclingAgent
+from docling_agent.agent.base import DoclingAgentType, BaseDoclingAgent
 
 # Configure logging
 logging.basicConfig(
@@ -60,7 +60,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from examples.mellea.agent.base_functions import (
+from docling_agent.agent.base_functions import (
     find_json_dicts,
     find_crefs,
     has_crefs,
@@ -96,7 +96,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
     system_prompt_expert_table_writer: ClassVar[str] = SYSTEM_PROMPT_EXPERT_TABLE_WRITER
 
-    def __init__(self, *, model_id: ModelIdentifier, tools: list[Tool]):
+    def __init__(self, *, model_id: ModelIdentifier, tools: list):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_WRITER,
             model_id=model_id,
@@ -118,6 +118,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         return document
 
+    """
     def _analyse_task_for_topics_and_followup_questions(self, *, task: str):
         chat_messages = self._init_chat_messages(
             system_prompt=self.system_prompt_for_task_analysis,
@@ -144,7 +145,8 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 in_topics = True
             elif isinstance(item, ListItem) and item.text == "follow-up questions:":
                 in_questions = True
-
+    """
+    
     def _analyse_task_for_final_destination(self, *, task: str):
         return
 
@@ -324,6 +326,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         return document
 
+    """
     def _analyse_output_into_docling_document(
         self, message: ChatMessage, language: str = "markdown"
     ) -> list[DoclingDocument]:
@@ -345,7 +348,8 @@ class DoclingWritingAgent(BaseDoclingAgent):
             result.append(conv_result.document)
 
         return result
-
+    """
+    
     def _write_paragraph(
         self,
         summary: str,

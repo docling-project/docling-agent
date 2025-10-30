@@ -7,7 +7,7 @@ from docling_core.types.doc.document import (
 )
 
 from mellea.backends import model_ids
-from examples.mellea.agents import DoclingEditingAgent, logger
+from docling_agent.agents import DoclingEditingAgent, logger
 
 
 def new_path(ipath: Path, ending: str) -> Path:

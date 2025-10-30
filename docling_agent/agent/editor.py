@@ -39,10 +39,10 @@ from docling_core.types.doc.document import (
 )
 from docling_core.types.io import DocumentStream
 
-from examples.mellea.agent_models import setup_local_session
+from docling_agent.agent_models import setup_local_session
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
-from examples.mellea.resources.prompts import (
+from docling_agent.resources.prompts import (
     SYSTEM_PROMPT_FOR_TASK_ANALYSIS,
     SYSTEM_PROMPT_FOR_OUTLINE,
     SYSTEM_PROMPT_FOR_EDITING_DOCUMENT,
@@ -52,9 +52,9 @@ from examples.mellea.resources.prompts import (
 )
 from abc import abstractmethod
 
-from examples.mellea.agent.base import DoclingAgentType, BaseDoclingAgent
+from docling_agent.agent.base import DoclingAgentType, BaseDoclingAgent
 
-from examples.mellea.agent.base_functions import (
+from docling_agent.agent.base_functions import (
     find_json_dicts,
     find_crefs,
     has_crefs,
@@ -87,7 +87,7 @@ class DoclingEditingAgent(BaseDoclingAgent):
 
     system_prompt_expert_writer: ClassVar[str] = SYSTEM_PROMPT_EXPERT_WRITER
 
-    def __init__(self, *, model_id: ModelIdentifier, tools: list[Tool]):
+    def __init__(self, *, model_id: ModelIdentifier, tools: list):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_EDITOR,
             model_id=model_id,

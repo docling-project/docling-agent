@@ -6,6 +6,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from examples.mellea.agent.base import DoclingAgentType, BaseDoclingAgent
-from examples.mellea.agent.writer import DoclingWritingAgent
-from examples.mellea.agent.editor import DoclingEditingAgent
+from docling_agent.agent.base import DoclingAgentType, BaseDoclingAgent
+from docling_agent.agent.writer import DoclingWritingAgent
+from docling_agent.agent.editor import DoclingEditingAgent

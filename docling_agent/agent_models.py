@@ -14,6 +14,8 @@ import mellea.stdlib.chat
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirement import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
+from mellea.stdlib.base import ChatContext
+from mellea.stdlib.chat import Message
 
 import re
 
@@ -24,12 +26,14 @@ def setup_local_session(
     system_prompt: str = "You are a helpful assistant.",
 ) -> MelleaSession:
     m = MelleaSession(
-        ctx=mellea.stdlib.base.LinearContext(),
+        # ctx=mellea.stdlib.base.LinearContext(),
+        ctx = ChatContext(),
         backend=OllamaModelBackend(model_id=model_id),
     )
 
     # Add the system prompt and the goal to the chat history.
-    m.ctx.insert(mellea.stdlib.chat.Message(role="system", content=system_prompt))
+    # m.ctx.insert(mellea.stdlib.chat.Message(role="system", content=system_prompt))
+    m.ctx.add(Message(role="system", content=system_prompt))
 
     return m
 

@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 from mellea.backends import model_ids
-from examples.mellea.agents import DoclingWritingAgent, logger
+from docling_agent.agents import DoclingWritingAgent, logger
 
 
 def main():
