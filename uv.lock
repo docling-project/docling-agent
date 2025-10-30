@@ -1108,6 +1108,7 @@ source = { editable = "." }
 dependencies = [
     { name = "boto3" },
     { name = "docling" },
+    { name = "docling-core", extra = ["chunking"] },
     { name = "fastparquet" },
     { name = "httpx" },
     { name = "mellea" },
@@ -1143,6 +1144,7 @@ requires-dist = [
     { name = "boto3", specifier = "~=1.35" },
     { name = "docling", specifier = "~=2.56" },
     { name = "docling", extras = ["vlm"], marker = "extra == 'vlm'", specifier = "~=2.53" },
+    { name = "docling-core", extras = ["chunking"], git = "https://github.com/docling-project/docling-core?rev=dafb5844a088d94ea99bcc9215ca1fdb79821f20" },
     { name = "fastparquet", specifier = "~=2024.11" },
     { name = "httpx", specifier = "~=0.28" },
     { name = "mellea", specifier = ">=0.1.3" },
@@ -1173,7 +1175,7 @@ dev = [
 [[package]]
 name = "docling-core"
 version = "2.49.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/docling-project/docling-core?rev=dafb5844a088d94ea99bcc9215ca1fdb79821f20#dafb5844a088d94ea99bcc9215ca1fdb79821f20" }
 dependencies = [
     { name = "jsonref" },
     { name = "jsonschema" },
@@ -1185,10 +1187,6 @@ dependencies = [
     { name = "tabulate" },
     { name = "typer" },
     { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/7f/1552500d2a197f69cb9cf69bf022e5021e8c914a00e1f5fbc87752e8e500/docling_core-2.49.0.tar.gz", hash = "sha256:7c0f39d58a06192c25aa043141cd8f87ac6a8d2c5eab5137344e1476dd13eacb", size = 161454, upload-time = "2025-10-16T14:43:03.218Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/cd/84034624d6c5a1484f694d16069be56c00117898ee4f43c9a3bf45061b31/docling_core-2.49.0-py3-none-any.whl", hash = "sha256:65605c0546548800dcc3cc4eb6eec24f1a4fa8c9bcd4257722894838588e41ed", size = 164457, upload-time = "2025-10-16T14:43:01.808Z" },
 ]
 
 [package.optional-dependencies]

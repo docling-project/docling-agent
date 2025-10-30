@@ -178,8 +178,6 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         outline = find_outline_v2(text=answer.value)
 
-        exit(-1)
-
         return outline
 
     def _update_document_with_content(
