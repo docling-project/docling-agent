@@ -40,7 +40,7 @@ def main():
     # tools = setup_mcp_tools(config=tools_config)
 
     # os.makedirs("./scratch", exist_ok=True)
-    ipath = Path("./examples/mellea/scratch/20250815_125216.json")
+    ipath = Path("./examples/example_02_edit_resources/20250815_125216.json")
 
     for _ in [
         (

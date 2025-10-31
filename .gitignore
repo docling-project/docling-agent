@@ -1,5 +1,6 @@
 *~
 *.DS_Store
+examples/example_02_edit_resources/*.html
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

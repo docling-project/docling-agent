@@ -28,7 +28,7 @@ from docling_agent.agent.base_functions import (
     serialize_table_to_html,
     validate_html_to_docling_table,
 )
-from docling_agent.agent_models import setup_local_session
+from docling_agent.agent_models import setup_local_session, view_linear_context
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
@@ -39,7 +39,7 @@ from docling_agent.resources.prompts import (
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s: %(name)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,8 @@ class DoclingEditingAgent(BaseDoclingAgent):
         logger.info(f"task: {task}")
 
         outline = create_document_outline(doc=document)
-
+        logger.info(f"outline: {outline}")
+        
         context = rf"""Given the current outline of the document:
 ```
 {outline}
@@ -123,7 +124,10 @@ Now, provide me the operations (encapsulated in on ore more ```json...```) and t
             prompt,
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
-
+        # logger.info(f"answer: {answer.value}")
+        
+        view_linear_context(m)
+        
         ops = find_json_dicts(text=answer.value)
 
         if len(ops) == 0:
