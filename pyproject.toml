@@ -182,6 +182,7 @@ module = [
     "mlx_vlm.*",
     "googleapiclient.*", 
     "google_auth_oauthlib.*",
+    "mellea.*",
 ]
 ignore_missing_imports = true
 

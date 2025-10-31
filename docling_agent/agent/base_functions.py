@@ -1,49 +1,31 @@
-import copy
+import json
 import logging
 import re
-from datetime import datetime
-from enum import Enum
 from io import BytesIO
-from typing import ClassVar
-import json
-
-from pydantic import BaseModel, Field, validator
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
-
-from mellea.backends import model_ids
-from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirement import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
-
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import (
-    ContentLayer,
+    BaseMeta,
     DocItemLabel,
     DoclingDocument,
-    NodeItem,
     GroupItem,
     GroupLabel,
-    DocItem,
-    LevelNumber,
     ListItem,
+    NodeItem,
+    PictureItem,
+    RefItem,
     SectionHeaderItem,
-    TableItem,
+    SummaryMetaField,
     TableData,
+    TableItem,
     TextItem,
     TitleItem,
-    RefItem,
-    PictureItem,
-    ListGroup,
-    BaseMeta,
-    SummaryMetaField,
 )
 from docling_core.types.io import DocumentStream
-
-from abc import abstractmethod
 
 # Configure logging
 logging.basicConfig(
@@ -74,20 +56,18 @@ def find_crefs(text: str) -> list[RefItem]:
     """
     Check if a string matches the pattern ```markdown(.*)?```
     """
-    labels: str = "|".join([_ for _ in DocItemLabel])
+    labels: str = "|".join(e.value for e in DocItemLabel)
     pattern = rf"#/({labels})/\d+"
 
-    match = re.search(pattern, text, re.DOTALL)
-
-    refs = []
-    for i, _ in enumerate(match):
-        refs.append(RefItem(cref=_.group(0)))
+    refs: list[RefItem] = []
+    for m in re.finditer(pattern, text, re.DOTALL):
+        refs.append(RefItem(cref=m.group(0)))
 
     return refs
 
 
 def has_crefs(text: str) -> bool:
-    return len(find_crefs) > 0
+    return len(find_crefs(text)) > 0
 
 
 def create_document_outline(doc: DoclingDocument) -> str:
@@ -97,7 +77,7 @@ def create_document_outline(doc: DoclingDocument) -> str:
         DocItemLabel.TEXT: 0,
     }
 
-    lines = []
+    lines: list[str] = []
     for item, level in doc.iterate_items(with_groups=True):
         if isinstance(item, TitleItem):
             lines.append(f"title (reference={item.self_ref}): {item.text}")
@@ -168,11 +148,11 @@ def find_outline_v1(text: str) -> DoclingDocument | None:
 
 def find_outline_v2(text: str) -> DoclingDocument | None:
     starts = ["paragraph", "list", "table", "figure", "picture"]
-    
+
     md = find_markdown_code_block(text)
 
     print(f"============================\n\n{md}\n\n============================\n\n")
-    
+
     if not md:
         return None
 
@@ -209,14 +189,16 @@ def find_outline_v2(text: str) -> DoclingDocument | None:
             meta = BaseMeta(summary=SummaryMetaField(text=summary))
 
             if label == "paragraph":
-                _ = outline.add_text(label=DocItemLabel.TEXT ,text=item.text)
+                _ = outline.add_text(label=DocItemLabel.TEXT, text=item.text)
                 _.meta = meta
 
             elif label == "table":
                 # Create an empty placeholder table with summary in meta
                 caption = outline.add_text(label=DocItemLabel.CAPTION, text="")
                 data = TableData(table_cells=[], num_rows=0, num_cols=0)
-                _ = outline.add_table(label=DocItemLabel.TABLE, data=data, caption=caption)
+                _ = outline.add_table(
+                    label=DocItemLabel.TABLE, data=data, caption=caption
+                )
                 _.meta = meta
 
             elif label in ["figure", "picture"]:
@@ -228,7 +210,9 @@ def find_outline_v2(text: str) -> DoclingDocument | None:
             elif label == "list":
                 # Add a group placeholder for a list; attach summary via meta
                 try:
-                    _ = outline.add_group(name="list", label=GroupLabel.UNSPECIFIED, parent=None)
+                    _ = outline.add_group(
+                        name="list", label=GroupLabel.UNSPECIFIED, parent=None
+                    )
                 except TypeError:
                     # Fallback for API variants that don't require explicit parent
                     _ = outline.add_group(name="list", label=GroupLabel.UNSPECIFIED)
@@ -249,7 +233,7 @@ def find_outline_v2(text: str) -> DoclingDocument | None:
         return None
 
     print(outline.export_to_markdown())
-    
+
     return outline
 
 
@@ -273,8 +257,8 @@ def serialize_item_to_markdown(item: TextItem, doc: DoclingDocument) -> str:
 
 def serialize_table_to_html(table: TableItem, doc: DoclingDocument) -> str:
     from docling_core.transforms.serializer.html import (
-        HTMLTableSerializer,
         HTMLDocSerializer,
+        HTMLTableSerializer,
     )
 
     # Create the table serializer
@@ -350,7 +334,7 @@ def convert_html_to_docling_table(text: str) -> list[TableItem] | None:
 
 def validate_html_to_docling_table(text: str) -> bool:
     logger.info(f"validate_html_to_docling_table for {text[0:64]}")
-    return convert_html_to_docling_table is not None
+    return convert_html_to_docling_table(text) is not None
 
 
 def convert_markdown_to_docling_document(text: str) -> DoclingDocument | None:
@@ -368,7 +352,7 @@ def convert_markdown_to_docling_document(text: str) -> DoclingDocument | None:
 
         if conv.status == ConversionStatus.SUCCESS:
             return conv.document
-    except Exception as exc:
+    except Exception:
         return None
 
     return None
@@ -387,7 +371,7 @@ def convert_html_to_docling_document(text: str) -> DoclingDocument | None:
     try:
         converter = DocumentConverter(allowed_formats=[InputFormat.HTML])
 
-        buff = BytesIO(text.encode("utf-8"))
+        buff = BytesIO(text_.encode("utf-8"))
         doc_stream = DocumentStream(name="tmp.html", stream=buff)
 
         conv: ConversionResult = converter.convert(doc_stream)
@@ -434,7 +418,7 @@ def insert_document(
             logger.error(f"Item with unknown parent: {item}")
 
         elif isinstance(item, GroupItem):
-            g = doc.add_group(
+            doc.add_group(
                 name=item.name,
                 label=item.label,
                 parent=to_item[item.parent.cref],
@@ -459,9 +443,8 @@ def insert_document(
 
         elif isinstance(item, TableItem):
             if len(item.captions) > 0:
-                caption = doc.add_text(
-                    label=DocItemLabel.CAPTION, text=item.captions[0].text
-                )
+                # Caption entries may be references; create an empty caption text item
+                caption = doc.add_text(label=DocItemLabel.CAPTION, text="")
                 te = doc.add_table(
                     data=item.data,
                     caption=caption,
@@ -474,4 +457,6 @@ def insert_document(
                 to_item[item.self_ref] = te
 
         else:
-            logger.warning(f"No support to insert items of label: {item.label}")
+            logger.warning(f"No support to insert items of type: {type(item).__name__}")
+
+    return doc

@@ -1,12 +1,11 @@
-import os
-
 from pathlib import Path
+
+from mellea.backends import model_ids
 
 from docling_core.types.doc.document import (
     DoclingDocument,
 )
 
-from mellea.backends import model_ids
 from docling_agent.agents import DoclingEditingAgent, logger
 
 
@@ -25,7 +24,7 @@ def run_task(
 
     agent = DoclingEditingAgent(model_id=model_id, tools=tools)
 
-    document_ = agent.run(
+    document = agent.run(
         task=task,
         document=document,
     )
@@ -39,7 +38,6 @@ def main():
 
     # tools_config = MCPConfig()
     # tools = setup_mcp_tools(config=tools_config)
-    tools = []
 
     # os.makedirs("./scratch", exist_ok=True)
     ipath = Path("./examples/mellea/scratch/20250815_125216.json")

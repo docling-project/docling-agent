@@ -1,45 +1,15 @@
-import copy
 import logging
-import re
-from datetime import datetime
+from abc import abstractmethod
 from enum import Enum
-from io import BytesIO
-from typing import ClassVar
-import json
-
-from pydantic import BaseModel, Field, validator
+from typing import TYPE_CHECKING
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
-
-from mellea.backends import model_ids
 from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirement import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
+from pydantic import BaseModel
 
-from docling.datamodel.base_models import ConversionStatus, InputFormat
-from docling.datamodel.document import ConversionResult
-from docling.document_converter import DocumentConverter
-from docling_core.types.doc.document import (
-    ContentLayer,
-    DocItemLabel,
-    DoclingDocument,
-    NodeItem,
-    GroupItem,
-    GroupLabel,
-    DocItem,
-    LevelNumber,
-    ListItem,
-    SectionHeaderItem,
-    TableItem,
-    TextItem,
-    TitleItem,
-    RefItem,
-    PictureItem,
-)
-from docling_core.types.io import DocumentStream
-
-from abc import abstractmethod
+if TYPE_CHECKING:
+    from docling_core.types.doc.document import DoclingDocument
 
 # Configure logging
 logging.basicConfig(
@@ -60,7 +30,7 @@ class DoclingAgentType(Enum):
         return self.value
 
     @classmethod
-    def from_string(cls, value: str) -> "AgentType":
+    def from_string(cls, value: str) -> "DoclingAgentType":
         """Create AgentType from string value."""
         for agent_type in cls:
             if agent_type.value == value:
@@ -86,5 +56,6 @@ class BaseDoclingAgent(BaseModel):
         arbitrary_types_allowed = True  # Needed for complex types like Model
 
     @abstractmethod
-    def run(self, task: str, **kwargs) -> str:
-        return
+    def run(self, task: str, **kwargs) -> "DoclingDocument":
+        """Execute the agent for a task and return a document."""
+        raise NotImplementedError

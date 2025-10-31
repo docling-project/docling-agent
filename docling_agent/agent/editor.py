@@ -1,75 +1,40 @@
-import copy
 import logging
-import re
-from datetime import datetime
-from enum import Enum
-from io import BytesIO
-from typing import ClassVar
-import json
-
-from pydantic import BaseModel, Field, validator
+from typing import Any, ClassVar
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
-
-from mellea.backends import model_ids
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirement import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 
-from docling.datamodel.base_models import ConversionStatus, InputFormat
-from docling.datamodel.document import ConversionResult
-from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import (
-    ContentLayer,
     DocItemLabel,
     DoclingDocument,
-    NodeItem,
-    GroupItem,
-    GroupLabel,
-    DocItem,
-    LevelNumber,
-    ListItem,
+    RefItem,
     SectionHeaderItem,
     TableItem,
     TextItem,
-    TitleItem,
-    RefItem,
-    PictureItem,
 )
-from docling_core.types.io import DocumentStream
 
+from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
+from docling_agent.agent.base_functions import (
+    convert_html_to_docling_table,
+    convert_markdown_to_docling_document,
+    create_document_outline,
+    find_json_dicts,
+    has_html_code_block,
+    insert_document,
+    serialize_item_to_markdown,
+    serialize_table_to_html,
+    validate_html_to_docling_table,
+)
 from docling_agent.agent_models import setup_local_session
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
-    SYSTEM_PROMPT_FOR_TASK_ANALYSIS,
-    SYSTEM_PROMPT_FOR_OUTLINE,
+    SYSTEM_PROMPT_EXPERT_WRITER,
     SYSTEM_PROMPT_FOR_EDITING_DOCUMENT,
     SYSTEM_PROMPT_FOR_EDITING_TABLE,
-    SYSTEM_PROMPT_EXPERT_WRITER,
-    SYSTEM_PROMPT_EXPERT_TABLE_WRITER,
-)
-from abc import abstractmethod
-
-from docling_agent.agent.base import DoclingAgentType, BaseDoclingAgent
-
-from docling_agent.agent.base_functions import (
-    find_json_dicts,
-    find_crefs,
-    has_crefs,
-    create_document_outline,
-    serialize_item_to_markdown,
-    serialize_table_to_html,
-    find_html_code_block,
-    has_html_code_block,
-    find_markdown_code_block,
-    has_markdown_code_block,
-    convert_html_to_docling_table,
-    validate_html_to_docling_table,
-    convert_markdown_to_docling_document,
-    validate_markdown_to_docling_document,
-    insert_document,
 )
 
 # Configure logging
@@ -106,7 +71,9 @@ class DoclingEditingAgent(BaseDoclingAgent):
                 refs=op["refs"],
             )
         elif op["operation"] == "delete_content":
-            self._delete_content(task=task, document=document, refs=op["refs"])
+            self._delete_content_of_document_items(
+                task=task, document=document, refs=op["refs"]
+            )
         elif op["operation"] == "update_section_heading_level":
             self._update_section_heading_level(
                 task=task, document=document, to_level=op["to_level"]
@@ -116,12 +83,14 @@ class DoclingEditingAgent(BaseDoclingAgent):
             logger.info(message)
             raise ValueError(message)
 
+        return document
+
     def _identify_document_items(
         self,
         task: str,
         document: DoclingDocument,
         loop_budget: int = 5,
-    ) -> list[RefItem]:
+    ) -> dict[str, Any]:
         logger.info(f"task: {task}")
 
         outline = create_document_outline(doc=document)
@@ -158,7 +127,7 @@ Now, provide me the operations (encapsulated in on ore more ```json...```) and t
         ops = find_json_dicts(text=answer.value)
 
         if len(ops) == 0:
-            raise ValueError(f"No operation is detected")
+            raise ValueError("No operation is detected")
 
         if "operation" not in ops[0]:
             raise ValueError(f"`operation` not in op: {ops[0]}")
@@ -266,6 +235,9 @@ Execute the following task: {task}
         # logger.info(f"response: {answer.value}")
 
         updated_doc = convert_markdown_to_docling_document(text=answer.value)
+        if updated_doc is None:
+            logger.warning("No valid document produced for updated content.")
+            return
 
         document = insert_document(item=item, doc=document, updated_doc=updated_doc)
 
@@ -293,9 +265,17 @@ Execute the following task: {task}
             if isinstance(item, SectionHeaderItem):
                 item.level = level
             else:
-                logger.warning(f"{sref} is not SectionHeaderItem {item.label}")
+                logger.warning(
+                    f"{sref} is not SectionHeaderItem (got {type(item).__name__})"
+                )
 
-    def _rewrite_content(self, task: str, document: DoclingDocument, refs: list[str]):
+    def _rewrite_content(
+        self,
+        task: str,
+        document: DoclingDocument,
+        refs: list[str],
+        loop_budget: int = 5,
+    ):
         logger.info("_update_content_of_text")
 
         texts = []
@@ -319,7 +299,7 @@ Execute the following task: {task}
 
         m = setup_local_session(
             model_id=self.model_id,
-            system_prompt=self.system_prompt_for_expert_writer,
+            system_prompt=self.system_prompt_expert_writer,
         )
 
         answer = m.instruct(
@@ -329,6 +309,9 @@ Execute the following task: {task}
         logger.info(f"response: {answer.value}")
 
         updated_doc = convert_markdown_to_docling_document(text=answer.value)
+        if updated_doc is None:
+            logger.warning("No valid document produced for rewrite.")
+            return
 
         ref = RefItem(cref=refs[0])
         item = ref.resolve(document)

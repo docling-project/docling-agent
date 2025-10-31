@@ -1,23 +1,13 @@
-import mellea
-
-from mellea.backends import model_ids
-from mellea.backends.ollama import OllamaModelBackend
-from mellea.backends.types import ModelOption
+import re
 
 from mellea import MelleaSession
-
-import mellea.backends
-import mellea.backends.types
-import mellea.stdlib
-import mellea.stdlib.base
-import mellea.stdlib.chat
+from mellea.backends import model_ids
 from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirement import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
+from mellea.backends.ollama import OllamaModelBackend
 from mellea.stdlib.base import ChatContext
 from mellea.stdlib.chat import Message
-
-import re
+from mellea.stdlib.requirement import Requirement, simple_validate
+from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 
 def setup_local_session(
@@ -27,7 +17,7 @@ def setup_local_session(
 ) -> MelleaSession:
     m = MelleaSession(
         # ctx=mellea.stdlib.base.LinearContext(),
-        ctx = ChatContext(),
+        ctx=ChatContext(),
         backend=OllamaModelBackend(model_id=model_id),
     )
 
@@ -71,7 +61,7 @@ def main():
 
     m = setup_local_session(system_prompt="You are an expert material-scientist.")
 
-    answer = m.instruct(
+    _ = m.instruct(
         "Please write me a table in HTML with the most common properties of the most common polymers. The polymers need to be rows, the properties need to be colums.",
         requirements=[
             # "The resulting HTML table should satisfy the following regex ```html(.*)?```",
@@ -88,7 +78,7 @@ def main():
     try:
         for i, _ in enumerate(m.ctx.linearize()):
             print(i, ": ", _)
-    except:
+    except Exception:
         print("fail ...")
 
 

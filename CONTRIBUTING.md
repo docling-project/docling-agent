@@ -2,10 +2,10 @@
 Our project welcomes external contributions. If you have an itch, please feel
 free to scratch it.
 
-To contribute code or documentation, please submit a [pull request](https://github.com/docling-project/docling-jobkit/pulls).
+To contribute code or documentation, please submit a [pull request](https://github.com/docling-project/docling-agent/pulls).
 
 A good way to familiarize yourself with the codebase and contribution process is
-to look for and tackle low-hanging fruit in the [issue tracker](https://github.com/docling-project/docling-jobkit/issues).
+to look for and tackle low-hanging fruit in the [issue tracker](https://github.com/docling-project/docling-agent/issues).
 Before embarking on a more ambitious contribution, please quickly [get in touch](#communication) with us.
 
 For general questions or support requests, please refer to the [discussion section](https://github.com/docling-project/docling/discussions)
@@ -17,14 +17,14 @@ cannot be accepted at all!**
 
 ### Proposing New Features
 
-If you would like to implement a new feature, please [raise an issue](https://github.com/docling-project/docling-jobkit/issues)
+If you would like to implement a new feature, please [raise an issue](https://github.com/docling-project/docling-agent/issues)
 before sending a pull request so the feature can be discussed. This is to avoid
 you spending valuable time working on a feature that the project developers
 are not interested in accepting into the codebase.
 
 ### Fixing Bugs
 
-If you would like to fix a bug, please [raise an issue](https://github.com/docling-project/docling/docling-jobkit) before sending a
+If you would like to fix a bug, please [raise an issue](https://github.com/docling-project/docling/docling-agent) before sending a
 pull request so it can be tracked.
 
 ### Merge Approval
@@ -120,56 +120,3 @@ Then, to install dependencies, run:
 uv sync
 ```
 
-**(Advanced) Use a Specific Python Version**
-
-If you need to work with a specific (older) version of Python, run:
-
-```bash
-uv venv --python 3.11
-```
-
-More detailed options are described in the [uv documentation](https://docs.astral.sh/uv/pip/environments).
-
-
-#### Add a New Dependency
-
-```bash
-uv add NAME
-```
-
-### Developing and testing the RQ engine
-
-Here are the setup steps for the local development and testing of the RQ engine.
-
-Launch the local redis container:
-
-```sh
-docker run -d --name redis -p 6379:6379 redis
-```
-
-Launch the workers (to be repeated when developing the worker code):
-
-```sh
-uv run python docling_jobkit/orchestrators/rq/worker.py
-```
-
-
-## Coding style guidelines
-
-We use the following tools to enforce code style:
-
-- ruff, to sort imports and format code
-
-We run a series of checks on the code base on every commit, using `pre-commit`. To install the hooks, run:
-
-```bash
-pre-commit install
-```
-
-To run the checks on-demand, run:
-
-```shell
-pre-commit run --all-files
-```
-
-Note: Formatting checks like `ruff` will "fail" if they modify files. This is because `pre-commit` doesn't like to see files modified by their Hooks. In these cases, `git add` the modified files and `git commit` again.
