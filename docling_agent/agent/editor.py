@@ -59,7 +59,16 @@ class DoclingEditingAgent(BaseDoclingAgent):
             tools=tools,
         )
 
-    def run(self, task: str, document: DoclingDocument, **kwargs) -> DoclingDocument:
+    def run(
+        self,
+        task: str,
+        document: DoclingDocument | None = None,
+        sources: list[DoclingDocument] = [],
+        **kwargs,
+    ) -> DoclingDocument:
+        if document is None:
+            raise ValueError("Document must not be None")
+
         op = self._identify_document_items(task=task, document=document)
 
         if op["operation"] == "update_content":
@@ -95,7 +104,7 @@ class DoclingEditingAgent(BaseDoclingAgent):
 
         outline = create_document_outline(doc=document)
         logger.info(f"outline: {outline}")
-        
+
         context = rf"""Given the current outline of the document:
 ```
 {outline}
@@ -125,9 +134,9 @@ Now, provide me the operations (encapsulated in on ore more ```json...```) and t
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
         # logger.info(f"answer: {answer.value}")
-        
+
         view_linear_context(m)
-        
+
         ops = find_json_dicts(text=answer.value)
 
         if len(ops) == 0:

@@ -1,8 +1,6 @@
 import logging
 import re
 
-from tabulate import tabulate
-
 from mellea import MelleaSession
 from mellea.backends import model_ids
 from mellea.backends.model_ids import ModelIdentifier
@@ -11,6 +9,7 @@ from mellea.stdlib.base import ChatContext
 from mellea.stdlib.chat import Message
 from mellea.stdlib.requirement import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
+from tabulate import tabulate  # type: ignore[import-untyped]
 
 # Configure logging
 logging.basicConfig(
@@ -18,36 +17,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 def setup_local_session(
     *,
     model_id: ModelIdentifier = model_ids.OPENAI_GPT_OSS_20B,
     system_prompt: str = "You are a helpful assistant.",
 ) -> MelleaSession:
-
     ctx = ChatContext()
     ctx = ctx.add(Message(role="system", content=system_prompt))
-    
+
     m = MelleaSession(
         ctx=ctx,
         backend=OllamaModelBackend(model_id=model_id),
     )
-    
+
     return m
 
-def view_linear_context(m: MelleaSession):
 
-    rows=[]
+def view_linear_context(m: MelleaSession):
+    rows = []
     for i, _ in enumerate(m.ctx.view_for_generation()):
         if isinstance(_, Message):
-            if len(_.content)>64:
-                rows.append([i, _.role, (_.content[0:32] + " ... " +  _.content[-32:])])
+            if len(_.content) > 64:
+                rows.append([i, _.role, (_.content[0:32] + " ... " + _.content[-32:])])
             else:
                 rows.append([i, _.role, _.content])
         else:
             rows.append([i, "<unknown>", str(_)[0:64]])
-            
-    logger.info(f"linearized chat:\n\n {tabulate(rows, headers=['turn', 'role', 'message'])}")
-        
+
+    logger.info(
+        f"linearized chat:\n\n {tabulate(rows, headers=['turn', 'role', 'message'])}"
+    )
+
+
 def matches_html_code_block(text: str) -> bool:
     """
     Check if a string matches the pattern ```html(.*)?```

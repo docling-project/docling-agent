@@ -66,7 +66,13 @@ class DoclingWritingAgent(BaseDoclingAgent):
             tools=tools,
         )
 
-    def run(self, task: str, **kwargs) -> DoclingDocument:
+    def run(
+        self,
+        task: str,
+        document: DoclingDocument | None = None,
+        sources: list[DoclingDocument] = [],
+        **kwargs,
+    ) -> DoclingDocument:
         # self._analyse_task_for_topics_and_followup_questions(task=task)
 
         # self._analyse_task_for_final_destination(task=task)
@@ -75,11 +81,11 @@ class DoclingWritingAgent(BaseDoclingAgent):
         outline: DoclingDocument = self._make_outline_for_writing(task=task)
 
         # Write the actual document item by item
-        document: DoclingDocument = self._populate_document_with_content(
+        result_document: DoclingDocument = self._populate_document_with_content(
             task=task, outline=outline
         )
 
-        return document
+        return result_document
 
     """
     def _analyse_task_for_topics_and_followup_questions(self, *, task: str):

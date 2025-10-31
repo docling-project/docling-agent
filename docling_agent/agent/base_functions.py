@@ -123,7 +123,7 @@ def find_outline_v1(text: str) -> DoclingDocument | None:
 
         conv: ConversionResult = converter.convert(doc_stream)
 
-        lines = []
+        lines: list[str] = []
         for item, level in conv.document.iterate_items(with_groups=True):
             if isinstance(item, TitleItem) or isinstance(item, SectionHeaderItem):
                 continue

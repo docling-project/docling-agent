@@ -56,6 +56,12 @@ class BaseDoclingAgent(BaseModel):
         arbitrary_types_allowed = True  # Needed for complex types like Model
 
     @abstractmethod
-    def run(self, task: str, **kwargs) -> "DoclingDocument":
+    def run(
+        self,
+        task: str,
+        document: DoclingDocument | None = None,
+        sources: list[DoclingDocument] = [],
+        **kwargs,
+    ) -> "DoclingDocument":
         """Execute the agent for a task and return a document."""
         raise NotImplementedError
