@@ -58,7 +58,6 @@ def main():
         ),
     ]:
         run_task(ipath=ipath, opath=_[1], task=_[0], model_id=model_id)
-
-
+    
 if __name__ == "__main__":
     main()

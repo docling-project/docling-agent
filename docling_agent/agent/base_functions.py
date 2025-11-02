@@ -151,8 +151,6 @@ def find_outline_v2(text: str) -> DoclingDocument | None:
 
     md = find_markdown_code_block(text)
 
-    print(f"============================\n\n{md}\n\n============================\n\n")
-
     if not md:
         return None
 
@@ -232,7 +230,7 @@ def find_outline_v2(text: str) -> DoclingDocument | None:
         logger.error(message)
         return None
 
-    print(outline.export_to_markdown())
+    # print(outline.export_to_markdown())
 
     return outline
 
@@ -390,9 +388,11 @@ def validate_html_to_docling_document(text: str) -> bool:
     return convert_html_to_docling_document(text) is not None
 
 
-def insert_document(
+def insert_document(*,
     item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument
 ) -> DoclingDocument:
+    logger.info(f"inserting new document at item {item.self_ref}")
+        
     group_item = GroupItem(
         label=GroupLabel.UNSPECIFIED,
         name="inserted-group",
@@ -402,61 +402,62 @@ def insert_document(
     if isinstance(item, ListItem):
         # we should delete all the children of the list-item and put the text to ""
         raise ValueError("ListItem insertion is not yet supported!")
-
-    doc.replace_item(old_item=item, new_item=group_item)
-
+    
+    doc.replace_item(old_item=item, new_item=group_item) # group_item is being updated here ...
+    
     to_item: dict[str, NodeItem] = {}
+    for _item, level in updated_doc.iterate_items(with_groups=True):
+        
+        if isinstance(_item, GroupItem) and _item.self_ref == "#/body":
+            to_item[_item.self_ref] = group_item
 
-    for item, level in updated_doc.iterate_items(with_groups=True):
-        if isinstance(item, GroupItem) and item.self_ref == "#/body":
-            to_item[item.self_ref] = group_item
-
-        elif item.parent is None:
-            logger.error(f"Item with null parent: {item}")
-
-        elif item.parent.cref not in to_item:
-            logger.error(f"Item with unknown parent: {item}")
-
-        elif isinstance(item, GroupItem):
-            doc.add_group(
-                name=item.name,
-                label=item.label,
-                parent=to_item[item.parent.cref],
+        elif _item.parent is None:
+            logger.error(f"Item with null parent: {_item}")
+            
+        elif _item.parent.cref not in to_item:
+            logger.error(f"Item with unknown parent: {_item}")
+            
+        elif isinstance(_item, GroupItem):
+            gr = doc.add_group(
+                name=_item.name,
+                label=_item.label,
+                parent=to_item[_item.parent.cref],
             )
-
-        elif isinstance(item, ListItem):
+            to_item[_item.self_ref] = gr
+            
+        elif isinstance(_item, ListItem):
             li = doc.add_list_item(
-                text=item.text,
-                formatting=item.formatting,
-                parent=to_item[item.parent.cref],
+                text=_item.text,
+                formatting=_item.formatting,
+                parent=to_item[_item.parent.cref],
             )
-            to_item[item.self_ref] = li
+            to_item[_item.self_ref] = li
 
-        elif isinstance(item, TextItem):
+        elif isinstance(_item, TextItem):
             te = doc.add_text(
-                text=item.text,
-                label=item.label,
-                formatting=item.formatting,
-                parent=to_item[item.parent.cref],
+                text=_item.text,
+                label=_item.label,
+                formatting=_item.formatting,
+                parent=to_item[_item.parent.cref],
             )
-            to_item[item.self_ref] = te
+            to_item[_item.self_ref] = te
 
-        elif isinstance(item, TableItem):
-            if len(item.captions) > 0:
+        elif isinstance(_item, TableItem):
+            if len(_item.captions) > 0:
                 # Caption entries may be references; create an empty caption text item
                 caption = doc.add_text(label=DocItemLabel.CAPTION, text="")
                 te = doc.add_table(
-                    data=item.data,
+                    data=_item.data,
                     caption=caption,
                 )
-                to_item[item.self_ref] = te
+                to_item[_item.self_ref] = te
             else:
                 te = doc.add_table(
-                    data=item.data,
+                    data=_item.data,
                 )
-                to_item[item.self_ref] = te
+                to_item[_item.self_ref] = te
 
         else:
             logger.warning(f"No support to insert items of type: {type(item).__name__}")
-
+            
     return doc
