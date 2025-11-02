@@ -388,11 +388,11 @@ def validate_html_to_docling_document(text: str) -> bool:
     return convert_html_to_docling_document(text) is not None
 
 
-def insert_document(*,
-    item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument
+def insert_document(
+    *, item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument
 ) -> DoclingDocument:
     logger.info(f"inserting new document at item {item.self_ref}")
-        
+
     group_item = GroupItem(
         label=GroupLabel.UNSPECIFIED,
         name="inserted-group",
@@ -402,21 +402,22 @@ def insert_document(*,
     if isinstance(item, ListItem):
         # we should delete all the children of the list-item and put the text to ""
         raise ValueError("ListItem insertion is not yet supported!")
-    
-    doc.replace_item(old_item=item, new_item=group_item) # group_item is being updated here ...
-    
+
+    doc.replace_item(
+        old_item=item, new_item=group_item
+    )  # group_item is being updated here ...
+
     to_item: dict[str, NodeItem] = {}
     for _item, level in updated_doc.iterate_items(with_groups=True):
-        
         if isinstance(_item, GroupItem) and _item.self_ref == "#/body":
             to_item[_item.self_ref] = group_item
 
         elif _item.parent is None:
             logger.error(f"Item with null parent: {_item}")
-            
+
         elif _item.parent.cref not in to_item:
             logger.error(f"Item with unknown parent: {_item}")
-            
+
         elif isinstance(_item, GroupItem):
             gr = doc.add_group(
                 name=_item.name,
@@ -424,7 +425,7 @@ def insert_document(*,
                 parent=to_item[_item.parent.cref],
             )
             to_item[_item.self_ref] = gr
-            
+
         elif isinstance(_item, ListItem):
             li = doc.add_list_item(
                 text=_item.text,
@@ -459,5 +460,5 @@ def insert_document(*,
 
         else:
             logger.warning(f"No support to insert items of type: {type(item).__name__}")
-            
+
     return doc
