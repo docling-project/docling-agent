@@ -80,7 +80,7 @@ allow-direct-references = true
 include = ["docling_agent"]
 
 [project.scripts]
-docling-agent = "docling_agent.cli.local:app"
+docling-agent = "docling_agent.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/docling-project/docling-agent"
