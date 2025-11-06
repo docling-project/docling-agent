@@ -35,8 +35,8 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "docling~=2.56",
-    "docling-core[chunking]>=2.50.0",
+    "docling>=2.61.0",
+    "docling-core[chunking]>=2.50.1",
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
     "typer~=0.12",
@@ -80,7 +80,7 @@ allow-direct-references = true
 include = ["docling_agent"]
 
 [project.scripts]
-docling-agent = "docling_agent.cli.local:app"
+docling-agent = "docling_agent.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/docling-project/docling-agent"
