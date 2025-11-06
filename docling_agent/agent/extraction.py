@@ -1,53 +1,25 @@
-import copy
 import json
 import logging
 from pathlib import Path
 from typing import ClassVar
-from pydantic import Field
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirement import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
+from pydantic import Field
 
-from docling_core.types.doc.document import (
-    DocItemLabel,
+# from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
+from docling.datamodel.base_models import InputFormat
+from docling.document_extractor import DocumentExtractor
+from docling_core.types.doc import (
+    CodeLanguageLabel,
     DoclingDocument,
-    GroupItem,
-    ListItem,
-    NodeItem,
-    SectionHeaderItem,
-    TableItem,
-    TextItem,
-    TitleItem,
 )
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
-from docling_agent.agent.base_functions import (
-    find_json_dicts,
-    convert_html_to_docling_document,
-    convert_markdown_to_docling_document,
-    find_outline_v2,
-    has_html_code_block,
-    has_markdown_code_block,
-    validate_html_to_docling_document,
-    validate_markdown_to_docling_document,
-    validate_outline_format,
-)
 from docling_agent.agent_models import setup_local_session
-
-# from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
-from docling_agent.resources.prompts import (
-    SYSTEM_PROMPT_EXPERT_TABLE_WRITER,
-    SYSTEM_PROMPT_EXPERT_WRITER,
-    SYSTEM_PROMPT_FOR_OUTLINE,
-    SYSTEM_PROMPT_FOR_TASK_ANALYSIS,
-)
-
-from docling.datamodel.base_models import InputFormat
-from docling.document_converter import DocumentConverter
-from docling.document_extractor import DocumentExtractor
 
 # Configure logging
 logging.basicConfig(
@@ -61,6 +33,9 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         "You are a precise data engineer. Given a task, output only a JSON schema (no backticks) describing the fields to extract with simple value types like string, integer, float, date, or arrays/objects of those."
     )
 
+    # Optional during validation; initialized in __init__
+    extractor: DocumentExtractor | None = None
+
     # Stores the last extraction results as {path_str: [json_obj, ...]}
     last_results: dict[str, list[dict]] = Field(default_factory=dict)
 
@@ -70,8 +45,9 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             model_id=model_id,
             tools=tools,
         )
-
-        self.extractor = DocumentExtractor()
+        self.extractor = DocumentExtractor(
+            allowed_formats=[InputFormat.IMAGE, InputFormat.PDF]
+        )
 
     def run(
         self,
@@ -81,13 +57,8 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         **kwargs,
     ) -> DoclingDocument:
         # If the task already includes a JSON schema, use it; otherwise generate one.
-        schema_candidates = find_json_dicts(text=task)
-        if len(schema_candidates) > 0:
-            schema = schema_candidates[0]
-            logger.info("Schema parsed from task text.")
-        else:
-            schema = self._extract_schema_from_task(task)
-            logger.info("Schema generated from task.")
+        schema = self._extract_schema_from_task(task=task)
+        logger.info("Schema generated from task.")
 
         if sources is None:
             sources = []
@@ -98,19 +69,19 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         total_items = 0
         self.last_results = {}
 
-        logger.info(f"Starting extraction for {total} source(s)...")
+        logger.info(f"Starting extraction for {total} source(s) for schema: {schema}")
         for idx, source in enumerate(sources, start=1):
             logger.info(f"[{idx}/{total}] Extracting from: {source}")
             if isinstance(source, Path):
                 try:
-                    result = self.extractor.extract(source, template=schema)
+                    result = self.extractor.extract(source=source, template=schema)
                     # Ensure list-of-json for values
                     items: list
                     if isinstance(result, list):
                         items = result
                     else:
                         items = [result]
-                    self.last_results[str(source)] = items  # key by path string
+                    self.last_results[source] = items  # key by path string
                     successes += 1
                     total_items += len(items)
                     logger.info(
@@ -121,9 +92,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
                     logger.error(f"Failed to extract from {source}: {e}")
             else:
                 failures += 1
-                logger.error(
-                    f"source {source} is not the right type (expected Path)"
-                )
+                logger.error(f"source {source} is not the right type (expected Path)")
 
         logger.info(
             f"Extraction summary: files={total}, successes={successes}, failures={failures}, items={total_items}"
@@ -132,15 +101,25 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         # Build a document with headings per source and fenced JSON blocks per item.
         doc = DoclingDocument(name="extraction results")
         doc.add_title(text="Extraction Results")
-        for path_str, items in self.last_results.items():
-            doc.add_heading(text=path_str, level=1)
+        for path, items in self.last_results.items():
+            doc.add_heading(text=f"filename: {path.name}", level=1)
             for item in items:
-                payload = json.dumps(item, indent=2)
-                doc.add_text(label=DocItemLabel.TEXT, text=f"```json\n{payload}\n```")
+                for page in item.pages:
+                    payload = json.dumps(page.extracted_data, indent=2)
+                    doc.add_code(
+                        code_language=CodeLanguageLabel.JSON,
+                        text=f"```json\n{payload}\n```",
+                    )
 
         return doc
 
     def _extract_schema_from_task(self, task: str, loop_budget: int = 5) -> dict:
+        try:
+            schema = json.loads(task)
+            return schema
+        except Exception:
+            logger.info("not a direct json")
+
         def validate_json_str(text: str) -> bool:
             try:
                 json.loads(text)

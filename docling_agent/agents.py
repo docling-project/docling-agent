@@ -1,10 +1,10 @@
 import logging
 
 from docling_agent.agent.editor import DoclingEditingAgent
+from docling_agent.agent.extraction import DoclingExtractingAgent
 
 # Public re-exports for convenience imports in examples
 from docling_agent.agent.writer import DoclingWritingAgent
-from docling_agent.agent.extraction import DoclingExtractingAgent
 
 # Configure logging
 logging.basicConfig(
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DoclingEditingAgent",
-    "DoclingWritingAgent",
     "DoclingExtractingAgent",
+    "DoclingWritingAgent",
     "logger",
 ]

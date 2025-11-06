@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import glob
 
 from mellea.backends import model_ids
 
@@ -27,7 +28,7 @@ def run_task(
 """
 
     document = agent.run(
-        task=task,
+        task=json.dumps(schema),
         sources=sources,
     )
     document.save_as_html(filename=opath)
@@ -42,7 +43,10 @@ def main():
         "name": "string",
         "birth year": "integer",
         "nationality": "string",
-        "skills": "string"
+        "contact details": "string",
+        "latest education": "string",
+        "languages": "string",
+        "skills": "string",
     }
 
     schema_02 = {
@@ -56,23 +60,41 @@ def main():
         "currency": "string",
     }
     
-    sources = Path("./examples")  # Adjust to your data root
+    docdir = Path("./examples/example_03")  # Adjust to your data root
 
     for _ in [
         (
             schema_01,
-            sources / "curriculum_vitae",
-        ),
+            "curriculum_vitae",
+        ),        
         (
             schema_02,
-            sources / "papers",
+            "papers",
         ),
         (
             schema_03,
-            sources / "invoices",
+            "invoices",
         )        
     ]:
-        run_task(schema=_[0], sources=[_[1]], opath=Path("./extraction_report.html"), model_id=model_id)
+        cdir = docdir / _[1]
+        
+        sources: list[Path] = []
+        # Collect PDFs and PNGs recursively under each source directory
+        sources.extend([p for p in cdir.rglob("*.pdf") if p.is_file()])
+        sources.extend([p for p in cdir.rglob("*.png") if p.is_file()])
+        sources.extend([p for p in cdir.rglob("*.jpg") if p.is_file()])
+        sources.extend([p for p in cdir.rglob("*.jpeg") if p.is_file()])
+
+        sources = sorted(sources)
+        
+        logger.info(f"documents [{len(sources)}]:\n\n\t" + ",\n\t".join(str(p) for p in sources))
+
+        run_task(
+            schema=_[0],
+            sources=sources,
+            opath=docdir / f"{_[1]}_extraction_report.html",
+            model_id=model_id,
+        )
     
 if __name__ == "__main__":
     main()

@@ -14,9 +14,7 @@ def resolve_model_id(name: str):
     try:
         return getattr(model_ids, name)
     except Exception:
-        logger.warning(
-            f"Unknown model id '{name}', falling back to OPENAI_GPT_OSS_20B"
-        )
+        logger.warning(f"Unknown model id '{name}', falling back to OPENAI_GPT_OSS_20B")
         return model_ids.OPENAI_GPT_OSS_20B
 
 
@@ -54,9 +52,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
 ```
 """
 
-    logger.info(
-        f"Running extraction on {len(sources)} file(s) with model {args.model}"
-    )
+    logger.info(f"Running extraction on {len(sources)} file(s) with model {args.model}")
     doc = agent.run(task=task, sources=sources)
 
     # Save document if requested
