@@ -1,6 +1,5 @@
 import argparse
 import json
-import logging
 from pathlib import Path
 from typing import Iterable
 
@@ -114,10 +113,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    )
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

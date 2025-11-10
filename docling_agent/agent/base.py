@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import logging
 from abc import abstractmethod
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -9,15 +7,12 @@ from typing import TYPE_CHECKING
 # from smolagents.models import ChatMessage, MessageRole, Model
 from mellea.backends.model_ids import ModelIdentifier
 from pydantic import BaseModel
+from docling_agent.agents import logger
 
 if TYPE_CHECKING:
     from docling_core.types.doc.document import DoclingDocument
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Use shared logger from docling_agent.agents
 
 
 class DoclingAgentType(Enum):

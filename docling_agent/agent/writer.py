@@ -1,5 +1,4 @@
 import copy
-import logging
 from typing import ClassVar
 
 # from smolagents import MCPClient, Tool, ToolCollection
@@ -40,12 +39,9 @@ from docling_agent.resources.prompts import (
     SYSTEM_PROMPT_FOR_OUTLINE,
     SYSTEM_PROMPT_FOR_TASK_ANALYSIS,
 )
+from docling_agent.agents import logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Use shared logger from docling_agent.agents
 
 
 class DoclingWritingAgent(BaseDoclingAgent):

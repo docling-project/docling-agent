@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 from io import BytesIO
 
@@ -26,12 +25,9 @@ from docling_core.types.doc.document import (
     TitleItem,
 )
 from docling_core.types.io import DocumentStream
+from docling_agent.agents import logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Use shared logger from docling_agent.agents
 
 
 def find_json_dicts(text: str) -> list[dict]:

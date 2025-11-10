@@ -1,4 +1,3 @@
-import logging
 import re
 
 from mellea import MelleaSession
@@ -10,12 +9,9 @@ from mellea.stdlib.chat import Message
 from mellea.stdlib.requirement import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from tabulate import tabulate  # type: ignore[import-untyped]
+from docling_agent.agents import logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s: %(name)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Use shared logger from docling_agent.agents
 
 
 def setup_local_session(

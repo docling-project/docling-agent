@@ -1,5 +1,4 @@
 import json
-import logging
 from pathlib import Path
 from typing import ClassVar
 
@@ -20,12 +19,9 @@ from docling_core.types.doc import (
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent_models import setup_local_session
+from docling_agent.agents import logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Use shared logger from docling_agent.agents
 
 
 class DoclingExtractingAgent(BaseDoclingAgent):
