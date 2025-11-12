@@ -9,11 +9,6 @@ from mellea.stdlib.sampling import RejectionSamplingStrategy
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
-from docling_core.experimental.serializer.outline import (
-    OutlineDocSerializer,
-    OutlineMode,
-    OutlineParams,
-)
 from docling_core.types.doc.document import (
     BaseMeta,
     DocItemLabel,
@@ -40,7 +35,6 @@ from docling_agent.agent.base_functions import (
     has_markdown_code_block,
     validate_html_to_docling_document,
     validate_markdown_to_docling_document,
-    validate_outline_format,
 )
 from docling_agent.agent_models import setup_local_session
 from docling_agent.logging import logger
@@ -65,6 +59,14 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
     system_prompt_expert_table_writer: ClassVar[str] = SYSTEM_PROMPT_EXPERT_TABLE_WRITER
 
+    _outline_descriptions: ClassVar[list[str]] = [
+        "paragraph:",
+        "list:",
+        "table:",
+        "figure:",
+        "picture:",
+    ]
+
     def __init__(self, *, model_id: ModelIdentifier, tools: list):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_WRITER,
@@ -76,9 +78,11 @@ class DoclingWritingAgent(BaseDoclingAgent):
         self,
         task: str,
         document: DoclingDocument | None = None,
-        sources: list[DoclingDocument | Path] = [],
+        sources: list[DoclingDocument | Path] | None = None,
         **kwargs,
     ) -> DoclingDocument:
+        # Avoid mutable default list for sources
+        sources = sources or []
         # self._analyse_task_for_topics_and_followup_questions(task=task)
 
         # self._analyse_task_for_final_destination(task=task)
@@ -112,7 +116,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 ),
                 Requirement(
                     description="The resulting outline should be in markdown format. If not a title or subheading, start each line with `paragraph: `, `table: `, `picture: ` or `list: ` followed by a single sentence summary.",
-                    validation_fn=simple_validate(validate_outline_format),
+                    # validation_fn=simple_validate(validate_outline_format),
+                    validation_fn=simple_validate(
+                        DoclingWritingAgent._validate_outline_format
+                    ),
                 ),
             ],
             # user_variables={"name": name, "notes": notes},
@@ -125,6 +132,44 @@ class DoclingWritingAgent(BaseDoclingAgent):
             raise ValueError("Failed to generate a valid outline document.")
 
         return outline
+
+    @staticmethod
+    def _validate_outline_format(content: str) -> bool:
+        """Validate that content contains a markdown outline with valid lines.
+
+        Rules:
+        - The outline must be inside a ```md or ```markdown code block.
+        - Non-heading lines must start with one of:
+          "paragraph:", "list:", "table:", "figure:", or "picture:",
+          followed by a single sentence summary ending with a period.
+        """
+
+        # Extract markdown block
+        md = find_markdown_code_block(content)
+        if not md:
+            return False
+
+        # Parse markdown to DoclingDocument
+        try:
+            converter = DocumentConverter(allowed_formats=[InputFormat.MD])
+            conv: ConversionResult = converter.convert_string(
+                content=md, format=InputFormat.MD, name="outline.md"
+            )
+        except Exception:
+            return False
+
+        starts = ["paragraph", "list", "table", "figure", "picture"]
+        pattern = re.compile(rf"^({'|'.join(starts)}):\s(.*)\.$")
+
+        invalid_lines: list[str] = []
+
+        # Validate content lines: only TextItem lines are checked
+        for item, _ in conv.document.iterate_items(with_groups=True):
+            if isinstance(item, TextItem):
+                if not pattern.match(item.text):
+                    invalid_lines.append(item.text)
+
+        return len(invalid_lines) == 0
 
     def _find_outline(self, text: str, task: str) -> DoclingDocument | None:
         starts = ["paragraph", "list", "table", "figure", "picture"]
@@ -154,7 +199,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
             elif isinstance(item, TextItem):
                 pattern = rf"^({'|'.join(starts)}):\s(.*)\.$"
-                match = re.match(pattern, item.text, re.DOTALL)
+                match = re.match(pattern, item.text)
 
                 if not match:
                     logger.warning(
@@ -211,19 +256,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
             logger.error(message)
             return None
 
-        if True:
-            params = OutlineParams(
-                include_non_meta=True,
-                mode=OutlineMode.OUTLINE,
-                # mode=OutlineMode.TABLE_OF_CONTENTS
-            )
-            ser = OutlineDocSerializer(doc=outline, params=params)
-            res = ser.serialize()
-
-            print(f" === \n\noutline\n\n{res.text}\n\n === \n")
-            import time
-
-            time.sleep(1)
+        # Debug serializer block removed
 
         return outline
 
@@ -395,7 +428,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     )
                     to_item[item.self_ref] = li
                 else:
-                    print("skipping: ", item)
+                    logger.debug(f"Skipping ListItem without known parent: {item}")
 
             elif isinstance(item, TextItem):
                 if item.parent and item.parent.cref in to_item:
@@ -407,22 +440,27 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     )
                     to_item[item.self_ref] = te
                 else:
-                    print("skipping: ", item)
+                    logger.debug(f"Skipping TextItem without known parent: {item}")
 
             elif isinstance(item, TableItem):
                 if item.parent and item.parent.cref in to_item:
                     if len(item.captions) > 0:
                         # Create an empty caption placeholder to avoid deref issues
-                        caption = document.add_text(label=DocItemLabel.CAPTION, text="")
+                        caption = document.add_text(
+                            label=DocItemLabel.CAPTION,
+                            text="",
+                            parent=to_item[item.parent.cref],
+                        )
                         te = document.add_table(
                             data=item.data,
                             caption=caption,
+                            parent=to_item[item.parent.cref],
                         )
                         to_item[item.self_ref] = te
                     else:
                         te = document.add_table(
                             data=item.data,
-                            # caption=caption,
+                            parent=to_item[item.parent.cref],
                         )
                         to_item[item.self_ref] = te
                 else:
@@ -438,9 +476,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
         self,
         summary: str,
         task: str = "",
-        hierarchy: dict[int, str] = {},
+        hierarchy: dict[int, str] | None = None,
         loop_budget: int = 5,
     ) -> DoclingDocument:
+        hierarchy = hierarchy or {}
         context = ""
         for level, header in hierarchy.items():
             context += "#" * (level + 1) + header + "\n"
@@ -476,9 +515,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
         self,
         summary: str,
         task: str = "",
-        hierarchy: dict[int, str] = {},
+        hierarchy: dict[int, str] | None = None,
         loop_budget: int = 5,
     ) -> DoclingDocument:
+        hierarchy = hierarchy or {}
         context = ""
         for level, header in hierarchy.items():
             context += "#" * (level + 1) + header + "\n"
@@ -514,9 +554,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
         self,
         summary: str,
         task: str = "",
-        hierarchy: dict[int, str] = {},
+        hierarchy: dict[int, str] | None = None,
         loop_budget: int = 5,
     ) -> DoclingDocument:
+        hierarchy = hierarchy or {}
         context = ""
         for level, header in hierarchy.items():
             context += "#" * (level + 1) + header + "\n"

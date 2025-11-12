@@ -1,6 +1,5 @@
 import logging
 
-
 # Centralized logger for the docling_agent package.
 # Modules should import as: `from docling_agent.logging import logger`.
 
@@ -17,4 +16,3 @@ if not logger.handlers:
 
 # Set a sensible default level; host apps may override
 logger.setLevel(logging.INFO)
-
