@@ -8,7 +8,6 @@ from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import (
-    BaseMeta,
     DocItemLabel,
     DoclingDocument,
     GroupItem,
@@ -18,8 +17,6 @@ from docling_core.types.doc.document import (
     PictureItem,
     RefItem,
     SectionHeaderItem,
-    SummaryMetaField,
-    TableData,
     TableItem,
     TextItem,
     TitleItem,
@@ -105,144 +102,6 @@ def create_document_outline(doc: DoclingDocument) -> str:
     outline = "\n\n".join(lines)
 
     return outline
-
-
-def find_outline_v1(text: str) -> DoclingDocument | None:
-    starts = ["paragraph", "list", "table", "figure", "picture"]
-
-    md = find_markdown_code_block(text)
-
-    if md:
-        converter = DocumentConverter(allowed_formats=[InputFormat.MD])
-
-        buff = BytesIO(md.encode("utf-8"))
-        doc_stream = DocumentStream(name="tmp.md", stream=buff)
-
-        conv: ConversionResult = converter.convert(doc_stream)
-
-        lines: list[str] = []
-        for item, level in conv.document.iterate_items(with_groups=True):
-            if isinstance(item, TitleItem) or isinstance(item, SectionHeaderItem):
-                continue
-            elif isinstance(item, TextItem):
-                pattern = rf"^({'|'.join(starts)}):\s(.*)\.$"
-                match = bool(re.match(pattern, text, re.DOTALL))
-                if match is None:
-                    lines.append(item.text)
-            else:
-                continue
-
-        if len(lines) > 0:
-            message = f"Every content line should start with one out of the following choices: {starts}. The following lines need to be updated: {'\n'.join(lines)}"
-            logger.error(message)
-
-            return None
-        else:
-            return conv.document
-    else:
-        return None
-
-
-def find_outline_v2(text: str) -> DoclingDocument | None:
-    starts = ["paragraph", "list", "table", "figure", "picture"]
-
-    md = find_markdown_code_block(text)
-
-    if not md:
-        return None
-
-    converter = DocumentConverter(allowed_formats=[InputFormat.MD])
-
-    """
-    buff = BytesIO(md.encode("utf-8"))
-    doc_stream = DocumentStream(name="tmp.md", stream=buff)
-
-    conv: ConversionResult = converter.convert(doc_stream)
-    """
-    # Use the extracted markdown block and provide a name (required by pydantic model)
-    conv: ConversionResult = converter.convert_string(
-        content=md,
-        format=InputFormat.MD,
-        name="outline.md",
-    )
-
-    # Build a fresh outline document rather than deep-copying content
-    outline = DoclingDocument(name=f"outline for: {conv.document.name}")
-
-    invalid_lines: list[str] = []
-
-    for item, level in conv.document.iterate_items(with_groups=True):
-        if isinstance(item, TitleItem):
-            outline.add_title(text=item.text)
-
-        elif isinstance(item, SectionHeaderItem):
-            outline.add_heading(text=item.text, level=item.level)
-
-        elif isinstance(item, TextItem):
-            pattern = rf"^({'|'.join(starts)}):\s(.*)\.$"
-            match = re.match(pattern, item.text, re.DOTALL)
-
-            if not match:
-                invalid_lines.append(item.text)
-                continue
-
-            label = match[1]
-            summary = match[2]
-
-            meta = BaseMeta(summary=SummaryMetaField(text=summary))
-
-            if label == "paragraph":
-                _ = outline.add_text(label=DocItemLabel.TEXT, text=item.text)
-                _.meta = meta
-
-            elif label == "table":
-                # Create an empty placeholder table with summary in meta
-                caption = outline.add_text(label=DocItemLabel.CAPTION, text="")
-                data = TableData(table_cells=[], num_rows=0, num_cols=0)
-                _ = outline.add_table(
-                    label=DocItemLabel.TABLE, data=data, caption=caption
-                )
-                _.meta = meta
-
-            elif label in ["figure", "picture"]:
-                # Add a picture with a caption derived from the summary
-                caption = outline.add_text(label=DocItemLabel.CAPTION, text="")
-                _ = outline.add_picture(caption=caption)
-                _.meta = meta
-
-            elif label == "list":
-                # Add a group placeholder for a list; attach summary via meta
-                try:
-                    _ = outline.add_group(
-                        name="list", label=GroupLabel.LIST, parent=None
-                    )
-                except TypeError:
-                    # Fallback for API variants that don't require explicit parent
-                    _ = outline.add_group(name="list", label=GroupLabel.LIST)
-                _.meta = meta
-
-            else:
-                logger.warning(f"label {label} is not supported.")
-        else:
-            continue
-
-    if len(invalid_lines) > 0:
-        message = (
-            "Every content line should start with one of: "
-            f"{starts}. The following lines need to be updated: "
-            + "\n".join(invalid_lines)
-        )
-        logger.error(message)
-        return None
-
-    # print(outline.export_to_markdown())
-
-    return outline
-
-
-def validate_outline_format(text: str) -> bool:
-    # logger.info(f"testing validate_outline_format for {text[0:64]}")
-    return find_outline_v2(text) is not None
 
 
 def serialize_item_to_markdown(item: TextItem, doc: DoclingDocument) -> str:

@@ -29,8 +29,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         "You are a precise data engineer. Given a task, output only a JSON schema (no backticks) describing the fields to extract with simple value types like string, integer, float, date, or arrays/objects of those."
     )
 
-    # Optional during validation; initialized in __init__
-    extractor: DocumentExtractor
+    extractor: DocumentExtractor | None = None
 
     # Stores the last extraction results as {path_str: [items, ...]}
     last_results: dict[str, list[Any]] = Field(default_factory=dict)
@@ -67,6 +66,8 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             logger.info(f"[{idx}/{total}] Extracting from: {source}")
             if isinstance(source, Path):
                 try:
+                    if self.extractor is None:
+                        raise RuntimeError("DocumentExtractor is not initialized")
                     result = self.extractor.extract(source=source, template=schema)
                     # Ensure list for values
                     items: list[Any]
