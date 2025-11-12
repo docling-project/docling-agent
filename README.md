@@ -1,18 +1,11 @@
-# docling-agent
-
-<p align="center">
-  <a href="https://trendshift.io/repositories/12132" target="_blank"><img src="https://trendshift.io/api/badge/repositories/12132" alt="DS4SD%2Fdocling | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-</p>
-
-[![PyPI version](https://img.shields.io/pypi/v/docling-agent)](https://pypi.org/project/docling-agent/)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/docling-agent)](https://pypi.org/project/docling-agent/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Pydantic v2](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/pydantic/pydantic/main/docs/badge/v2.json)](https://pydantic.dev)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![License MIT](https://img.shields.io/github/license/docling-agent-project/docling-agent)](https://opensource.org/licenses/MIT)
-[![PyPI Downloads](https://static.pepy.tech/badge/docling-agent/month)](https://pepy.tech/projects/docling-agent)
 [![LF AI & Data](https://img.shields.io/badge/LF%20AI%20%26%20Data-003778?logo=linuxfoundation&logoColor=fff&color=0094ff&labelColor=003778)](https://lfaidata.foundation/projects/)
+
+# Docling-Agent
 
 Docling-agent simplifies agentic operation on documents, such as writing, editing, summarizing, etc.
 
@@ -21,13 +14,77 @@ Docling-agent simplifies agentic operation on documents, such as writing, editin
 
 ## Features
 
+- Document writing: Generate well-structured reports from natural prompts, and export as JSON/Markdown/HTML. See examples/example_01_write_report.py.
+- Targeted editing: Load an existing Docling JSON and apply focused edits with natural-language tasks. See examples/example_02_edit_report.py.
+- Schema-guided extraction: Extract typed fields from PDFs/images using a simple schema and produce HTML reports. See examples/example_03_extract_schema.py and example reports: examples/example_03_extract/curriculum_vitae_extraction_report.html, examples/example_03_extract/papers_extraction_report.html, examples/example_03_extract/invoices_extraction_report.html.
+- Model-agnostic: Plug in different backends via Mellea `model_ids` (e.g., OpenAI GPT OSS, IBM Granite).
+- Simple API surface: Use `agent.run(...)` with `DoclingDocument` in/out; save via `save_as_*` helpers.
+- Optional tools: Integrate external tools (e.g., MCP) when available.
+
+Quick start (writing):
+
+```python
+from mellea.backends import model_ids
+from docling_agent.agents import DoclingWritingAgent
+
+agent = DoclingWritingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+doc = agent.run("Write a one-page summary about polymers in food packaging.")
+doc.save_as_html("report.html")
+```
+
 ## Installation
 
 **Coming soon**
 
 ## Getting started
 
-**Coming soon**
+Below are three minimal, end-to-end examples mirroring the scripts in the examples folder. Each snippet shows how to initialize an agent, run a task, and save the result.
+
+Write a new document (see examples/example_01_write_report.py):
+
+```python
+from mellea.backends import model_ids
+from docling_agent.agents import DoclingWritingAgent
+
+agent = DoclingWritingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+doc = agent.run("Write a brief report on polymers in food packaging with a small comparison table.")
+doc.save_as_html("./scratch/report.html")
+```
+
+Edit an existing document (see examples/example_02_edit_report.py):
+
+Use natural-language tasks to update a Docling JSON. You can run multiple tasks to iteratively refine content, structure, or formatting.
+
+```python
+from pathlib import Path
+from mellea.backends import model_ids
+from docling_core.types.doc.document import DoclingDocument
+from docling_agent.agents import DoclingEditingAgent
+
+ipath = Path("./examples/example_02_edit_resources/20250815_125216.json")
+doc = DoclingDocument.load_from_json(ipath)
+
+agent = DoclingEditingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+updated = agent.run(task="Put polymer abbreviations in a separate column in the first table.", document=doc)
+updated.save_as_html("./scratch/updated_table.html")
+```
+
+Extract structured data with a schema (see examples/example_03_extract_schema.py):
+
+Define a simple schema and provide a list of files (PDFs/images). The agent produces an HTML report with extracted fields.
+
+```python
+from pathlib import Path
+from mellea.backends import model_ids
+from docling_agent.agents import DoclingExtractingAgent
+
+schema = {"invoice-number": "string", "total": "float", "currency": "string"}
+sources = sorted([p for p in Path("./examples/example_03_extract/invoices").rglob("*.*") if p.suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg"}])
+
+agent = DoclingExtractingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+report = agent.run(task=str(schema), sources=sources)
+report.save_as_html("./scratch/invoices_extraction_report.html")
+```
 
 ## Documentation
 
@@ -85,4 +142,3 @@ Docling is hosted as a project in the [LF AI & Data Foundation](https://lfaidata
 ### IBM ❤️ Open Source AI
 
 The project was started by the AI for knowledge team at IBM Research Zurich.
-
