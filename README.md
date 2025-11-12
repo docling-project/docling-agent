@@ -14,10 +14,10 @@ Docling-agent simplifies agentic operation on documents, such as writing, editin
 
 ## Features
 
-- Document writing: Generate well-structured reports from natural prompts, and export as JSON/Markdown/HTML. See examples/example_01_write_report.py.
-- Targeted editing: Load an existing Docling JSON and apply focused edits with natural-language tasks. See examples/example_02_edit_report.py.
-- Schema-guided extraction: Extract typed fields from PDFs/images using a simple schema and produce HTML reports. See examples/example_03_extract_schema.py and example reports: examples/example_03_extract/curriculum_vitae_extraction_report.html, examples/example_03_extract/papers_extraction_report.html, examples/example_03_extract/invoices_extraction_report.html.
-- Model-agnostic: Plug in different backends via Mellea `model_ids` (e.g., OpenAI GPT OSS, IBM Granite).
+- [Document writing](examples/example_01_write_report.py): Generate well-structured reports from natural prompts and export to JSON/Markdown/HTML.
+- [Targeted editing](examples/example_02_edit_report.py): Load an existing Docling JSON and apply focused edits with natural-language tasks.
+- [Schema-guided extraction](examples/example_03_extract_schema.py): Extract typed fields from PDFs/images using a simple schema and produce HTML reports. See examples on curriculum_vitae, papers, invoices, etc.
+- Model-agnostic: Plug in different backends via [Mellea](https://github.com/generative-computing/mellea) `model_ids` (e.g., OpenAI GPT OSS, IBM Granite).
 - Simple API surface: Use `agent.run(...)` with `DoclingDocument` in/out; save via `save_as_*` helpers.
 - Optional tools: Integrate external tools (e.g., MCP) when available.
 
@@ -40,7 +40,7 @@ doc.save_as_html("report.html")
 
 Below are three minimal, end-to-end examples mirroring the scripts in the examples folder. Each snippet shows how to initialize an agent, run a task, and save the result.
 
-Write a new document (see examples/example_01_write_report.py):
+### Write a new document (see [example](examples/example_01_write_report.py)):
 
 ```python
 from mellea.backends import model_ids
@@ -51,7 +51,7 @@ doc = agent.run("Write a brief report on polymers in food packaging with a small
 doc.save_as_html("./scratch/report.html")
 ```
 
-Edit an existing document (see examples/example_02_edit_report.py):
+### Edit an existing document (see [example](examples/example_02_edit_report.py)):
 
 Use natural-language tasks to update a Docling JSON. You can run multiple tasks to iteratively refine content, structure, or formatting.
 
@@ -69,7 +69,7 @@ updated = agent.run(task="Put polymer abbreviations in a separate column in the 
 updated.save_as_html("./scratch/updated_table.html")
 ```
 
-Extract structured data with a schema (see examples/example_03_extract_schema.py):
+### Extract structured data with a schema (see [example](examples/example_03_extract_schema.py)):
 
 Define a simple schema and provide a list of files (PDFs/images). The agent produces an HTML report with extracted fields.
 
