@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 from io import BytesIO
 
@@ -9,7 +8,6 @@ from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import (
-    BaseMeta,
     DocItemLabel,
     DoclingDocument,
     GroupItem,
@@ -19,19 +17,15 @@ from docling_core.types.doc.document import (
     PictureItem,
     RefItem,
     SectionHeaderItem,
-    SummaryMetaField,
-    TableData,
     TableItem,
     TextItem,
     TitleItem,
 )
 from docling_core.types.io import DocumentStream
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from docling_agent.logging import logger
+
+# Use shared logger from docling_agent.agents
 
 
 def find_json_dicts(text: str) -> list[dict]:
@@ -110,136 +104,6 @@ def create_document_outline(doc: DoclingDocument) -> str:
     return outline
 
 
-def find_outline_v1(text: str) -> DoclingDocument | None:
-    starts = ["paragraph", "list", "table", "figure", "picture"]
-
-    md = find_markdown_code_block(text)
-
-    if md:
-        converter = DocumentConverter(allowed_formats=[InputFormat.MD])
-
-        buff = BytesIO(md.encode("utf-8"))
-        doc_stream = DocumentStream(name="tmp.md", stream=buff)
-
-        conv: ConversionResult = converter.convert(doc_stream)
-
-        lines: list[str] = []
-        for item, level in conv.document.iterate_items(with_groups=True):
-            if isinstance(item, TitleItem) or isinstance(item, SectionHeaderItem):
-                continue
-            elif isinstance(item, TextItem):
-                pattern = rf"^({'|'.join(starts)}):\s(.*)\.$"
-                match = bool(re.match(pattern, text, re.DOTALL))
-                if match is None:
-                    lines.append(item.text)
-            else:
-                continue
-
-        if len(lines) > 0:
-            message = f"Every content line should start with one out of the following choices: {starts}. The following lines need to be updated: {'\n'.join(lines)}"
-            logger.error(message)
-
-            return None
-        else:
-            return conv.document
-    else:
-        return None
-
-
-def find_outline_v2(text: str) -> DoclingDocument | None:
-    starts = ["paragraph", "list", "table", "figure", "picture"]
-
-    md = find_markdown_code_block(text)
-
-    if not md:
-        return None
-
-    converter = DocumentConverter(allowed_formats=[InputFormat.MD])
-
-    buff = BytesIO(md.encode("utf-8"))
-    doc_stream = DocumentStream(name="tmp.md", stream=buff)
-
-    conv: ConversionResult = converter.convert(doc_stream)
-
-    # Build a fresh outline document rather than deep-copying content
-    outline = DoclingDocument(name=f"outline for: {conv.document.name}")
-
-    invalid_lines: list[str] = []
-
-    for item, level in conv.document.iterate_items(with_groups=True):
-        if isinstance(item, TitleItem):
-            outline.add_title(text=item.text)
-
-        elif isinstance(item, SectionHeaderItem):
-            outline.add_heading(text=item.text, level=item.level)
-
-        elif isinstance(item, TextItem):
-            pattern = rf"^({'|'.join(starts)}):\s(.*)\.$"
-            match = re.match(pattern, item.text, re.DOTALL)
-
-            if not match:
-                invalid_lines.append(item.text)
-                continue
-
-            label = match[1]
-            summary = match[2]
-
-            meta = BaseMeta(summary=SummaryMetaField(text=summary))
-
-            if label == "paragraph":
-                _ = outline.add_text(label=DocItemLabel.TEXT, text=item.text)
-                _.meta = meta
-
-            elif label == "table":
-                # Create an empty placeholder table with summary in meta
-                caption = outline.add_text(label=DocItemLabel.CAPTION, text="")
-                data = TableData(table_cells=[], num_rows=0, num_cols=0)
-                _ = outline.add_table(
-                    label=DocItemLabel.TABLE, data=data, caption=caption
-                )
-                _.meta = meta
-
-            elif label in ["figure", "picture"]:
-                # Add a picture with a caption derived from the summary
-                caption = outline.add_text(label=DocItemLabel.CAPTION, text="")
-                _ = outline.add_picture(caption=caption)
-                _.meta = meta
-
-            elif label == "list":
-                # Add a group placeholder for a list; attach summary via meta
-                try:
-                    _ = outline.add_group(
-                        name="list", label=GroupLabel.UNSPECIFIED, parent=None
-                    )
-                except TypeError:
-                    # Fallback for API variants that don't require explicit parent
-                    _ = outline.add_group(name="list", label=GroupLabel.UNSPECIFIED)
-                _.meta = meta
-
-            else:
-                logger.warning(f"NOT SUPPORTED: {label}")
-        else:
-            continue
-
-    if len(invalid_lines) > 0:
-        message = (
-            "Every content line should start with one of: "
-            f"{starts}. The following lines need to be updated: "
-            + "\n".join(invalid_lines)
-        )
-        logger.error(message)
-        return None
-
-    # print(outline.export_to_markdown())
-
-    return outline
-
-
-def validate_outline_format(text: str) -> bool:
-    logger.info(f"testing validate_outline_format for {text[0:64]}")
-    return find_outline_v2(text) is not None
-
-
 def serialize_item_to_markdown(item: TextItem, doc: DoclingDocument) -> str:
     """Serialize a text item to markdown format using existing serializer."""
     from docling_core.transforms.serializer.markdown import (
@@ -286,7 +150,7 @@ def has_html_code_block(text: str) -> bool:
     """
     Check if a string contains a html code block pattern anywhere in the text
     """
-    logger.info(f"testing has_html_code_block for {text[0:64]}")
+    # logger.info(f"testing has_html_code_block for {text[0:64]}")
     return find_html_code_block(text) is not None
 
 
@@ -303,7 +167,7 @@ def has_markdown_code_block(text: str) -> bool:
     """
     Check if a string contains a markdown code block pattern anywhere in the text
     """
-    logger.info(f"testing has_markdown_code_block for {text[0:64]}")
+    # logger.info(f"testing has_markdown_code_block for {text[0:64]}")
     return find_markdown_code_block(text) is not None
 
 
@@ -331,7 +195,7 @@ def convert_html_to_docling_table(text: str) -> list[TableItem] | None:
 
 
 def validate_html_to_docling_table(text: str) -> bool:
-    logger.info(f"validate_html_to_docling_table for {text[0:64]}")
+    # logger.info(f"validate_html_to_docling_table for {text[0:64]}")
     return convert_html_to_docling_table(text) is not None
 
 
@@ -357,7 +221,7 @@ def convert_markdown_to_docling_document(text: str) -> DoclingDocument | None:
 
 
 def validate_markdown_to_docling_document(text: str) -> bool:
-    logger.info(f"testing validate_markdown_docling_document for {text[0:64]}")
+    # logger.info(f"testing validate_markdown_docling_document for {text[0:64]}")
     return convert_markdown_to_docling_document(text) is not None
 
 
@@ -384,14 +248,14 @@ def convert_html_to_docling_document(text: str) -> DoclingDocument | None:
 
 
 def validate_html_to_docling_document(text: str) -> bool:
-    logger.info(f"testing validate_html_docling_document for {text[0:64]}")
+    # logger.info(f"testing validate_html_docling_document for {text[0:64]}")
     return convert_html_to_docling_document(text) is not None
 
 
 def insert_document(
     *, item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument
 ) -> DoclingDocument:
-    logger.info(f"inserting new document at item {item.self_ref}")
+    # logger.info(f"inserting new document at item {item.self_ref}")
 
     group_item = GroupItem(
         label=GroupLabel.UNSPECIFIED,

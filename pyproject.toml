@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docling-agent"
-version = "1.7.0"  # DO NOT EDIT, updated automatically
+version = "0.1.0"  # DO NOT EDIT, updated automatically
 description = "Running a distributed job processing documents with Docling."
 readme = "README.md"
 license = "MIT"
@@ -36,7 +36,8 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "docling>=2.61.0",
-    "docling-core[chunking]>=2.50.1",
+    # "docling-core[chunking]>=2.50.1",
+    "docling-core[chunking] @ git+https://github.com/DS4SD/docling-core.git@ca030e9c413d224b60119e04af3b13c750a3893a",
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
     "typer~=0.12",

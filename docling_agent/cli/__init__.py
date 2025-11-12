@@ -1,10 +1,11 @@
 import argparse
 import json
-import logging
 from pathlib import Path
 from typing import Iterable
 
 from mellea.backends import model_ids
+
+from docling_core.types.doc.document import DoclingDocument
 
 from docling_agent.agents import DoclingExtractingAgent, logger
 
@@ -18,8 +19,10 @@ def resolve_model_id(name: str):
         return model_ids.OPENAI_GPT_OSS_20B
 
 
-def gather_sources(paths: Iterable[Path], pattern: str | None = None) -> list[Path]:
-    files: list[Path] = []
+def gather_sources(
+    paths: Iterable[Path], pattern: str | None = None
+) -> list[DoclingDocument | Path]:
+    files: list[DoclingDocument | Path] = []
     for p in paths:
         if p.is_dir():
             if pattern:
@@ -114,10 +117,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    )
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

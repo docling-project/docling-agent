@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import logging
 from abc import abstractmethod
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 # from smolagents import MCPClient, Tool, ToolCollection
@@ -13,11 +13,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from docling_core.types.doc.document import DoclingDocument
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Use shared logger from docling_agent.agents
 
 
 class DoclingAgentType(Enum):
@@ -63,7 +59,7 @@ class BaseDoclingAgent(BaseModel):
         self,
         task: str,
         document: DoclingDocument | None = None,
-        sources: list[DoclingDocument] = [],
+        sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> "DoclingDocument":
         """Execute the agent for a task and return a document."""

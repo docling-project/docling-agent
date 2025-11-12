@@ -1,7 +1,6 @@
 import json
-import logging
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
@@ -20,12 +19,9 @@ from docling_core.types.doc import (
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent_models import setup_local_session
+from docling_agent.logging import logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Use shared logger from docling_agent.agents
 
 
 class DoclingExtractingAgent(BaseDoclingAgent):
@@ -33,11 +29,10 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         "You are a precise data engineer. Given a task, output only a JSON schema (no backticks) describing the fields to extract with simple value types like string, integer, float, date, or arrays/objects of those."
     )
 
-    # Optional during validation; initialized in __init__
     extractor: DocumentExtractor | None = None
 
-    # Stores the last extraction results as {path_str: [json_obj, ...]}
-    last_results: dict[str, list[dict]] = Field(default_factory=dict)
+    # Stores the last extraction results as {path_str: [items, ...]}
+    last_results: dict[str, list[Any]] = Field(default_factory=dict)
 
     def __init__(self, *, model_id: ModelIdentifier, tools: list):
         super().__init__(
@@ -53,15 +48,12 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         self,
         task: str,
         document: DoclingDocument | None = None,
-        sources: list[Path] | None = None,
+        sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> DoclingDocument:
         # If the task already includes a JSON schema, use it; otherwise generate one.
         schema = self._extract_schema_from_task(task=task)
         logger.info("Schema generated from task.")
-
-        if sources is None:
-            sources = []
 
         total = len(sources)
         successes = 0
@@ -74,14 +66,16 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             logger.info(f"[{idx}/{total}] Extracting from: {source}")
             if isinstance(source, Path):
                 try:
+                    if self.extractor is None:
+                        raise RuntimeError("DocumentExtractor is not initialized")
                     result = self.extractor.extract(source=source, template=schema)
-                    # Ensure list-of-json for values
-                    items: list
+                    # Ensure list for values
+                    items: list[Any]
                     if isinstance(result, list):
                         items = result
                     else:
                         items = [result]
-                    self.last_results[source] = items  # key by path string
+                    self.last_results[str(source)] = items  # key by path string
                     successes += 1
                     total_items += len(items)
                     logger.info(
@@ -101,11 +95,22 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         # Build a document with headings per source and fenced JSON blocks per item.
         doc = DoclingDocument(name="extraction results")
         doc.add_title(text="Extraction Results")
-        for path, items in self.last_results.items():
-            doc.add_heading(text=f"filename: {path.name}", level=1)
+        for path_str, items in self.last_results.items():
+            filename = Path(path_str).name
+            doc.add_heading(text=f"filename: {filename}", level=1)
             for item in items:
-                for page in item.pages:
-                    payload = json.dumps(page.extracted_data, indent=2)
+                # 'item' is dynamically typed depending on extractor output
+                pages = getattr(item, "pages", None)
+                if pages is None:
+                    # Fallback: if item is already a mapping
+                    payload = json.dumps(item, indent=2)
+                    doc.add_code(
+                        code_language=CodeLanguageLabel.JSON,
+                        text=f"```json\n{payload}\n```",
+                    )
+                    continue
+                for page in pages:
+                    payload = json.dumps(getattr(page, "extracted_data", {}), indent=2)
                     doc.add_code(
                         code_language=CodeLanguageLabel.JSON,
                         text=f"```json\n{payload}\n```",
