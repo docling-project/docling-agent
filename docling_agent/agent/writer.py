@@ -1,19 +1,31 @@
-import copy
+import re
+from pathlib import Path
 from typing import ClassVar
 
-# from smolagents import MCPClient, Tool, ToolCollection
-# from smolagents.models import ChatMessage, MessageRole, Model
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirement import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.document import ConversionResult
+from docling.document_converter import DocumentConverter
+from docling_core.experimental.serializer.outline import (
+    OutlineDocSerializer,
+    OutlineMode,
+    OutlineParams,
+)
 from docling_core.types.doc.document import (
+    BaseMeta,
     DocItemLabel,
     DoclingDocument,
     GroupItem,
+    GroupLabel,
     ListItem,
     NodeItem,
+    PictureItem,
     SectionHeaderItem,
+    SummaryMetaField,
+    TableData,
     TableItem,
     TextItem,
     TitleItem,
@@ -23,7 +35,7 @@ from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
     convert_html_to_docling_document,
     convert_markdown_to_docling_document,
-    find_outline_v2,
+    find_markdown_code_block,
     has_html_code_block,
     has_markdown_code_block,
     validate_html_to_docling_document,
@@ -31,6 +43,7 @@ from docling_agent.agent.base_functions import (
     validate_outline_format,
 )
 from docling_agent.agent_models import setup_local_session
+from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
@@ -39,9 +52,6 @@ from docling_agent.resources.prompts import (
     SYSTEM_PROMPT_FOR_OUTLINE,
     SYSTEM_PROMPT_FOR_TASK_ANALYSIS,
 )
-from docling_agent.agents import logger
-
-# Use shared logger from docling_agent.agents
 
 
 class DoclingWritingAgent(BaseDoclingAgent):
@@ -66,7 +76,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         self,
         task: str,
         document: DoclingDocument | None = None,
-        sources: list[DoclingDocument] = [],
+        sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> DoclingDocument:
         # self._analyse_task_for_topics_and_followup_questions(task=task)
@@ -83,35 +93,6 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         return result_document
 
-    """
-    def _analyse_task_for_topics_and_followup_questions(self, *, task: str):
-        chat_messages = self._init_chat_messages(
-            system_prompt=self.system_prompt_for_task_analysis,
-            user_prompt=f"{task}",
-        )
-
-        output = self.model.generate(messages=chat_messages)
-
-        self.chat_history.extend(chat_messages)
-        self.chat_history.append(output)
-
-        results = self._analyse_output_into_docling_document(message=output)
-        assert len(results) == 1, (
-            "We only want to see a single response from the initial task analysis"
-        )
-
-        self.task_analysis = results[0]
-
-        in_topics: bool = False
-        in_questions: bool = False
-
-        for item, level in self.task_analysis.iterate_items():
-            if isinstance(item, ListItem) and item.text == "topics:":
-                in_topics = True
-            elif isinstance(item, ListItem) and item.text == "follow-up questions:":
-                in_questions = True
-    """
-
     def _analyse_task_for_final_destination(self, *, task: str):
         return
 
@@ -125,13 +106,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
         answer = m.instruct(
             f"{task}",
             requirements=[
-                # "The resulting output should satisfy the following regex ```markdown(.*)?```"
                 Requirement(
                     description="Put the resulting markdown outline in the format ```markdown <insert-content>```",
                     validation_fn=simple_validate(has_markdown_code_block),
                 ),
-                # "The resulting outline should have a specific format: start with `paragraph: `,
-                # `table: `, `picture: ` or `list: `.
                 Requirement(
                     description="The resulting outline should be in markdown format. If not a title or subheading, start each line with `paragraph: `, `table: `, `picture: ` or `list: ` followed by a single sentence summary.",
                     validation_fn=simple_validate(validate_outline_format),
@@ -141,12 +119,250 @@ class DoclingWritingAgent(BaseDoclingAgent):
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
 
-        outline = find_outline_v2(text=answer.value)
+        outline = self._find_outline(text=answer.value, task=task)
 
         if outline is None:
             raise ValueError("Failed to generate a valid outline document.")
 
         return outline
+
+    def _find_outline(self, text: str, task: str) -> DoclingDocument | None:
+        starts = ["paragraph", "list", "table", "figure", "picture"]
+
+        md = find_markdown_code_block(text)
+
+        if not md:
+            return None
+
+        converter = DocumentConverter(allowed_formats=[InputFormat.MD])
+
+        conv: ConversionResult = converter.convert_string(
+            content=md, format=InputFormat.MD, name=f"outline for {task}"
+        )
+
+        # Build a fresh outline document rather than deep-copying content
+        outline = DoclingDocument(name=f"outline for: {conv.document.name}")
+
+        invalid_lines: list[str] = []
+
+        for item, level in conv.document.iterate_items(with_groups=True):
+            if isinstance(item, TitleItem):
+                outline.add_title(text=item.text)
+
+            elif isinstance(item, SectionHeaderItem):
+                outline.add_heading(text=item.text, level=item.level)
+
+            elif isinstance(item, TextItem):
+                pattern = rf"^({'|'.join(starts)}):\s(.*)\.$"
+                match = re.match(pattern, item.text, re.DOTALL)
+
+                if not match:
+                    logger.warning(
+                        f"line `{item.text}` does not match pattern `{pattern}`"
+                    )
+                    invalid_lines.append(item.text)
+                    continue
+
+                label = match[1]
+                summary = match[2]
+
+                meta = BaseMeta(summary=SummaryMetaField(text=summary))
+
+                if label == "paragraph":
+                    _ = outline.add_text(label=DocItemLabel.TEXT, text=item.text)
+                    _.meta = meta
+
+                elif label == "table":
+                    # Create an empty placeholder table with summary in meta
+                    caption = outline.add_text(label=DocItemLabel.CAPTION, text="")
+                    data = TableData(table_cells=[], num_rows=0, num_cols=0)
+
+                    _ = outline.add_table(
+                        label=DocItemLabel.TABLE, data=data, caption=caption
+                    )
+                    _.meta = meta
+
+                elif label in ["figure", "picture"]:
+                    # Add a picture with a caption derived from the summary
+                    caption = outline.add_text(label=DocItemLabel.CAPTION, text="")
+
+                    _ = outline.add_picture(caption=caption)
+                    _.meta = meta
+
+                elif label == "list":
+                    _ = outline.add_group(
+                        name="list",
+                        label=GroupLabel.LIST,  # , parent=None
+                    )
+                    _.meta = meta
+
+                else:
+                    logger.warning(f"label {label} is not supported")
+            else:
+                logger.warning(f"could not classify item: {item}")
+                continue
+
+        if len(invalid_lines) > 0:
+            message = (
+                "Every content line should start with one of: "
+                f"{starts}. The following lines need to be updated: "
+                + "\n".join(invalid_lines)
+            )
+            logger.error(message)
+            return None
+
+        if True:
+            params = OutlineParams(
+                include_non_meta=True,
+                mode=OutlineMode.OUTLINE,
+                # mode=OutlineMode.TABLE_OF_CONTENTS
+            )
+            ser = OutlineDocSerializer(doc=outline, params=params)
+            res = ser.serialize()
+
+            print(f" === \n\noutline\n\n{res.text}\n\n === \n")
+            import time
+
+            time.sleep(1)
+
+        return outline
+
+    def _populate_document_with_content(
+        self, *, task: str, outline: DoclingDocument, loop_budget: int = 5
+    ) -> DoclingDocument:
+        headers: dict[int, str] = {}
+
+        document = DoclingDocument(name=f"report on task: {task}")
+
+        for item, _ in outline.iterate_items(with_groups=True):
+            headers = self._process_outline_item(
+                document=document,
+                headers=headers,
+                item=item,
+                loop_budget=loop_budget,
+            )
+
+        return document
+
+    def _ordered_hierarchy(self, headers: dict[int, str]) -> dict[int, str]:
+        return {lvl: headers[lvl] for lvl in sorted(headers.keys())}
+
+    def _summary_for(self, *, node: NodeItem) -> str | None:
+        if node.meta and node.meta.summary and node.meta.summary.text:
+            return node.meta.summary.text
+        logger.error(f"No summary found for {node}")
+        return None
+
+    def _write_and_merge(
+        self,
+        *,
+        kind: str,
+        summary: str,
+        headers: dict[int, str],
+        document: DoclingDocument,
+        loop_budget: int,
+    ) -> None:
+        h = self._ordered_hierarchy(headers)
+        if kind == "paragraph":
+            content = self._write_paragraph(
+                summary=summary, hierarchy=h, loop_budget=loop_budget
+            )
+        elif kind == "table":
+            content = self._write_table(
+                summary=summary, hierarchy=h, loop_budget=loop_budget
+            )
+        elif kind == "list":
+            content = self._write_list(
+                summary=summary, hierarchy=h, loop_budget=loop_budget
+            )
+        else:
+            logger.warning(f"Unsupported content kind: {kind}")
+            return
+
+        self._update_document_with_content(document=document, content=content)
+
+    def _update_headers(
+        self, *, item: SectionHeaderItem, headers: dict[int, str]
+    ) -> dict[int, str]:
+        for k in [k for k in list(headers.keys()) if k > item.level]:
+            del headers[k]
+        headers[item.level] = item.text
+        return headers
+
+    def _process_outline_item(
+        self,
+        *,
+        document: DoclingDocument,
+        headers: dict[int, str],
+        item: NodeItem,
+        loop_budget: int,
+    ) -> dict[int, str]:
+        if isinstance(item, TitleItem):
+            headers[0] = item.text
+            document.add_title(text=item.text)
+
+        elif isinstance(item, SectionHeaderItem):
+            logger.info(f"starting in {item.text}")
+            headers = self._update_headers(item=item, headers=headers)
+            document.add_heading(text=item.text, level=item.level)
+
+        elif isinstance(item, TextItem):
+            if item.label == DocItemLabel.CAPTION:
+                return headers
+            summary = self._summary_for(node=item)
+            if summary:
+                logger.info("writing a paragraph")
+                self._write_and_merge(
+                    kind="paragraph",
+                    summary=summary,
+                    headers=headers,
+                    document=document,
+                    loop_budget=loop_budget,
+                )
+            else:
+                logger.warning(f"Skipping paragraph without summary: {item.text!r}")
+
+        elif isinstance(item, TableItem):
+            summary = self._summary_for(node=item)
+            if summary:
+                logger.info("writing a table")
+                self._write_and_merge(
+                    kind="table",
+                    summary=summary,
+                    headers=headers,
+                    document=document,
+                    loop_budget=loop_budget,
+                )
+            else:
+                logger.warning("Skipping table without summary")
+
+        elif isinstance(item, PictureItem):
+            summary = self._summary_for(node=item)
+            if summary:
+                logger.info("writing a picture")
+                caption = document.add_text(label=DocItemLabel.CAPTION, text=summary)
+                document.add_picture(caption=caption)
+            else:
+                logger.warning("Skipping picture without summary")
+
+        elif isinstance(item, GroupItem) and item.label == GroupLabel.LIST:
+            summary = self._summary_for(node=item)
+            if summary:
+                logger.info("writing a list")
+                self._write_and_merge(
+                    kind="list",
+                    summary=summary,
+                    headers=headers,
+                    document=document,
+                    loop_budget=loop_budget,
+                )
+            else:
+                logger.warning("Skipping list without summary")
+
+        else:
+            logger.info(f"Unhandled item: {item}")
+
+        return headers
 
     def _update_document_with_content(
         self, *, document: DoclingDocument, content: DoclingDocument
@@ -165,7 +381,6 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     )
                     to_item[item.self_ref] = g
                 else:
-                    # print("adding: ", item)
                     g = document.add_group(
                         name=item.name, label=item.label, parent=None
                     )
@@ -211,109 +426,13 @@ class DoclingWritingAgent(BaseDoclingAgent):
                         )
                         to_item[item.self_ref] = te
                 else:
-                    print("skipping: ", item)
-
+                    # print("skipping: ", item)
+                    continue
             else:
-                print("skipping: ", item)
+                # print("skipping: ", item)
+                continue
 
         return document
-
-    def _populate_document_with_content(
-        self, *, task: str, outline: DoclingDocument
-    ) -> DoclingDocument:
-        def update_headers(
-            *, item: SectionHeaderItem, headers: dict[int, str]
-        ) -> dict[int, str]:
-            keys = copy.deepcopy(list(headers.keys()))
-            for key in keys:
-                if key > item.level:
-                    del headers[key]
-
-            headers[item.level] = item.text
-            return headers
-
-        headers: dict[int, str] = {}
-
-        document = DoclingDocument(name=f"report on task: `{task}`")
-
-        for item, level in outline.iterate_items(with_groups=True):
-            if isinstance(item, TitleItem):
-                headers[0] = item.text
-                document.add_title(text=item.text)
-
-            elif isinstance(item, SectionHeaderItem):
-                logger.info(f"starting in {item.text}")
-                headers = update_headers(item=item, headers=headers)
-                document.add_heading(text=item.text, level=item.level)
-
-            elif isinstance(item, TextItem):
-                if item.text.startswith("paragraph:"):
-                    summary = item.text.replace("paragraph: ", "").strip()
-
-                    logger.info(f"need to write a paragraph: {summary})")
-                    new_content = self._write_paragraph(
-                        summary=summary, hierarchy=headers
-                    )
-                    document = self._update_document_with_content(
-                        document=document, content=new_content
-                    )
-
-                elif item.text.startswith("list:"):
-                    summary = item.text.replace("list:", "").strip()
-                    logger.info(f"need to write a list: {summary}")
-
-                    new_content = self._write_list(summary=summary, hierarchy=headers)
-                    document = self._update_document_with_content(
-                        document=document, content=new_content
-                    )
-
-                elif item.text.startswith("table:"):
-                    summary = item.text.replace("table:", "").strip()
-                    logger.info(f"need to write a table: {summary}")
-
-                    new_content = self._write_table(summary=summary, hierarchy=headers)
-
-                    document = self._update_document_with_content(
-                        document=document, content=new_content
-                    )
-
-                elif item.text.startswith("picture:") or item.text.startswith(
-                    "figure:"
-                ):
-                    summary = (
-                        item.text.replace("picture:", "").replace("figure:", "").strip()
-                    )
-
-                    caption = document.add_text(
-                        label=DocItemLabel.CAPTION, text=summary
-                    )
-                    document.add_picture(caption=caption)
-
-        return document
-
-    r"""
-    def _analyse_output_into_docling_document(
-        self, message: ChatMessage, language: str = "markdown"
-    ) -> list[DoclingDocument]:
-        def extract_code_blocks(text, language: str):
-            pattern = rf"```{language}\s*(.*?)\s*```"
-            matches = re.findall(pattern, text, re.DOTALL)
-            return matches
-
-        converter = DocumentConverter(allowed_formats=[InputFormat.MD])
-
-        result = []
-        for mtch in extract_code_blocks(message.content, language=language):
-            md_doc: str = mtch
-
-            buff = BytesIO(md_doc.encode("utf-8"))
-            doc_stream = DocumentStream(name="tmp.md", stream=buff)
-
-            conv_result: ConversionResult = converter.convert(doc_stream)
-            result.append(conv_result.document)
-
-        return result
-    """
 
     def _write_paragraph(
         self,
@@ -335,7 +454,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         )
 
         prompt = f"{context}Write me a single paragraph that expands the following summary: {summary}"
-        logger.info(f"prompt: {prompt}")
+        # logger.info(f"prompt: {prompt}")
 
         answer = m.instruct(
             prompt,
@@ -351,42 +470,6 @@ class DoclingWritingAgent(BaseDoclingAgent):
         )
 
         result = convert_markdown_to_docling_document(text=answer.value)
-        return result if result is not None else DoclingDocument(name="content")
-
-    def _write_list(
-        self,
-        summary: str,
-        task: str = "",
-        hierarchy: dict[int, str] = {},
-        loop_budget: int = 5,
-    ) -> DoclingDocument:
-        context = ""
-        for level, header in hierarchy.items():
-            context += "#" * (level + 1) + header + "\n"
-
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_expert_writer,
-        )
-
-        prompt = f"Given the current context in the document:\n\n```{context}```\n\nwrite me a list (can be nested) in markdown that expands the following summary: {summary}"
-        logger.info(f"prompt: {prompt}")
-
-        answer = m.instruct(
-            prompt,
-            requirements=[
-                Requirement(
-                    description="The resulting markdown list should use latex notation for superscript, subscript or inline equations. This means that every superscript, subscript and inline equation in must start and end with a $ sign.",
-                    validation_fn=simple_validate(
-                        validate_markdown_to_docling_document
-                    ),
-                ),
-            ],
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
-        )
-
-        result = convert_markdown_to_docling_document(text=answer.value)
-
         return result if result is not None else DoclingDocument(name="content")
 
     def _write_table(
@@ -406,7 +489,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         )
 
         prompt = f"Given the current context in the document:\n\n```{context}```\n\nwrite me a single HTML table that expands the following summary: {summary}"
-        logger.info(f"prompt: {prompt}")
+        # logger.info(f"prompt: {prompt}")
 
         answer = m.instruct(
             prompt,
@@ -424,5 +507,41 @@ class DoclingWritingAgent(BaseDoclingAgent):
         )
 
         result = convert_html_to_docling_document(text=answer.value)
+
+        return result if result is not None else DoclingDocument(name="content")
+
+    def _write_list(
+        self,
+        summary: str,
+        task: str = "",
+        hierarchy: dict[int, str] = {},
+        loop_budget: int = 5,
+    ) -> DoclingDocument:
+        context = ""
+        for level, header in hierarchy.items():
+            context += "#" * (level + 1) + header + "\n"
+
+        m = setup_local_session(
+            model_id=self.model_id,
+            system_prompt=self.system_prompt_expert_writer,
+        )
+
+        prompt = f"Given the current context in the document:\n\n```{context}```\n\nwrite me a list (can be nested) in markdown that expands the following summary: {summary}"
+        # logger.info(f"prompt: {prompt}")
+
+        answer = m.instruct(
+            prompt,
+            requirements=[
+                Requirement(
+                    description="The resulting markdown list should use latex notation for superscript, subscript or inline equations. This means that every superscript, subscript and inline equation in must start and end with a $ sign.",
+                    validation_fn=simple_validate(
+                        validate_markdown_to_docling_document
+                    ),
+                ),
+            ],
+            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+        )
+
+        result = convert_markdown_to_docling_document(text=answer.value)
 
         return result if result is not None else DoclingDocument(name="content")

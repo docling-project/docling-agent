@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 from abc import abstractmethod
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
 from mellea.backends.model_ids import ModelIdentifier
 from pydantic import BaseModel
-from docling_agent.agents import logger
 
 if TYPE_CHECKING:
     from docling_core.types.doc.document import DoclingDocument
@@ -58,7 +59,7 @@ class BaseDoclingAgent(BaseModel):
         self,
         task: str,
         document: DoclingDocument | None = None,
-        sources: list[DoclingDocument] = [],
+        sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> "DoclingDocument":
         """Execute the agent for a task and return a document."""

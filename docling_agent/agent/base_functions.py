@@ -25,7 +25,8 @@ from docling_core.types.doc.document import (
     TitleItem,
 )
 from docling_core.types.io import DocumentStream
-from docling_agent.agents import logger
+
+from docling_agent.logging import logger
 
 # Use shared logger from docling_agent.agents
 
@@ -152,10 +153,18 @@ def find_outline_v2(text: str) -> DoclingDocument | None:
 
     converter = DocumentConverter(allowed_formats=[InputFormat.MD])
 
+    """
     buff = BytesIO(md.encode("utf-8"))
     doc_stream = DocumentStream(name="tmp.md", stream=buff)
 
     conv: ConversionResult = converter.convert(doc_stream)
+    """
+    # Use the extracted markdown block and provide a name (required by pydantic model)
+    conv: ConversionResult = converter.convert_string(
+        content=md,
+        format=InputFormat.MD,
+        name="outline.md",
+    )
 
     # Build a fresh outline document rather than deep-copying content
     outline = DoclingDocument(name=f"outline for: {conv.document.name}")
@@ -205,15 +214,15 @@ def find_outline_v2(text: str) -> DoclingDocument | None:
                 # Add a group placeholder for a list; attach summary via meta
                 try:
                     _ = outline.add_group(
-                        name="list", label=GroupLabel.UNSPECIFIED, parent=None
+                        name="list", label=GroupLabel.LIST, parent=None
                     )
                 except TypeError:
                     # Fallback for API variants that don't require explicit parent
-                    _ = outline.add_group(name="list", label=GroupLabel.UNSPECIFIED)
+                    _ = outline.add_group(name="list", label=GroupLabel.LIST)
                 _.meta = meta
 
             else:
-                logger.warning(f"NOT SUPPORTED: {label}")
+                logger.warning(f"label {label} is not supported.")
         else:
             continue
 
@@ -232,7 +241,7 @@ def find_outline_v2(text: str) -> DoclingDocument | None:
 
 
 def validate_outline_format(text: str) -> bool:
-    logger.info(f"testing validate_outline_format for {text[0:64]}")
+    # logger.info(f"testing validate_outline_format for {text[0:64]}")
     return find_outline_v2(text) is not None
 
 
@@ -282,7 +291,7 @@ def has_html_code_block(text: str) -> bool:
     """
     Check if a string contains a html code block pattern anywhere in the text
     """
-    logger.info(f"testing has_html_code_block for {text[0:64]}")
+    # logger.info(f"testing has_html_code_block for {text[0:64]}")
     return find_html_code_block(text) is not None
 
 
@@ -299,7 +308,7 @@ def has_markdown_code_block(text: str) -> bool:
     """
     Check if a string contains a markdown code block pattern anywhere in the text
     """
-    logger.info(f"testing has_markdown_code_block for {text[0:64]}")
+    # logger.info(f"testing has_markdown_code_block for {text[0:64]}")
     return find_markdown_code_block(text) is not None
 
 
@@ -327,7 +336,7 @@ def convert_html_to_docling_table(text: str) -> list[TableItem] | None:
 
 
 def validate_html_to_docling_table(text: str) -> bool:
-    logger.info(f"validate_html_to_docling_table for {text[0:64]}")
+    # logger.info(f"validate_html_to_docling_table for {text[0:64]}")
     return convert_html_to_docling_table(text) is not None
 
 
@@ -353,7 +362,7 @@ def convert_markdown_to_docling_document(text: str) -> DoclingDocument | None:
 
 
 def validate_markdown_to_docling_document(text: str) -> bool:
-    logger.info(f"testing validate_markdown_docling_document for {text[0:64]}")
+    # logger.info(f"testing validate_markdown_docling_document for {text[0:64]}")
     return convert_markdown_to_docling_document(text) is not None
 
 
@@ -380,14 +389,14 @@ def convert_html_to_docling_document(text: str) -> DoclingDocument | None:
 
 
 def validate_html_to_docling_document(text: str) -> bool:
-    logger.info(f"testing validate_html_docling_document for {text[0:64]}")
+    # logger.info(f"testing validate_html_docling_document for {text[0:64]}")
     return convert_html_to_docling_document(text) is not None
 
 
 def insert_document(
     *, item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument
 ) -> DoclingDocument:
-    logger.info(f"inserting new document at item {item.self_ref}")
+    # logger.info(f"inserting new document at item {item.self_ref}")
 
     group_item = GroupItem(
         label=GroupLabel.UNSPECIFIED,

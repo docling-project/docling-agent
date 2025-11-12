@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, ClassVar
 
 # from smolagents import MCPClient, Tool, ToolCollection
@@ -28,6 +29,7 @@ from docling_agent.agent.base_functions import (
     validate_html_to_docling_table,
 )
 from docling_agent.agent_models import setup_local_session, view_linear_context
+from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
@@ -35,7 +37,6 @@ from docling_agent.resources.prompts import (
     SYSTEM_PROMPT_FOR_EDITING_DOCUMENT,
     SYSTEM_PROMPT_FOR_EDITING_TABLE,
 )
-from docling_agent.agents import logger
 
 # Use shared logger from docling_agent.agents
 
@@ -59,7 +60,7 @@ class DoclingEditingAgent(BaseDoclingAgent):
         self,
         task: str,
         document: DoclingDocument | None = None,
-        sources: list[DoclingDocument] = [],
+        sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> DoclingDocument:
         if document is None:

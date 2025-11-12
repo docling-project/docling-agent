@@ -9,7 +9,8 @@ from mellea.stdlib.chat import Message
 from mellea.stdlib.requirement import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from tabulate import tabulate  # type: ignore[import-untyped]
-from docling_agent.agents import logger
+
+from docling_agent.logging import logger
 
 # Use shared logger from docling_agent.agents
 

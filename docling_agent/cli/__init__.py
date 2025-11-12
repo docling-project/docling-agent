@@ -5,6 +5,8 @@ from typing import Iterable
 
 from mellea.backends import model_ids
 
+from docling_core.types.doc.document import DoclingDocument
+
 from docling_agent.agents import DoclingExtractingAgent, logger
 
 
@@ -17,8 +19,10 @@ def resolve_model_id(name: str):
         return model_ids.OPENAI_GPT_OSS_20B
 
 
-def gather_sources(paths: Iterable[Path], pattern: str | None = None) -> list[Path]:
-    files: list[Path] = []
+def gather_sources(
+    paths: Iterable[Path], pattern: str | None = None
+) -> list[DoclingDocument | Path]:
+    files: list[DoclingDocument | Path] = []
     for p in paths:
         if p.is_dir():
             if pattern:
