@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Pattern
 
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirement import Requirement, simple_validate
@@ -30,6 +30,7 @@ from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
     convert_html_to_docling_document,
     convert_markdown_to_docling_document,
+    serialize_table_to_html,
     find_markdown_code_block,
     has_html_code_block,
     has_markdown_code_block,
@@ -59,13 +60,18 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
     system_prompt_expert_table_writer: ClassVar[str] = SYSTEM_PROMPT_EXPERT_TABLE_WRITER
 
-    _outline_descriptions: ClassVar[list[str]] = [
-        "paragraph:",
-        "list:",
-        "table:",
-        "figure:",
-        "picture:",
-    ]
+    # Private outline configuration
+    _OUTLINE_KINDS: ClassVar[tuple[str, ...]] = (
+        "paragraph",
+        "list",
+        "table",
+        "figure",
+        "picture",
+    )
+    _OUTLINE_LINE_PATTERN: ClassVar[Pattern[str]] = re.compile(
+        rf"^({'|'.join(_OUTLINE_KINDS)}):\s(.*)\.$"
+    )
+    _outline_descriptions: ClassVar[list[str]] = [f"{k}:" for k in _OUTLINE_KINDS]
 
     def __init__(self, *, model_id: ModelIdentifier, tools: list):
         super().__init__(
@@ -88,9 +94,11 @@ class DoclingWritingAgent(BaseDoclingAgent):
         # self._analyse_task_for_final_destination(task=task)
 
         # Plan an outline for the document
+        logger.info(" === Plan an outline for the report!")                
         outline: DoclingDocument = self._make_outline_for_writing(task=task)
 
         # Write the actual document item by item
+        logger.info(" === Write the content of the document!")                
         result_document: DoclingDocument = self._populate_document_with_content(
             task=task, outline=outline
         )
@@ -104,7 +112,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         self, *, task: str, loop_budget: int = 5
     ) -> DoclingDocument:
         m = setup_local_session(
-            model_id=self.model_id, system_prompt=self.system_prompt_for_outline
+            model_id=self.get_reasoning_model_id(), system_prompt=self.system_prompt_for_outline
         )
 
         answer = m.instruct(
@@ -143,12 +151,12 @@ class DoclingWritingAgent(BaseDoclingAgent):
           "paragraph:", "list:", "table:", "figure:", or "picture:",
           followed by a single sentence summary ending with a period.
         """
-
         # Extract markdown block
         md = find_markdown_code_block(content)
         if not md:
+            logger.error(f"could not find markdown block in:\n\n{content}")
             return False
-
+        
         # Parse markdown to DoclingDocument
         try:
             converter = DocumentConverter(allowed_formats=[InputFormat.MD])
@@ -156,24 +164,27 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 content=md, format=InputFormat.MD, name="outline.md"
             )
         except Exception:
+            logger.error(f"could not convert markdown:\n\n{md}")
             return False
-
-        starts = ["paragraph", "list", "table", "figure", "picture"]
-        pattern = re.compile(rf"^({'|'.join(starts)}):\s(.*)\.$")
+        
+        pattern = DoclingWritingAgent._OUTLINE_LINE_PATTERN
 
         invalid_lines: list[str] = []
 
         # Validate content lines: only TextItem lines are checked
         for item, _ in conv.document.iterate_items(with_groups=True):
-            if isinstance(item, TextItem):
+            if isinstance(item, TitleItem) or isinstance(item, SectionHeaderItem):
+                continue
+            elif isinstance(item, TextItem):
                 if not pattern.match(item.text):
                     invalid_lines.append(item.text)
-
+                    
+        if len(invalid_lines) > 0:
+            logger.error(f"found invalid lines: {invalid_lines}")
+                    
         return len(invalid_lines) == 0
 
     def _find_outline(self, text: str, task: str) -> DoclingDocument | None:
-        starts = ["paragraph", "list", "table", "figure", "picture"]
-
         md = find_markdown_code_block(text)
 
         if not md:
@@ -190,6 +201,8 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         invalid_lines: list[str] = []
 
+        pattern = self._OUTLINE_LINE_PATTERN
+
         for item, level in conv.document.iterate_items(with_groups=True):
             if isinstance(item, TitleItem):
                 outline.add_title(text=item.text)
@@ -198,8 +211,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 outline.add_heading(text=item.text, level=item.level)
 
             elif isinstance(item, TextItem):
-                pattern = rf"^({'|'.join(starts)}):\s(.*)\.$"
-                match = re.match(pattern, item.text)
+                match = pattern.match(item.text)
 
                 if not match:
                     logger.warning(
@@ -243,6 +255,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
                 else:
                     logger.warning(f"label {label} is not supported")
+                    
+            elif isinstance(item, GroupItem):
+                continue # nothing to be done
+
             else:
                 logger.warning(f"could not classify item: {item}")
                 continue
@@ -250,7 +266,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         if len(invalid_lines) > 0:
             message = (
                 "Every content line should start with one of: "
-                f"{starts}. The following lines need to be updated: "
+                f"{', '.join(self._OUTLINE_KINDS)}. The following lines need to be updated: "
                 + "\n".join(invalid_lines)
             )
             logger.error(message)
@@ -378,6 +394,9 @@ class DoclingWritingAgent(BaseDoclingAgent):
             else:
                 logger.warning("Skipping picture without summary")
 
+        elif isinstance(item, GroupItem) and (item.label == GroupLabel.UNSPECIFIED):
+            pass  # nothing to be done ...
+                
         elif isinstance(item, GroupItem) and item.label == GroupLabel.LIST:
             summary = self._summary_for(node=item)
             if summary:
@@ -444,33 +463,73 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
             elif isinstance(item, TableItem):
                 if item.parent and item.parent.cref in to_item:
-                    if len(item.captions) > 0:
-                        # Create an empty caption placeholder to avoid deref issues
-                        caption = document.add_text(
-                            label=DocItemLabel.CAPTION,
-                            text="",
-                            parent=to_item[item.parent.cref],
-                        )
-                        te = document.add_table(
-                            data=item.data,
-                            caption=caption,
-                            parent=to_item[item.parent.cref],
-                        )
-                        to_item[item.self_ref] = te
-                    else:
-                        te = document.add_table(
-                            data=item.data,
-                            parent=to_item[item.parent.cref],
-                        )
-                        to_item[item.self_ref] = te
+                    # Generate a good caption from the table HTML content
+                    try:
+                        table_html = serialize_table_to_html(table=item, doc=content)
+                    except Exception:
+                        table_html = ""
+
+                    caption_text = self._generate_caption_for_table(table_html=table_html)
+
+                    caption = document.add_text(
+                        label=DocItemLabel.CAPTION,
+                        text=caption_text,
+                        parent=to_item[item.parent.cref],
+                    )
+
+                    te = document.add_table(
+                        data=item.data,
+                        caption=caption,
+                        parent=to_item[item.parent.cref],
+                    )
+                    to_item[item.self_ref] = te
                 else:
-                    # print("skipping: ", item)
                     continue
             else:
                 # print("skipping: ", item)
                 continue
 
         return document
+
+    def _generate_caption_for_table(
+        self, *, table_html: str, summary: str | None = None, loop_budget: int = 3
+    ) -> str:
+        """Create a concise, informative caption for a table.
+
+        Uses the expert table writer prompt to produce a 1-sentence caption
+        based on the table's HTML (and optional summary), suitable to attach
+        to the table.
+        """
+        try:
+            m = setup_local_session(
+                model_id=self.get_writing_model_id(),
+                system_prompt=self.system_prompt_expert_table_writer,
+            )
+
+            context = ""
+            if table_html:
+                context += f"Here is the table in HTML:\n```html\n{table_html}\n```\n\n"
+            if summary:
+                context += f"Table summary: {summary}\n\n"
+
+            prompt = (
+                "Write a clear, specific caption (max 20 words) for the table above. "
+                "Describe what the table shows, including the key variables, scope, and unit if evident. "
+                "Return only the caption text without quotes or code fences."
+            )
+
+            answer = m.instruct(
+                f"{context}{prompt}",
+                strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            )
+
+            caption = answer.value.strip()
+            # Strip accidental code fences/backticks and condense whitespace
+            caption = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL).strip()
+            caption = re.sub(r"\s+", " ", caption)
+            return caption if caption else ""
+        except Exception:
+            return ""
 
     def _write_paragraph(
         self,
@@ -488,7 +547,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
             context = rf"Given the current context in the document:\n\n```markdown\n{context}```\n\n"
 
         m = setup_local_session(
-            model_id=self.model_id,
+            model_id=self.get_writing_model_id(),
             system_prompt=self.system_prompt_expert_writer,
         )
 
@@ -524,7 +583,8 @@ class DoclingWritingAgent(BaseDoclingAgent):
             context += "#" * (level + 1) + header + "\n"
 
         m = setup_local_session(
-            model_id=self.model_id,
+            # model_id=self.model_id,
+            model_id=self.get_writing_model_id(),
             system_prompt=self.system_prompt_expert_writer,
         )
 
@@ -563,7 +623,8 @@ class DoclingWritingAgent(BaseDoclingAgent):
             context += "#" * (level + 1) + header + "\n"
 
         m = setup_local_session(
-            model_id=self.model_id,
+            # model_id=self.model_id,
+            model_id=self.get_writing_model_id(),
             system_prompt=self.system_prompt_expert_writer,
         )
 

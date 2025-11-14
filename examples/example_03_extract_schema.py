@@ -1,12 +1,7 @@
 from pathlib import Path
 import json
-import glob
 
 from mellea.backends import model_ids
-
-from docling_core.types.doc.document import (
-    DoclingDocument,
-)
 
 from docling_agent.agents import DoclingExtractingAgent, logger
 
@@ -19,13 +14,6 @@ def run_task(
     tools: list | None = None,
 ):
     agent = DoclingExtractingAgent(model_id=model_id, tools=tools or [])
-
-    task = f"""Extract data according to this schema:
-
-```json
-{json.dumps(schema, indent=2)}
-```
-"""
 
     document = agent.run(
         task=json.dumps(schema),
@@ -60,7 +48,7 @@ def main():
         "currency": "string",
     }
     
-    docdir = Path("./examples/example_03")  # Adjust to your data root
+    docdir = Path("./examples/example_03_extract")  # Adjust to your data root
 
     for _ in [
         (
