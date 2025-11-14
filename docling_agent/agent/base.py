@@ -49,7 +49,21 @@ class BaseDoclingAgent(BaseModel):
     model_id: ModelIdentifier
     tools: list
 
+    # model needed for reasoning/instruction following
+    reasoning_model_id: ModelIdentifier | None = None
+
+    # model needed for writing, summarizing, etc
+    writing_model_id: ModelIdentifier | None = None
+
     max_iteration: int = 16
+
+    def get_reasoning_model_id(self) -> ModelIdentifier:
+        """Return the reasoning model id, falling back to the primary model."""
+        return self.reasoning_model_id or self.model_id
+
+    def get_writing_model_id(self) -> ModelIdentifier:
+        """Return the writing model id, falling back to the primary model."""
+        return self.writing_model_id or self.model_id
 
     class Config:
         arbitrary_types_allowed = True  # Needed for complex types like Model
