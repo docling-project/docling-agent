@@ -30,10 +30,10 @@ from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
     convert_html_to_docling_document,
     convert_markdown_to_docling_document,
-    serialize_table_to_html,
     find_markdown_code_block,
     has_html_code_block,
     has_markdown_code_block,
+    serialize_table_to_html,
     validate_html_to_docling_document,
     validate_markdown_to_docling_document,
 )
@@ -94,11 +94,11 @@ class DoclingWritingAgent(BaseDoclingAgent):
         # self._analyse_task_for_final_destination(task=task)
 
         # Plan an outline for the document
-        logger.info(" === Plan an outline for the report!")                
+        logger.info(" === Plan an outline for the report!")
         outline: DoclingDocument = self._make_outline_for_writing(task=task)
 
         # Write the actual document item by item
-        logger.info(" === Write the content of the document!")                
+        logger.info(" === Write the content of the document!")
         result_document: DoclingDocument = self._populate_document_with_content(
             task=task, outline=outline
         )
@@ -112,7 +112,8 @@ class DoclingWritingAgent(BaseDoclingAgent):
         self, *, task: str, loop_budget: int = 5
     ) -> DoclingDocument:
         m = setup_local_session(
-            model_id=self.get_reasoning_model_id(), system_prompt=self.system_prompt_for_outline
+            model_id=self.get_reasoning_model_id(),
+            system_prompt=self.system_prompt_for_outline,
         )
 
         answer = m.instruct(
@@ -156,7 +157,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         if not md:
             logger.error(f"could not find markdown block in:\n\n{content}")
             return False
-        
+
         # Parse markdown to DoclingDocument
         try:
             converter = DocumentConverter(allowed_formats=[InputFormat.MD])
@@ -166,7 +167,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         except Exception:
             logger.error(f"could not convert markdown:\n\n{md}")
             return False
-        
+
         pattern = DoclingWritingAgent._OUTLINE_LINE_PATTERN
 
         invalid_lines: list[str] = []
@@ -178,10 +179,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
             elif isinstance(item, TextItem):
                 if not pattern.match(item.text):
                     invalid_lines.append(item.text)
-                    
+
         if len(invalid_lines) > 0:
             logger.error(f"found invalid lines: {invalid_lines}")
-                    
+
         return len(invalid_lines) == 0
 
     def _find_outline(self, text: str, task: str) -> DoclingDocument | None:
@@ -255,9 +256,9 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
                 else:
                     logger.warning(f"label {label} is not supported")
-                    
+
             elif isinstance(item, GroupItem):
-                continue # nothing to be done
+                continue  # nothing to be done
 
             else:
                 logger.warning(f"could not classify item: {item}")
@@ -396,7 +397,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         elif isinstance(item, GroupItem) and (item.label == GroupLabel.UNSPECIFIED):
             pass  # nothing to be done ...
-                
+
         elif isinstance(item, GroupItem) and item.label == GroupLabel.LIST:
             summary = self._summary_for(node=item)
             if summary:
@@ -469,7 +470,9 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     except Exception:
                         table_html = ""
 
-                    caption_text = self._generate_caption_for_table(table_html=table_html)
+                    caption_text = self._generate_caption_for_table(
+                        table_html=table_html
+                    )
 
                     caption = document.add_text(
                         label=DocItemLabel.CAPTION,
@@ -525,7 +528,9 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
             caption = answer.value.strip()
             # Strip accidental code fences/backticks and condense whitespace
-            caption = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL).strip()
+            caption = re.sub(
+                r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL
+            ).strip()
             caption = re.sub(r"\s+", " ", caption)
             return caption if caption else ""
         except Exception:
