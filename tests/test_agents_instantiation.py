@@ -26,7 +26,7 @@ def test_instantiate_docling_editing_agent():
 def test_instantiate_docling_extracting_agent():
     from mellea.backends import model_ids
 
-    from docling_agent.agent.extraction import DoclingExtractingAgent
+    from docling_agent.agent.extractor import DoclingExtractingAgent
 
     try:
         _ = DoclingExtractingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B, tools=[])
