@@ -21,8 +21,6 @@ from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent_models import setup_local_session
 from docling_agent.logging import logger
 
-# Use shared logger from docling_agent.agents
-
 
 class DoclingExtractingAgent(BaseDoclingAgent):
     system_prompt_schema_extraction: ClassVar[str] = (
@@ -152,3 +150,4 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         )
 
         return json.loads(answer.value)
+
