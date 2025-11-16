@@ -32,3 +32,14 @@ def test_instantiate_docling_extracting_agent():
         _ = DoclingExtractingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B, tools=[])
     except Exception as e:
         pytest.fail(f"DoclingExtractingAgent instantiation raised: {e}")
+
+
+def test_instantiate_docling_enriching_agent():
+    from mellea.backends import model_ids
+
+    from docling_agent.agent.enricher import DoclingEnrichingAgent
+
+    try:
+        _ = DoclingEnrichingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B, tools=[])
+    except Exception as e:
+        pytest.fail(f"DoclingEnrichingAgent instantiation raised: {e}")
