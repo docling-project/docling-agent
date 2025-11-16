@@ -17,6 +17,7 @@ Docling-agent simplifies agentic operation on documents, such as writing, editin
 - [Document writing](examples/example_01_write_report.py): Generate well-structured reports from natural prompts and export to JSON/Markdown/HTML.
 - [Targeted editing](examples/example_02_edit_report.py): Load an existing Docling JSON and apply focused edits with natural-language tasks.
 - [Schema-guided extraction](examples/example_03_extract_schema.py): Extract typed fields from PDFs/images using a simple schema and produce HTML reports. See examples on curriculum_vitae, papers, invoices, etc.
+- [Document enrichment](examples/example_04_enrich_document.py): Enrich existing documents with summaries, search keywords, key entities, and item classifications (language/function).
 - Model-agnostic: Plug in different backends via [Mellea](https://github.com/generative-computing/mellea) `model_ids` (e.g., OpenAI GPT OSS, IBM Granite).
 - Simple API surface: Use `agent.run(...)` with `DoclingDocument` in/out; save via `save_as_*` helpers.
 - Optional tools: Integrate external tools (e.g., MCP) when available.
@@ -84,6 +85,24 @@ sources = sorted([p for p in Path("./examples/example_03_extract/invoices").rglo
 agent = DoclingExtractingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
 report = agent.run(task=str(schema), sources=sources)
 report.save_as_html("./scratch/invoices_extraction_report.html")
+```
+
+### Enrich an existing document (see [example](examples/example_04_enrich_document.py)):
+
+Run enrichment passes like summaries, keywords, entities, and classifications on a Docling JSON.
+
+```python
+from pathlib import Path
+from mellea.backends import model_ids
+from docling_core.types.doc.document import DoclingDocument
+from docling_agent.agents import DoclingEnrichingAgent
+
+ipath = Path("./examples/example_02_edit_resources/20250815_125216.json")
+doc = DoclingDocument.load_from_json(ipath)
+
+agent = DoclingEnrichingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+enriched = agent.run(task="Summarize each paragraph, table, and section header.", document=doc)
+enriched.save_as_html("./scratch/enriched_summaries.html")
 ```
 
 ## Documentation
