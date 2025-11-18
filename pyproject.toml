@@ -37,7 +37,7 @@ requires-python = ">=3.10"
 dependencies = [
     "docling>=2.61.0",
     # "docling-core[chunking]>=2.50.1",
-    "docling-core[chunking] @ git+https://github.com/DS4SD/docling-core.git@ca030e9c413d224b60119e04af3b13c750a3893a",
+    "docling-core[chunking] @ git+https://github.com/docling-project/docling-core.git@62f8a712c36021a7f28a5b83858b7c4249c5e20b",
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
     "typer~=0.12",
