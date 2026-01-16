@@ -4,13 +4,13 @@ from mellea import MelleaSession
 from mellea.backends import model_ids
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.backends.ollama import OllamaModelBackend
-from mellea.stdlib.base import ChatContext
-from mellea.stdlib.chat import Message
-from mellea.stdlib.requirement import Requirement, simple_validate
+from mellea.stdlib.context import ChatContext
+from mellea.stdlib.components import Message
+from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from tabulate import tabulate  # type: ignore[import-untyped]
 
-from docling_agent.logging import logger
+from docling_agent.log import logger
 
 # Use shared logger from docling_agent.agents
 
@@ -95,7 +95,7 @@ def main():
     # print(answer)
 
     try:
-        for i, _ in enumerate(m.ctx.linearize()):
+        for i, _ in enumerate(m.ctx.view_for_generation()):
             print(i, ": ", _)
     except Exception:
         print("fail ...")

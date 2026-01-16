@@ -3,7 +3,8 @@ from pathlib import Path
 from typing import ClassVar, Pattern
 
 from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirement import Requirement, simple_validate
+from mellea.core.requirement import Requirement
+from mellea.stdlib.requirements import simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling.datamodel.base_models import InputFormat
@@ -38,7 +39,7 @@ from docling_agent.agent.base_functions import (
     validate_markdown_to_docling_document,
 )
 from docling_agent.agent_models import setup_local_session
-from docling_agent.logging import logger
+from docling_agent.log import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (

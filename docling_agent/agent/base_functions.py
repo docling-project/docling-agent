@@ -23,7 +23,7 @@ from docling_core.types.doc.document import (
 )
 from docling_core.types.io import DocumentStream
 
-from docling_agent.logging import logger
+from docling_agent.log import logger
 
 
 def find_json_dicts(text: str) -> list[dict]:
