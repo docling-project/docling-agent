@@ -4,8 +4,8 @@ from mellea import MelleaSession
 from mellea.backends import model_ids
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.backends.ollama import OllamaModelBackend
-from mellea.stdlib.context import ChatContext
 from mellea.stdlib.components import Message
+from mellea.stdlib.context import ChatContext
 from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from tabulate import tabulate  # type: ignore[import-untyped]
