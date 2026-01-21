@@ -3,8 +3,7 @@ from pathlib import Path
 from typing import ClassVar, Pattern
 
 from mellea.backends.model_ids import ModelIdentifier
-from mellea.core.requirement import Requirement
-from mellea.stdlib.requirements import simple_validate
+from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling.datamodel.base_models import InputFormat
