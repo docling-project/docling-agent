@@ -134,7 +134,7 @@ Now, provide me the operations (encapsulated in on ore more ```json...```) and t
 
         view_linear_context(m)
 
-        ops = find_json_dicts(text=answer.value)
+        ops = find_json_dicts(text=answer.value)  # type: ignore[arg-type]
 
         if len(ops) == 0:
             raise ValueError("No operation is detected")
@@ -204,7 +204,7 @@ Execute the following task: {task}
 
         logger.info(f"response: {answer.value}")
 
-        new_tables = convert_html_to_docling_table(text=answer.value)
+        new_tables = convert_html_to_docling_table(text=answer.value)  # type: ignore[arg-type]
 
         if new_tables and len(new_tables) == 1:
             table.data = new_tables[0].data
@@ -244,7 +244,7 @@ Execute the following task: {task}
         )
         # logger.info(f"response: {answer.value}")
 
-        updated_doc = convert_markdown_to_docling_document(text=answer.value)
+        updated_doc = convert_markdown_to_docling_document(text=answer.value)  # type: ignore[arg-type]
         if updated_doc is None:
             logger.warning("No valid document produced for updated content.")
             return
@@ -318,7 +318,7 @@ Execute the following task: {task}
         )
         logger.info(f"response: {answer.value}")
 
-        updated_doc = convert_markdown_to_docling_document(text=answer.value)
+        updated_doc = convert_markdown_to_docling_document(text=answer.value)  # type: ignore[arg-type]
         if updated_doc is None:
             logger.warning("No valid document produced for rewrite.")
             return

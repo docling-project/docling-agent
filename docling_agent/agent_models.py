@@ -33,7 +33,7 @@ def setup_local_session(
 
 def view_linear_context(m: MelleaSession):
     rows = []
-    for i, _ in enumerate(m.ctx.view_for_generation()):
+    for i, _ in enumerate(m.ctx.view_for_generation()):  # type: ignore[arg-type]
         if isinstance(_, Message):
             if len(_.content) > 64:
                 rows.append([i, _.role, (_.content[0:32] + " ... " + _.content[-32:])])
@@ -95,7 +95,7 @@ def main():
     # print(answer)
 
     try:
-        for i, _ in enumerate(m.ctx.view_for_generation()):
+        for i, _ in enumerate(m.ctx.view_for_generation())  # type: ignore[arg-type]
             print(i, ": ", _)
     except Exception:
         print("fail ...")
