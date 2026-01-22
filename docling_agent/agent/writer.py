@@ -526,7 +526,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
             )
 
-            caption = answer.value.strip()  # type: ignore[reportOptionalMemberAccess]
+            caption = answer.value.strip()  # type: ignore[union-attr]
             # Strip accidental code fences/backticks and condense whitespace
             caption = re.sub(
                 r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL

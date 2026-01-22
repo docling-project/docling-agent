@@ -95,7 +95,7 @@ def main():
     # print(answer)
 
     try:
-        for i, _ in enumerate(m.ctx.view_for_generation())  # type: ignore[arg-type]
+        for i, _ in enumerate(m.ctx.view_for_generation()):  # type: ignore[arg-type]
             print(i, ": ", _)
     except Exception:
         print("fail ...")
