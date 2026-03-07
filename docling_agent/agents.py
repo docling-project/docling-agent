@@ -2,6 +2,7 @@
 from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.extractor import DoclingExtractingAgent
+from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
 from docling_agent.logging import logger
 from docling_agent.task_model import (
@@ -19,6 +20,7 @@ __all__ = [
     "DoclingEditingAgent",
     "DoclingEnrichingAgent",
     "DoclingExtractingAgent",
+    "DoclingRAGAgent",
     "DoclingWritingAgent",
     "logger",
     # task model
