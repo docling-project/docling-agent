@@ -1125,6 +1125,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "typer" },
 ]
 
@@ -1161,7 +1162,7 @@ requires-dist = [
     { name = "pyarrow", specifier = "~=19.0" },
     { name = "pydantic", specifier = "~=2.10" },
     { name = "pydantic-settings", specifier = "~=2.4" },
-    { name = "typer", specifier = "~=0.12" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
 provides-extras = ["vlm"]
