@@ -26,24 +26,6 @@ from docling_core.types.io import DocumentStream
 from docling_agent.log import logger
 
 
-def find_json_dicts(text: str) -> list[dict]:
-    """
-    Extract JSON dictionaries from ```json code blocks
-    """
-    pattern = r"```json\s*(.*?)\s*```"
-    matches = re.findall(pattern, text, re.DOTALL)
-
-    calls = []
-    for i, json_content in enumerate(matches):
-        try:
-            # print(f"call {i}: {json_content}")
-            calls.append(json.loads(json_content))
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON in match {i}: {e}")
-
-    return calls
-
-
 def find_crefs(text: str) -> list[RefItem]:
     """
     Check if a string matches the pattern ```markdown(.*)?```
@@ -60,6 +42,41 @@ def find_crefs(text: str) -> list[RefItem]:
 
 def has_crefs(text: str) -> bool:
     return len(find_crefs(text)) > 0
+
+
+def has_json_dicts(text: str) -> bool:
+    """
+    Extract JSON dictionaries from ```json code blocks
+    """
+    pattern = r"```json\s*(.*?)\s*```"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    calls = []
+    for i, json_content in enumerate(matches):
+        try:
+            calls.append(json.loads(json_content))
+        except:
+            return False
+
+    return len(calls) > 0
+
+
+def find_json_dicts(text: str) -> list[dict]:
+    """
+    Extract JSON dictionaries from ```json code blocks
+    """
+    pattern = r"```json\s*(.*?)\s*```"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    calls = []
+    for i, json_content in enumerate(matches):
+        try:
+            # print(f"call {i}: {json_content}")
+            calls.append(json.loads(json_content))
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON in match {i}: {e}")
+
+    return calls
 
 
 def create_document_outline(doc: DoclingDocument) -> str:
