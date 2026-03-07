@@ -1,3 +1,5 @@
+import json
+import re
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -7,8 +9,9 @@ from mellea.stdlib.sampling import RejectionSamplingStrategy
 from pydantic import Field
 
 from docling_core.types.doc.document import (
+    BaseMeta,
     DoclingDocument,
-    ListItem,
+    NodeItem,
     PictureItem,
     SectionHeaderItem,
     SummaryMetaField,
@@ -16,37 +19,38 @@ from docling_core.types.doc.document import (
     TextItem,
     TitleItem,
 )
-from docling_core.transforms.serializer.html import (
-    HTMLDocSerializer,
-    HTMLTableSerializer,
-)
-from docling_core.transforms.serializer.markdown import (
-    MarkdownDocSerializer,
-    MarkdownTextSerializer,
-)
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
+    collect_subtree_text,
     find_json_dicts,
     has_json_dicts,
-    find_markdown_code_block,
-    has_markdown_code_block,
+    make_hierarchical_document,
+    serialize_table_to_html,
 )
 from docling_agent.agent_models import setup_local_session, view_linear_context
 from docling_agent.logging import logger
 
+# Mapping from routing names and short names to method names
+_OP_ALIASES: dict[str, str] = {
+    "summarize_items": "_summarize_items",
+    "summarize": "_summarize_items",
+    "find_search_keywords": "_find_search_keywords",
+    "keywords": "_find_search_keywords",
+    "detect_key_entities": "_detect_key_entities",
+    "entities": "_detect_key_entities",
+    "classify_items": "_classify_items",
+}
+
+_ROUTING_OPS = frozenset(
+    ["summarize_items", "find_search_keywords", "detect_key_entities", "classify_items"]
+)
+
 
 class DoclingEnrichingAgent(BaseDoclingAgent):
     """Agent for enriching a document with metadata like summaries, keywords,
-    entities, and classifications.
+    entities, and classifications."""
 
-    This scaffold routes the task to one of several enrichment operations using
-    a small reasoning step that returns a JSON instruction containing an
-    `operation` field. Each operation function currently iterates items and is
-    left for concrete implementation.
-    """
-
-    # Simple system prompt to route enrichment tasks
     system_prompt_for_enrichment_routing: ClassVar[str] = """
 You are a precise document enrichment router. Given a natural language task description, select exactly one operation to run and return only one JSON object in a ```json ...``` block, with the following schema:
 
@@ -56,9 +60,8 @@ You are a precise document enrichment router. Given a natural language task desc
 }
 
 Return no extra commentary. If multiple seem plausible, choose the single best fit.
-        """
+    """
 
-    # Store last chosen operation for introspection/debugging (optional)
     last_operation: dict[str, Any] = Field(default_factory=dict)
 
     def __init__(self, *, model_id: ModelIdentifier, tools: list):
@@ -78,28 +81,31 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         if document is None:
             raise ValueError("Document must not be None")
 
+        # Explicit operations list bypasses LLM routing entirely
+        operations: list[str] | None = kwargs.get("operations")
+        if operations is not None:
+            result = document
+            for op_name in operations:
+                method_name = _OP_ALIASES.get(op_name)
+                if method_name is None:
+                    raise ValueError(f"Unknown operation: {op_name!r}")
+                method = getattr(self, method_name)
+                result = method(document=result) or result
+            return result
+
         op = self._choose_operation(task=task)
         self.last_operation = op
 
         operation = op.get("operation")
-        args = op.get("args", {})
-
         logger.info(f"Chosen enrichment operation: {operation}")
 
-        if operation == "summarize_items":
-            self._summarize_items(document=document, **args)
-        elif operation == "find_search_keywords":
-            self._find_search_keywords(document=document, **args)
-        elif operation == "detect_key_entities":
-            self._detect_key_entities(document=document, **args)
-        elif operation == "classify_items":
-            self._classify_items(document=document, **args)
-        else:
+        method_name = _OP_ALIASES.get(operation or "")
+        if method_name is None:
             raise ValueError(
                 f"Unknown enrichment operation: {operation}. Op payload: {op}"
             )
-
-        return document
+        method = getattr(self, method_name)
+        return method(document=document) or document
 
     def _choose_operation(self, *, task: str, loop_budget: int = 5) -> dict[str, Any]:
         logger.info(f"task: {task}")
@@ -118,12 +124,11 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                     validation_fn=simple_validate(has_json_dicts),
                 ),
                 Requirement(
-                    description="""Given a natural language task description, select exactly one operation to run and return only one JSON object in a ```json ...``` block, with the following schema:
-
-{
-  "operation": "summarize_items" | "find_search_keywords" | "detect_key_entities" | "classify_items",
-  "args": { }
-}""",
+                    description=(
+                        "Select exactly one operation and return only one JSON object "
+                        "in a ```json ...``` block with 'operation' set to one of: "
+                        + ", ".join(sorted(_ROUTING_OPS))
+                    ),
                     validation_fn=simple_validate(
                         DoclingEnrichingAgent._validate_json_format
                     ),
@@ -142,118 +147,232 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
 
     @staticmethod
     def _validate_json_format(content: str) -> bool:
-        """Validate that content contains a json with valid format.
-
-        Rules:
-        - The json must be inside a ```json ... ``` code block.
-        - The operations must be of type "summarize_items" | "find_search_keywords" | "detect_key_entities" | "classify_items".
-        """
-
         ops = find_json_dicts(text=content)
-
-        # Must contain exactly one JSON object in a code block
         if len(ops) != 1:
             return False
+        return ops[0].get("operation") in _ROUTING_OPS
 
-        # Operation must be one of the allowed values
-        allowed_ops = {
-            "summarize_items",
-            "find_search_keywords",
-            "detect_key_entities",
-            "classify_items",
-        }
+    # ------------------------------------------------------------------
+    # Summarization
+    # ------------------------------------------------------------------
 
-        return ops[0].get("operation") in allowed_ops
+    def _summarize_items(
+        self,
+        *,
+        document: DoclingDocument,
+        fix_heading_levels: bool = True,
+        min_text_length: int = 100,
+        loop_budget: int = 5,
+    ) -> DoclingDocument:
+        logger.info("_summarize_items: starting")
 
-    # --- Enrichment operations (scaffolds) ---
-    def _summarize_items(self, *, document: DoclingDocument, **kwargs) -> None:
-        logger.info("_summarize_items: iterating over document items")
+        if fix_heading_levels:
+            self._fix_heading_levels(document=document)
 
-        md_serializer = MarkdownDocSerializer(doc=document)
-        html_serializer = HTMLDocSerializer(doc=document)
+        hier_doc = make_hierarchical_document(document)
 
-        for item, level in document.iterate_items(with_groups=True):
-            _ = (item, level)  # placeholder to avoid unused warnings
+        m = setup_local_session(model_id=self.get_reasoning_model_id())
 
-            # check if item already has a summary
-            if (item.meta is not None) and (item.meta.summary is not None):
+        self._walk_and_summarize(
+            node=hier_doc.body,
+            doc=hier_doc,
+            m=m,
+            loop_budget=loop_budget,
+            min_text_length=min_text_length,
+        )
+        self._summarize_leaf_items(
+            m=m,
+            document=hier_doc,
+            loop_budget=loop_budget,
+        )
+
+        return hier_doc
+
+    def _fix_heading_levels(self, *, document: DoclingDocument) -> None:
+        from docling_agent.agent.editor import DoclingEditingAgent
+
+        editor = DoclingEditingAgent(model_id=self.get_reasoning_model_id(), tools=[])
+        editor.run(
+            task=(
+                "Fix the section heading levels so the document hierarchy is correct. "
+                "Level 1 is a top-level section, level 2 a subsection, etc."
+            ),
+            document=document,
+        )
+
+    def _walk_and_summarize(
+        self,
+        *,
+        node: NodeItem,
+        doc: DoclingDocument,
+        m: Any,
+        loop_budget: int,
+        min_text_length: int,
+    ) -> None:
+        if isinstance(node, (TitleItem, SectionHeaderItem)):
+            if not (node.meta and node.meta.summary):
+                text = collect_subtree_text(node, doc)
+                if len(text) >= min_text_length:
+                    summary = self._generate_summary(
+                        m=m, text=text, loop_budget=loop_budget
+                    )
+                    if summary:
+                        if node.meta is None:
+                            node.meta = BaseMeta()
+                        node.meta.summary = SummaryMetaField(text=summary)
+
+        for child_ref in node.children or []:
+            try:
+                child = child_ref.resolve(doc)
+                self._walk_and_summarize(
+                    node=child,
+                    doc=doc,
+                    m=m,
+                    loop_budget=loop_budget,
+                    min_text_length=min_text_length,
+                )
+            except Exception as exc:
+                logger.warning(f"Could not resolve child {child_ref}: {exc}")
+
+    def _summarize_leaf_items(
+        self,
+        *,
+        m: Any,
+        document: DoclingDocument,
+        loop_budget: int,
+    ) -> None:
+        for item, _ in document.iterate_items():
+            if item.meta and item.meta.summary:
+                continue
+            if isinstance(item, TableItem):
+                html = serialize_table_to_html(table=item, doc=document)
+                summary = self._generate_summary(
+                    m=m,
+                    text=f"HTML table:\n{html}",
+                    loop_budget=loop_budget,
+                )
+            elif isinstance(item, PictureItem):
+                captions = [
+                    c.resolve(document).text
+                    for c in item.captions
+                    if hasattr(c.resolve(document), "text")
+                ]
+                text = " ".join(captions)
+                summary = (
+                    self._generate_summary(m=m, text=text, loop_budget=loop_budget)
+                    if text
+                    else None
+                )
+            else:
+                continue
+            if summary:
+                if item.meta is None:
+                    item.meta = BaseMeta()
+                item.meta.summary = SummaryMetaField(text=summary)
+
+    def _generate_summary(
+        self,
+        *,
+        m: Any,
+        text: str,
+        loop_budget: int = 5,
+    ) -> str | None:
+        ctask = (
+            "Summarize the following content in two or three succinct sentences. "
+            "Return only plain text with no markdown formatting.\n\n"
+            f"{text}"
+        )
+
+        def _validate_summary(content: str) -> bool:
+            sentences = [s.strip() for s in content.split(".") if s.strip()]
+            return 1 <= len(sentences) <= 5
+
+        try:
+            answer = m.instruct(
+                ctask,
+                strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+                requirements=[
+                    Requirement(
+                        description="Write 2-3 succinct sentences summarizing the content. Return plain text only.",
+                        validation_fn=simple_validate(_validate_summary),
+                    ),
+                ],
+            )
+            return answer.value.strip() or None
+        except Exception as exc:
+            logger.warning(f"Summary generation failed: {exc}")
+            return None
+
+    # ------------------------------------------------------------------
+    # Keywords
+    # ------------------------------------------------------------------
+
+    def _find_search_keywords(
+        self,
+        *,
+        document: DoclingDocument,
+        loop_budget: int = 5,
+    ) -> DoclingDocument:
+        logger.info("_find_search_keywords: iterating over document items")
+
+        m = setup_local_session(model_id=self.get_reasoning_model_id())
+
+        for item, _ in document.iterate_items():
+            if not isinstance(item, (TitleItem, SectionHeaderItem, TextItem)):
+                continue
+            if not hasattr(item, "text") or not item.text:
                 continue
 
-            if isinstance(item, TitleItem):
-                pass
-            elif isinstance(item, SectionHeaderItem):
-                pass
-            elif isinstance(item, ListItem):
-                pass
-            elif isinstance(item, TextItem):
-                ser = MarkdownTextSerializer()
-                res = ser.serialize(item=item, doc=document, doc_serializer=md_serializer)
+            ctask = (
+                "Extract 3 to 7 search keywords from the following text. "
+                "Return them as a JSON array of strings in a ```json ...``` block.\n\n"
+                f"{item.text}"
+            )
 
-                ctask = f"""Summarize the following text snippet in two or three succinct sentences:\n\n```{task}\n\n```."""
-                logger.info(f"task: {ctask}")
-                
+            def _validate_keywords(content: str) -> bool:
+                match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
+                if not match:
+                    return False
+                try:
+                    val = json.loads(match.group(1))
+                    return isinstance(val, list) and len(val) >= 1
+                except Exception:
+                    return False
+
+            try:
                 answer = m.instruct(
-                    f"{ctask}",
+                    ctask,
+                    strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
                     requirements=[
                         Requirement(
-                            description="Put the resulting markdown outline in the format ```markdown <insert-content>```",
-                            validation_fn=simple_validate(has_markdown_code_block),
+                            description="Return 3-7 keywords as a JSON array in a ```json ...``` block.",
+                            validation_fn=simple_validate(_validate_keywords),
                         ),
                     ],
-                    strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
                 )
+                match = re.search(r"```json\s*(.*?)\s*```", answer.value, re.DOTALL)
+                if match:
+                    keywords = json.loads(match.group(1))
+                    if item.meta is None:
+                        item.meta = BaseMeta()
+                    item.meta.keywords = keywords  # type: ignore[attr-defined]
+            except Exception as exc:
+                logger.warning(f"Keyword extraction failed for {item.self_ref}: {exc}")
 
-                summary = find_markdown_code_block(text=answer.value)
+        return document
 
-                if summary is None:
-                    raise ValueError("Failed to generate a valid summary.")
+    # ------------------------------------------------------------------
+    # Stubs
+    # ------------------------------------------------------------------
 
-                item.meta.summary = SummaryMetaField(text=summary)
+    def _detect_key_entities(
+        self, *, document: DoclingDocument, **kwargs
+    ) -> DoclingDocument:
+        logger.info("_detect_key_entities: not yet implemented")
+        return document
 
-            elif isinstance(item, TableItem):
-                ser = HTMLTableSerializer()
-                res = ser.serialize(item=item, doc=document, doc_serializer=html_serializer)
-
-                ctask = f"""Summarize the following html table in two or three succinct sentences:\n\n```{task}\n\n```."""
-                logger.info(f"task: {ctask}")
-                
-                answer = m.instruct(
-                    f"{ctask}",
-                    requirements=[
-                        Requirement(
-                            description="Put the resulting markdown outline in the format ```markdown <insert-content>```",
-                            validation_fn=simple_validate(has_markdown_code_block),
-                        ),
-                    ],
-                    # user_variables={"name": name, "notes": notes},
-                    strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
-                )
-
-                summary = find_markdown_code_block(text=answer.value)
-
-                if summary is None:
-                    raise ValueError("Failed to generate a valid summary.")
-
-                item.meta.summary = SummaryMetaField(text=summary)
-            elif isinstance(item, PictureItem):
-                pass
-            else:
-                logger.warning(f"Can not summerarize item of label ({item.label})")
-
-    def _find_search_keywords(self, *, document: DoclingDocument, **kwargs) -> None:
-        logger.info("_find_search_keywords: iterating over document items")
-        for item, level in document.iterate_items(with_groups=True):
-            _ = (item, level)
-            # TODO: implement keyword extraction per item
-
-    def _detect_key_entities(self, *, document: DoclingDocument, **kwargs) -> None:
-        logger.info("_detect_key_entities: iterating over document items")
-        for item, level in document.iterate_items(with_groups=True):
-            _ = (item, level)
-            # TODO: implement entity detection per item
-
-    def _classify_items(self, *, document: DoclingDocument, **kwargs) -> None:
-        logger.info("_classify_items: iterating over document items")
-        for item, level in document.iterate_items(with_groups=True):
-            _ = (item, level)
-            # TODO: implement classification per item (language, function, etc.)
+    def _classify_items(
+        self, *, document: DoclingDocument, **kwargs
+    ) -> DoclingDocument:
+        logger.info("_classify_items: not yet implemented")
+        return document
