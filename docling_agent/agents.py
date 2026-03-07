@@ -2,6 +2,7 @@
 from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.extractor import DoclingExtractingAgent
+from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
 from docling_agent.logging import logger
@@ -20,6 +21,7 @@ __all__ = [
     "DoclingEditingAgent",
     "DoclingEnrichingAgent",
     "DoclingExtractingAgent",
+    "DoclingOrchestratorAgent",
     "DoclingRAGAgent",
     "DoclingWritingAgent",
     "logger",
