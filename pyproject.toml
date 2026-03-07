@@ -40,14 +40,14 @@ dependencies = [
     "docling-core[chunking] @ git+https://github.com/docling-project/docling-core.git@62f8a712c36021a7f28a5b83858b7c4249c5e20b",
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
-    "typer~=0.12",
+    "typer>=0.12.5",
+    "pyyaml>=6.0",
     "boto3~=1.35",
     "pandas~=2.2",
     "fastparquet~=2024.11",
     "pyarrow~=19.0",
     "httpx~=0.28",
-    "typer>=0.12.5",
-    "mellea~=0.3",
+    "mellea>=0.3",
 ]
 
 [project.optional-dependencies]
@@ -81,7 +81,7 @@ allow-direct-references = true
 include = ["docling_agent"]
 
 [project.scripts]
-docling-agent = "docling_agent.cli:main"
+docling-agent = "docling_agent.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/docling-project/docling-agent"
