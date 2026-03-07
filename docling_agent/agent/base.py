@@ -25,6 +25,7 @@ class DoclingAgentType(Enum):
     DOCLING_DOCUMENT_EXTRACTOR = "extractor"
     DOCLING_DOCUMENT_ENRICHER = "enricher"
     DOCLING_DOCUMENT_RAG = "rag"
+    DOCLING_DOCUMENT_ORCHESTRATOR = "orchestrator"
 
     def __str__(self) -> str:
         """Return the string value of the enum."""
