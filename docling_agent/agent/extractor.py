@@ -150,4 +150,3 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         )
 
         return json.loads(answer.value)
-
