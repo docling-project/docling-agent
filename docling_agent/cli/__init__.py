@@ -6,6 +6,7 @@ from typing import Optional
 
 import typer
 
+from docling_agent.agent_models import configure_llm_logging
 from docling_agent.logging import logger
 from docling_agent.task_model import AgentTask, load_task
 
@@ -51,6 +52,11 @@ sources:
 #   reasoning: OPENAI_GPT_OSS_20B
 #   writing: OPENAI_GPT_OSS_20B
 #   backend: ollama  # ollama | lmstudio
+
+# Logging configuration -------------------------------------------------------
+# logging:
+#   level: INFO        # DEBUG | INFO | WARNING | ERROR
+#   log_llm_io: true   # log every LLM request and response at DEBUG level
 """
 
 
@@ -85,14 +91,16 @@ def main(
         typer.echo(f"Template written to {task}")
         raise typer.Exit()
 
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-
     if not task.exists():
         logger.error(f"Task file not found: {task}")
         raise typer.Exit(code=1)
 
     agent_task = load_task(task)
+
+    # Apply logging config from the task file (CLI --verbose overrides the level to DEBUG)
+    log_level = logging.DEBUG if verbose else getattr(logging, agent_task.logging.level, logging.INFO)
+    logger.setLevel(log_level)
+    configure_llm_logging(agent_task.logging.log_llm_io)
 
     # CLI overrides
     if model:

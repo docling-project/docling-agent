@@ -129,6 +129,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         iterations: list[RAGIteration] = []
 
         outline_text = self._build_outline(doc)
+        logger.debug(f"[RAG OUTLINE — {doc.name!r}]\n{outline_text}")
         valid_refs = self._extract_section_refs(doc)
 
         self._rprint(Rule(f"[bold cyan]RAG loop — {doc.name!r}[/bold cyan]"))
@@ -329,7 +330,11 @@ class DoclingRAGAgent(BaseDoclingAgent):
             strategy=RejectionSamplingStrategy(loop_budget=3),
         )
 
-        d = find_json_dicts(answer.value)[0]
+        dicts = find_json_dicts(answer.value)
+        d = dicts[0] if dicts else {}
+        if not isinstance(d.get("reason"), str) or d.get("section_ref") not in unvisited:
+            # Rejection sampling exhausted without a valid response; pick first unvisited
+            return SectionSelection(reason="fallback", section_ref=unvisited[0])
         return SectionSelection(reason=d["reason"], section_ref=d["section_ref"])
 
     # ------------------------------------------------------------------
