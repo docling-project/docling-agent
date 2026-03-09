@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirement import Requirement, simple_validate
+from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from pydantic import Field
 
@@ -31,7 +31,7 @@ from docling_agent.agent.base_functions import (
     serialize_table_to_html,
 )
 from docling_agent.agent_models import setup_local_session, view_linear_context
-from docling_agent.logging import logger  # type: ignore[import-untyped]
+from docling_agent.log import logger
 
 # Mapping from routing names and short names to method names
 _OP_ALIASES: dict[str, str] = {
