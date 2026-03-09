@@ -54,7 +54,8 @@ def has_json_dicts(text: str) -> bool:
     for i, json_content in enumerate(matches):
         try:
             calls.append(json.loads(json_content))
-        except:
+        except Exception as e:
+            logger.error("Failed to parse JSON call block: %s", e)
             return False
 
     return len(calls) > 0

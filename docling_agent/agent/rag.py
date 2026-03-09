@@ -103,7 +103,9 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
         if len(docs) > 1:
             self._rprint(
-                Rule(f"[bold cyan]Merging answers from {len(docs)} documents[/bold cyan]")
+                Rule(
+                    f"[bold cyan]Merging answers from {len(docs)} documents[/bold cyan]"
+                )
             )
 
         final_answer = self._merge_answers(query=task, answers=per_doc_answers)
@@ -145,11 +147,19 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
         # Fallback: no section headers → return full doc text
         if not valid_refs:
-            logger.warning("No section headers found; falling back to full document text.")
-            self._rprint(
-                Text("⚠ No section headers found — returning full document.", style="yellow")
+            logger.warning(
+                "No section headers found; falling back to full document text."
             )
-            from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
+            self._rprint(
+                Text(
+                    "⚠ No section headers found — returning full document.",
+                    style="yellow",
+                )
+            )
+            from docling_core.transforms.serializer.markdown import (
+                MarkdownDocSerializer,
+            )
+
             full_text = MarkdownDocSerializer(doc=doc).serialize().text
             return RAGResult(answer=full_text, iterations=[], converged=True)
 
@@ -157,10 +167,14 @@ class DoclingRAGAgent(BaseDoclingAgent):
             unvisited = valid_refs - visited
             if not unvisited:
                 logger.info("All sections visited; stopping early.")
-                self._rprint(Text("All sections visited — stopping early.", style="yellow"))
+                self._rprint(
+                    Text("All sections visited — stopping early.", style="yellow")
+                )
                 break
 
-            self._rprint(Rule(f"[bold]Iteration {i + 1} / {self.max_iterations}[/bold]"))
+            self._rprint(
+                Rule(f"[bold]Iteration {i + 1} / {self.max_iterations}[/bold]")
+            )
 
             selection = self._select_section(
                 m=m,
@@ -175,7 +189,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
                 Panel(
                     f"[bold]Selected:[/bold]  {selection.section_ref}\n"
                     f"[bold]Reason:[/bold]    {selection.reason}",
-                    title=f"[cyan]Section Selection[/cyan]",
+                    title="[cyan]Section Selection[/cyan]",
                     border_style="blue",
                 )
             )
@@ -200,7 +214,9 @@ class DoclingRAGAgent(BaseDoclingAgent):
             )
 
             status_color = "green" if attempt.can_answer else "yellow"
-            status_label = "✓ Can answer" if attempt.can_answer else "✗ Need more context"
+            status_label = (
+                "✓ Can answer" if attempt.can_answer else "✗ Need more context"
+            )
             self._rprint(
                 Panel(
                     f"[bold]Status:[/bold]   [{status_color}]{status_label}[/{status_color}]\n"
@@ -235,14 +251,22 @@ class DoclingRAGAgent(BaseDoclingAgent):
                     converged=True,
                 )
 
-        last = iterations[-1] if iterations else RAGIteration(
-            iteration=0, section_ref="", reason="", section_text_length=0,
-            can_answer=False, response="No content could be retrieved.",
+        last = (
+            iterations[-1]
+            if iterations
+            else RAGIteration(
+                iteration=0,
+                section_ref="",
+                reason="",
+                section_text_length=0,
+                can_answer=False,
+                response="No content could be retrieved.",
+            )
         )
         self._rprint(
             Panel(
                 last.response,
-                title=f"[bold yellow]Partial Answer (max iterations reached)[/bold yellow]",
+                title="[bold yellow]Partial Answer (max iterations reached)[/bold yellow]",
                 border_style="yellow",
             )
         )
@@ -332,7 +356,10 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
         dicts = find_json_dicts(answer.value)
         d = dicts[0] if dicts else {}
-        if not isinstance(d.get("reason"), str) or d.get("section_ref") not in unvisited:
+        if (
+            not isinstance(d.get("reason"), str)
+            or d.get("section_ref") not in unvisited
+        ):
             # Rejection sampling exhausted without a valid response; pick first unvisited
             return SectionSelection(reason="fallback", section_ref=unvisited[0])
         return SectionSelection(reason=d["reason"], section_ref=d["section_ref"])
@@ -361,9 +388,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
         return subtree
 
-    def _collect_flat_section_text(
-        self, doc: DoclingDocument, section_ref: str
-    ) -> str:
+    def _collect_flat_section_text(self, doc: DoclingDocument, section_ref: str) -> str:
         """Scan iterate_items for the section and collect siblings until next section."""
         texts: list[str] = []
         in_section = False
@@ -378,7 +403,10 @@ class DoclingRAGAgent(BaseDoclingAgent):
                 continue
 
             if in_section:
-                if isinstance(item, (TitleItem, SectionHeaderItem)) and depth <= section_level:
+                if (
+                    isinstance(item, (TitleItem, SectionHeaderItem))
+                    and depth <= section_level
+                ):
                     break
                 if hasattr(item, "text") and item.text:
                     texts.append(item.text)
@@ -443,9 +471,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
                 "Synthesize the provided partial answers into a single coherent response."
             ),
         )
-        formatted = "\n\n".join(
-            f"[Source {i + 1}]\n{a}" for i, a in enumerate(answers)
-        )
+        formatted = "\n\n".join(f"[Source {i + 1}]\n{a}" for i, a in enumerate(answers))
         answer = m.instruct(
             f"Query: {query}\n\nPartial answers:\n{formatted}\n\nSynthesize a final answer.",
             strategy=RejectionSamplingStrategy(loop_budget=3),

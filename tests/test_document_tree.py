@@ -1,6 +1,5 @@
 """Unit tests for make_flat_document and make_hierarchical_document."""
 
-import pytest
 from docling_core.types.doc.document import (
     BaseMeta,
     DocItemLabel,
@@ -9,11 +8,8 @@ from docling_core.types.doc.document import (
     PictureItem,
     SectionHeaderItem,
     SummaryMetaField,
-    TableCell,
     TableData,
     TableItem,
-    TextItem,
-    TitleItem,
 )
 
 from docling_agent.agent.base_functions import (
@@ -21,7 +17,6 @@ from docling_agent.agent.base_functions import (
     make_flat_document,
     make_hierarchical_document,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,7 +90,9 @@ class TestMakeFlatDocument:
 
         flat = make_flat_document(doc)
 
-        items = {ref.resolve(flat).text: ref.resolve(flat) for ref in flat.body.children}
+        items = {
+            ref.resolve(flat).text: ref.resolve(flat) for ref in flat.body.children
+        }
         assert isinstance(items["Top"], SectionHeaderItem)
         assert items["Top"].level == 1
         assert isinstance(items["Sub"], SectionHeaderItem)
@@ -341,7 +338,9 @@ class TestRoundTrip:
         doc.add_list_item(text="Step B", parent=lg)
 
         table = doc.add_table(data=TableData(num_rows=1, num_cols=1), parent=s3)
-        cap = doc.add_text(label=DocItemLabel.CAPTION, text="Table caption", parent=table)
+        cap = doc.add_text(
+            label=DocItemLabel.CAPTION, text="Table caption", parent=table
+        )
         table.captions.append(cap.get_ref())
 
         return doc
@@ -349,13 +348,17 @@ class TestRoundTrip:
     def test_flat_then_hier_preserves_text_order(self):
         doc = self._build_complex_doc()
         original_texts = all_texts_in_order(doc)
-        recovered_texts = all_texts_in_order(make_hierarchical_document(make_flat_document(doc)))
+        recovered_texts = all_texts_in_order(
+            make_hierarchical_document(make_flat_document(doc))
+        )
         assert recovered_texts == original_texts
 
     def test_hier_then_flat_preserves_text_order(self):
         doc = self._build_complex_doc()
         original_texts = all_texts_in_order(doc)
-        recovered_texts = all_texts_in_order(make_flat_document(make_hierarchical_document(doc)))
+        recovered_texts = all_texts_in_order(
+            make_flat_document(make_hierarchical_document(doc))
+        )
         assert recovered_texts == original_texts
 
     def test_flat_is_idempotent(self):
@@ -393,7 +396,9 @@ class TestRoundTrip:
 class TestCollectSubtreeText:
     def test_leaf_text_item(self):
         doc = DoclingDocument(name="test")
-        item = doc.add_text(label=DocItemLabel.TEXT, text="Hello world", parent=doc.body)
+        item = doc.add_text(
+            label=DocItemLabel.TEXT, text="Hello world", parent=doc.body
+        )
         assert collect_subtree_text(item, doc) == "Hello world"
 
     def test_section_with_children(self):

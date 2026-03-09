@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -28,9 +27,9 @@ class DocLibraryEntry(BaseModel):
 
     doc_id: str
     name: str
-    source_path: str          # canonical string path of the original file (or "in-memory")
-    created_at: str           # ISO-8601 UTC
-    updated_at: str           # ISO-8601 UTC
+    source_path: str  # canonical string path of the original file (or "in-memory")
+    created_at: str  # ISO-8601 UTC
+    updated_at: str  # ISO-8601 UTC
     status: DocStatus = Field(default_factory=DocStatus)
     summary: Optional[str] = None
     keywords: list[str] = Field(default_factory=list)
@@ -40,8 +39,8 @@ class DocLibraryEntry(BaseModel):
 class DocLibraryIndex(BaseModel):
     """Top-level index persisted to ``index.json``."""
 
-    entries: dict[str, DocLibraryEntry] = Field(default_factory=dict)   # doc_id → entry
-    source_to_id: dict[str, str] = Field(default_factory=dict)          # source_path → doc_id
+    entries: dict[str, DocLibraryEntry] = Field(default_factory=dict)  # doc_id → entry
+    source_to_id: dict[str, str] = Field(default_factory=dict)  # source_path → doc_id
 
 
 def _now_iso() -> str:
@@ -118,6 +117,7 @@ class DoclingLibrary:
             src = Path(source_path)
             if src.is_file():
                 import shutil
+
                 dest = doc_dir / src.name
                 if not dest.exists():
                     shutil.copy2(src, dest)
@@ -139,7 +139,9 @@ class DoclingLibrary:
         self._index.source_to_id[source_path] = doc_id
         self._save_index()
 
-        logger.debug(f"Library: stored {doc.name!r} → {doc_id} (source={source_path!r})")
+        logger.debug(
+            f"Library: stored {doc.name!r} → {doc_id} (source={source_path!r})"
+        )
         return entry
 
     def store_in_memory(self, doc: DoclingDocument) -> DocLibraryEntry:
@@ -147,7 +149,9 @@ class DoclingLibrary:
         doc_id = _doc_id_for_name(doc.name)
         doc_dir = self.path / doc_id
         doc_dir.mkdir(exist_ok=True)
-        (doc_dir / self.DOC_FILE).write_text(doc.model_dump_json(indent=2), encoding="utf-8")
+        (doc_dir / self.DOC_FILE).write_text(
+            doc.model_dump_json(indent=2), encoding="utf-8"
+        )
 
         entry = DocLibraryEntry(
             doc_id=doc_id,
@@ -167,7 +171,9 @@ class DoclingLibrary:
             logger.warning(f"Library: document file missing for {doc_id}")
             return None
         try:
-            return DoclingDocument.model_validate_json(doc_path.read_text(encoding="utf-8"))
+            return DoclingDocument.model_validate_json(
+                doc_path.read_text(encoding="utf-8")
+            )
         except Exception as exc:
             logger.error(f"Library: failed to load {doc_path}: {exc}")
             return None
@@ -176,7 +182,9 @@ class DoclingLibrary:
         """Set status flags on the entry (e.g. ``has_summaries=True``)."""
         entry = self._index.entries.get(doc_id)
         if entry is None:
-            logger.warning(f"Library: update_status called for unknown doc_id={doc_id!r}")
+            logger.warning(
+                f"Library: update_status called for unknown doc_id={doc_id!r}"
+            )
             return
         for field, value in flags.items():
             if hasattr(entry.status, field):
