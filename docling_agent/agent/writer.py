@@ -38,7 +38,7 @@ from docling_agent.agent.base_functions import (
     validate_markdown_to_docling_document,
 )
 from docling_agent.agent_models import setup_local_session
-from docling_agent.log import logger
+from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (

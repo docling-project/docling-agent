@@ -10,7 +10,7 @@ from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from tabulate import tabulate  # type: ignore[import-untyped]
 
-from docling_agent.log import logger
+from docling_agent.logging import logger
 
 # Use shared logger from docling_agent.agents
 

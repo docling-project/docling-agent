@@ -29,7 +29,7 @@ from docling_agent.agent.base_functions import (
     validate_html_to_docling_table,
 )
 from docling_agent.agent_models import setup_local_session, view_linear_context
-from docling_agent.log import logger
+from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (

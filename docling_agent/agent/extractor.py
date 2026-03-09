@@ -19,7 +19,7 @@ from docling_core.types.doc import (
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent_models import setup_local_session
-from docling_agent.log import logger
+from docling_agent.logging import logger
 
 
 class DoclingExtractingAgent(BaseDoclingAgent):
