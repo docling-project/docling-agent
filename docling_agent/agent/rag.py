@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirement import Requirement, simple_validate
+from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from rich.console import Console
 from rich.panel import Panel
