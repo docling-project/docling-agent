@@ -15,11 +15,17 @@ from docling_core.types.doc.document import (
 )
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
-from docling_agent.agent.library import DoclingLibrary, DocStatus
+from docling_agent.agent.library import DoclingLibrary
 from docling_agent.logging import logger
 
 if TYPE_CHECKING:
-    from docling_agent.task_model import AgentTask, EnrichTask, ExtractTask, RAGTask, WriteTask
+    from docling_agent.task_model import (
+        AgentTask,
+        EnrichTask,
+        ExtractTask,
+        RAGTask,
+        WriteTask,
+    )
 
 
 # Internal type alias: a resolved document paired with its library id.
@@ -83,7 +89,9 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         elif mode == "write":
             return self._run_write(task=task, source_pairs=source_pairs)
         elif mode == "enrich":
-            return self._run_enrich(task=task, source_pairs=source_pairs, library=library)
+            return self._run_enrich(
+                task=task, source_pairs=source_pairs, library=library
+            )
         else:
             raise ValueError(f"Unknown task mode: {mode!r}")
 
@@ -134,7 +142,9 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     logger.info(f"Library cache hit: {p.name} → {entry.doc_id}")
                     results.append((doc, entry.doc_id))
                     continue
-                logger.warning(f"Library entry exists but document missing; reconverting {p.name}")
+                logger.warning(
+                    f"Library entry exists but document missing; reconverting {p.name}"
+                )
 
             raw_to_convert.append(p)
 
@@ -337,6 +347,8 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         name = task.models.reasoning if role == "reasoning" else task.models.writing
         resolved = getattr(model_ids, name, None)
         if resolved is None:
-            logger.warning(f"Unknown model id {name!r}; falling back to OPENAI_GPT_OSS_20B")
+            logger.warning(
+                f"Unknown model id {name!r}; falling back to OPENAI_GPT_OSS_20B"
+            )
             return model_ids.OPENAI_GPT_OSS_20B
         return resolved

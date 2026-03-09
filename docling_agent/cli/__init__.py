@@ -64,7 +64,9 @@ sources:
 def main(
     task: Path = typer.Option(..., "--task", "-t", help="Path to task YAML file."),
     create_task: bool = typer.Option(
-        False, "--create-task", help="Write a template task YAML to --task path and exit."
+        False,
+        "--create-task",
+        help="Write a template task YAML to --task path and exit.",
     ),
     model: Optional[str] = typer.Option(
         None, "--model", "-m", help="Override both reasoning and writing model id."
@@ -72,7 +74,9 @@ def main(
     output: Optional[Path] = typer.Option(
         None, "--output", "-o", help="Override output path from the task file."
     ),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable debug logging."
+    ),
 ) -> None:
     """Run a docling-agent task defined in a YAML file.
 
@@ -84,7 +88,9 @@ def main(
     """
     if create_task:
         if task.exists():
-            typer.echo(f"File already exists: {task}. Aborting to avoid overwrite.", err=True)
+            typer.echo(
+                f"File already exists: {task}. Aborting to avoid overwrite.", err=True
+            )
             raise typer.Exit(code=1)
         task.parent.mkdir(parents=True, exist_ok=True)
         task.write_text(_TASK_TEMPLATE, encoding="utf-8")
@@ -98,7 +104,11 @@ def main(
     agent_task = load_task(task)
 
     # Apply logging config from the task file (CLI --verbose overrides the level to DEBUG)
-    log_level = logging.DEBUG if verbose else getattr(logging, agent_task.logging.level, logging.INFO)
+    log_level = (
+        logging.DEBUG
+        if verbose
+        else getattr(logging, agent_task.logging.level, logging.INFO)
+    )
     logger.setLevel(log_level)
     configure_llm_logging(agent_task.logging.log_llm_io)
 
@@ -112,13 +122,16 @@ def main(
     logger.info(f"Task loaded: mode={agent_task.mode}, query={agent_task.query!r}")
 
     # Deferred import: orchestrator is implemented in Feature 04.
-    from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
     from mellea.backends import model_ids
+
+    from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 
     def _resolve_model_id(name: str):
         resolved = getattr(model_ids, name, None)
         if resolved is None:
-            logger.warning(f"Unknown model id '{name}', falling back to OPENAI_GPT_OSS_20B")
+            logger.warning(
+                f"Unknown model id '{name}', falling back to OPENAI_GPT_OSS_20B"
+            )
             return model_ids.OPENAI_GPT_OSS_20B
         return resolved
 

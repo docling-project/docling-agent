@@ -18,20 +18,19 @@ from docling_agent.task_model import (
 )
 
 __all__ = [
+    "AgentTask",
     "DoclingEditingAgent",
     "DoclingEnrichingAgent",
     "DoclingExtractingAgent",
     "DoclingOrchestratorAgent",
     "DoclingRAGAgent",
     "DoclingWritingAgent",
-    "logger",
-    # task model
-    "AgentTask",
-    "RAGTask",
-    "ExtractTask",
-    "WriteTask",
     "EnrichTask",
-    "OutputConfig",
+    "ExtractTask",
     "ModelConfig",
+    "OutputConfig",
+    "RAGTask",
+    "WriteTask",
     "load_task",
+    "logger",
 ]

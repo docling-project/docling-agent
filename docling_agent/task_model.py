@@ -66,7 +66,9 @@ class RAGTask(AgentTask):
     """Query one or more documents using the chunkless RAG loop."""
 
     mode: Literal["rag"] = "rag"
-    max_iterations: int = Field(5, ge=1, description="Maximum section-selection iterations.")
+    max_iterations: int = Field(
+        5, ge=1, description="Maximum section-selection iterations."
+    )
     enrich_before_rag: bool = Field(
         True, description="Run summarization enrichment before the RAG loop."
     )
@@ -83,7 +85,8 @@ class ExtractTask(AgentTask):
 
     mode: Literal["extract"] = "extract"
     schema_path: Path | None = Field(
-        None, description="Optional path to a JSON schema file. If omitted the schema is inferred from the query."
+        None,
+        description="Optional path to a JSON schema file. If omitted the schema is inferred from the query.",
     )
     glob: str | None = Field(
         None, description="Glob pattern applied when sources contain directories."
