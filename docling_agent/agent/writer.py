@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import ClassVar, Pattern
 
 from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirement import Requirement, simple_validate
+from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling.datamodel.base_models import InputFormat
@@ -38,7 +38,7 @@ from docling_agent.agent.base_functions import (
     validate_markdown_to_docling_document,
 )
 from docling_agent.agent_models import setup_local_session
-from docling_agent.logging import logger
+from docling_agent.log import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
@@ -135,7 +135,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
 
-        outline = self._find_outline(text=answer.value, task=task)
+        outline = self._find_outline(text=answer.value, task=task)  # type: ignore[arg-type]
 
         if outline is None:
             raise ValueError("Failed to generate a valid outline document.")
@@ -526,7 +526,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
             )
 
-            caption = answer.value.strip()
+            caption = answer.value.strip()  # type: ignore[union-attr]
             # Strip accidental code fences/backticks and condense whitespace
             caption = re.sub(
                 r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL
@@ -572,7 +572,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
 
-        result = convert_markdown_to_docling_document(text=answer.value)
+        result = convert_markdown_to_docling_document(text=answer.value)  # type: ignore[arg-type]
         return result if result is not None else DoclingDocument(name="content")
 
     def _write_table(
@@ -611,7 +611,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
 
-        result = convert_html_to_docling_document(text=answer.value)
+        result = convert_html_to_docling_document(text=answer.value)  # type: ignore[arg-type]
 
         return result if result is not None else DoclingDocument(name="content")
 
@@ -649,6 +649,6 @@ class DoclingWritingAgent(BaseDoclingAgent):
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
 
-        result = convert_markdown_to_docling_document(text=answer.value)
+        result = convert_markdown_to_docling_document(text=answer.value)  # type: ignore[arg-type]
 
         return result if result is not None else DoclingDocument(name="content")

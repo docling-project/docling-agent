@@ -5,7 +5,7 @@ from typing import Any, ClassVar
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
 from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirement import Requirement, simple_validate
+from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from pydantic import Field
 
@@ -19,7 +19,7 @@ from docling_core.types.doc import (
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent_models import setup_local_session
-from docling_agent.logging import logger
+from docling_agent.log import logger
 
 
 class DoclingExtractingAgent(BaseDoclingAgent):
@@ -149,4 +149,4 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
 
-        return json.loads(answer.value)
+        return json.loads(answer.value)  # type: ignore[arg-type]

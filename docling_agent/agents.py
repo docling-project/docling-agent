@@ -5,7 +5,7 @@ from docling_agent.agent.extractor import DoclingExtractingAgent
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
-from docling_agent.logging import logger
+from docling_agent.log import logger
 from docling_agent.task_model import (
     AgentTask,
     EnrichTask,
