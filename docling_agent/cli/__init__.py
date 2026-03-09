@@ -7,7 +7,7 @@ from typing import Optional
 import typer
 
 from docling_agent.agent_models import configure_llm_logging
-from docling_agent.logging import logger
+from docling_agent.logging import logger  # type: ignore[import-untyped]
 from docling_agent.task_model import AgentTask, load_task
 
 app = typer.Typer(name="docling-agent", add_completion=False)
@@ -152,6 +152,8 @@ def main(
 
 def _write_output(doc, task: AgentTask) -> None:
     path = task.output.path
+    if path is None:
+        return
     fmt = task.output.format
     path.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "html":
