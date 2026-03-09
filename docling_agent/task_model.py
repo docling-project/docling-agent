@@ -111,7 +111,7 @@ class EnrichTask(AgentTask):
 
     mode: Literal["enrich"] = "enrich"
     operations: list[Literal["summarize", "keywords", "entities"]] = Field(
-        default_factory=lambda: ["summarize"],
+        default_factory=lambda: ["summarize"],  # type: ignore[arg-type]
         description="Enrichment operations to apply.",
     )
 

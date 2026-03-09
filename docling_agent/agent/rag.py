@@ -31,7 +31,7 @@ from docling_agent.agent.rag_models import (
     SectionSelection,
 )
 from docling_agent.agent_models import setup_local_session
-from docling_agent.logging import logger
+from docling_agent.logging import logger  # type: ignore[import-untyped]
 
 
 class DoclingRAGAgent(BaseDoclingAgent):
@@ -405,6 +405,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
             if in_section:
                 if (
                     isinstance(item, (TitleItem, SectionHeaderItem))
+                    and section_level is not None
                     and depth <= section_level
                 ):
                     break

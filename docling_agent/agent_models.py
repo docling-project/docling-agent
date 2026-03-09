@@ -59,7 +59,7 @@ def setup_local_session(
     return _LoggingSession(m)
 
 
-def view_linear_context(m: MelleaSession):
+def view_linear_context(m: "MelleaSession | _LoggingSession"):
     rows = []
     for i, _ in enumerate(m.ctx.view_for_generation()):  # type: ignore[arg-type]
         if isinstance(_, Message):

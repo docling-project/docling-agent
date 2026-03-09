@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from docling_core.types.doc.document import DoclingDocument
 
-from docling_agent.logging import logger
+from docling_agent.logging import logger  # type: ignore[import-untyped]
 
 
 class DocStatus(BaseModel):

@@ -16,11 +16,12 @@ from docling_core.types.doc.document import (
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.library import DoclingLibrary
-from docling_agent.logging import logger
+from docling_agent.logging import logger  # type: ignore[import-untyped]
 
 if TYPE_CHECKING:
     from docling_agent.task_model import (
         AgentTask,
+        AnyTask,
         EnrichTask,
         ExtractTask,
         RAGTask,
@@ -74,26 +75,27 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     # Main entry point
     # ------------------------------------------------------------------
 
-    def run_task(self, task: "AgentTask") -> DoclingDocument:
+    def run_task(self, task: "AnyTask") -> DoclingDocument:
         """Convert sources, enrich lazily, and dispatch to the right sub-agent."""
+        from docling_agent.task_model import EnrichTask, ExtractTask, RAGTask, WriteTask
+
         library = DoclingLibrary(path=self.library_path)
         source_pairs = self._resolve_sources(task, library)
 
-        mode = task.mode
-        logger.info(f"Orchestrator: mode={mode}, sources={len(source_pairs)}")
+        logger.info(f"Orchestrator: mode={task.mode}, sources={len(source_pairs)}")
 
-        if mode == "rag":
+        if isinstance(task, RAGTask):
             return self._run_rag(task=task, source_pairs=source_pairs, library=library)
-        elif mode == "extract":
+        elif isinstance(task, ExtractTask):
             return self._run_extract(task=task, source_pairs=source_pairs)
-        elif mode == "write":
+        elif isinstance(task, WriteTask):
             return self._run_write(task=task, source_pairs=source_pairs)
-        elif mode == "enrich":
+        elif isinstance(task, EnrichTask):
             return self._run_enrich(
                 task=task, source_pairs=source_pairs, library=library
             )
         else:
-            raise ValueError(f"Unknown task mode: {mode!r}")
+            raise ValueError(f"Unknown task mode: {task.mode!r}")
 
     # ------------------------------------------------------------------
     # Step 1: Source resolution
@@ -137,10 +139,10 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             # Check library cache for already-converted files
             entry = library.lookup_by_source(source_key)
             if entry is not None:
-                doc = library.load_doc(entry.doc_id)
-                if doc is not None:
+                cached_doc: DoclingDocument | None = library.load_doc(entry.doc_id)
+                if cached_doc is not None:
                     logger.info(f"Library cache hit: {p.name} → {entry.doc_id}")
-                    results.append((doc, entry.doc_id))
+                    results.append((cached_doc, entry.doc_id))
                     continue
                 logger.warning(
                     f"Library entry exists but document missing; reconverting {p.name}"
@@ -271,7 +273,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 source_pairs, library, operations=["summarize"]
             )
 
-        docs = [doc for doc, _ in source_pairs]
+        docs: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
         rag_agent = DoclingRAGAgent(
             model_id=self._model_id_for("reasoning", task),
             tools=[],
@@ -304,7 +306,6 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
         writer = DoclingWritingAgent(
             model_id=self._model_id_for("reasoning", task),
-            writing_model_id=self._model_id_for("writing", task),
             tools=[],
         )
         sources: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]

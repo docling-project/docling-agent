@@ -11,8 +11,10 @@ from pydantic import Field
 from docling_core.types.doc.document import (
     BaseMeta,
     DoclingDocument,
+    FloatingMeta,
     NodeItem,
     PictureItem,
+    PictureMeta,
     SectionHeaderItem,
     SummaryMetaField,
     TableItem,
@@ -29,7 +31,7 @@ from docling_agent.agent.base_functions import (
     serialize_table_to_html,
 )
 from docling_agent.agent_models import setup_local_session, view_linear_context
-from docling_agent.logging import logger
+from docling_agent.logging import logger  # type: ignore[import-untyped]
 
 # Mapping from routing names and short names to method names
 _OP_ALIASES: dict[str, str] = {
@@ -251,6 +253,10 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                     text=f"HTML table:\n{html}",
                     loop_budget=loop_budget,
                 )
+                if summary:
+                    if item.meta is None:
+                        item.meta = FloatingMeta()
+                    item.meta.summary = SummaryMetaField(text=summary)
             elif isinstance(item, PictureItem):
                 captions = [
                     c.resolve(document).text
@@ -263,12 +269,10 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                     if text
                     else None
                 )
-            else:
-                continue
-            if summary:
-                if item.meta is None:
-                    item.meta = BaseMeta()
-                item.meta.summary = SummaryMetaField(text=summary)
+                if summary:
+                    if item.meta is None:
+                        item.meta = PictureMeta()
+                    item.meta.summary = SummaryMetaField(text=summary)
 
     def _generate_summary(
         self,
