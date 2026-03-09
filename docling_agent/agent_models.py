@@ -14,12 +14,40 @@ from docling_agent.log import logger
 
 # Use shared logger from docling_agent.agents
 
+# Whether to log LLM requests/responses — toggled by the orchestrator via configure_llm_logging().
+_log_llm_io: bool = False
+
+
+def configure_llm_logging(enabled: bool) -> None:
+    """Enable or disable per-call LLM request/response logging."""
+    global _log_llm_io
+    _log_llm_io = enabled
+
+
+class _LoggingSession:
+    """Thin wrapper around MelleaSession that logs every instruct call."""
+
+    def __init__(self, session: MelleaSession) -> None:
+        self._s = session
+
+    # Forward attribute access to the wrapped session
+    def __getattr__(self, name: str):
+        return getattr(self._s, name)
+
+    def instruct(self, prompt: str, **kwargs):
+        if _log_llm_io:
+            logger.debug(f"[LLM REQUEST]\n{prompt}")
+        result = self._s.instruct(prompt, **kwargs)
+        if _log_llm_io:
+            logger.debug(f"[LLM RESPONSE]\n{result.value}")
+        return result
+
 
 def setup_local_session(
     *,
     model_id: ModelIdentifier = model_ids.OPENAI_GPT_OSS_20B,
     system_prompt: str = "You are a helpful assistant.",
-) -> MelleaSession:
+) -> _LoggingSession:
     ctx = ChatContext()
     ctx = ctx.add(Message(role="system", content=system_prompt))
 
@@ -28,7 +56,7 @@ def setup_local_session(
         backend=OllamaModelBackend(model_id=model_id),
     )
 
-    return m
+    return _LoggingSession(m)
 
 
 def view_linear_context(m: MelleaSession):

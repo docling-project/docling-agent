@@ -22,6 +22,16 @@ class ModelConfig(BaseModel):
     backend: Literal["ollama", "lmstudio"] = "ollama"
 
 
+class LoggingConfig(BaseModel):
+    """Logging configuration."""
+
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_llm_io: bool = Field(
+        True,
+        description="Log every LLM request and response at DEBUG level.",
+    )
+
+
 class AgentTask(BaseModel):
     """Base task: a query and a list of source documents or directories.
 
@@ -37,6 +47,7 @@ class AgentTask(BaseModel):
     )
     output: OutputConfig = Field(default_factory=OutputConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     extra: dict[str, Any] = Field(
         default_factory=dict,
         description="Pass-through extra args forwarded to specific agents.",
