@@ -4,12 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mellea.backends import model_ids
-from mellea.backends.model_ids import ModelIdentifier
-from mellea.core.base import ModelOutputThunk
-from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
-
 from docling.datamodel.base_models import ConversionStatus
 from docling.document_converter import DocumentConverter
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
@@ -19,6 +13,11 @@ from docling_core.types.doc.document import (
     SectionHeaderItem,
     TitleItem,
 )
+from mellea.backends import model_ids
+from mellea.backends.model_ids import ModelIdentifier
+from mellea.core.base import ModelOutputThunk
+from mellea.stdlib.requirements import Requirement, simple_validate
+from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import find_json_dicts
@@ -49,8 +48,7 @@ class _SourcePairs(list):
     def __repr__(self) -> str:
         logger.info("_SourcePairs.__repr__")
         entries = ", ".join(
-            f"(DoclingDocument(name={doc.name!r}, version={doc.version!r}, body=[]), {did!r})"
-            for doc, did in self
+            f"(DoclingDocument(name={doc.name!r}, version={doc.version!r}, body=[]), {did!r})" for doc, did in self
         )
         return f"[{entries}]"
 
@@ -121,9 +119,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         elif isinstance(task, EditingTask):
             return self._run_edit(task=task, source_pairs=source_pairs)
         elif isinstance(task, EnrichTask):
-            return self._run_enrich(
-                task=task, source_pairs=source_pairs, library=library
-            )
+            return self._run_enrich(task=task, source_pairs=source_pairs, library=library)
         else:
             raise ValueError(f"Unknown task mode: {task.mode!r}")
 
@@ -131,9 +127,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     # Step 1: Source resolution
     # ------------------------------------------------------------------
 
-    def _resolve_sources(
-        self, task: AgentTask, library: DoclingLibrary
-    ) -> list[_SourcePair]:
+    def _resolve_sources(self, task: AgentTask, library: DoclingLibrary) -> list[_SourcePair]:
         """Expand paths/globs, load from library cache or convert, return (doc, doc_id) pairs."""
         logger.info(f"_resolve_sources: sources={task.sources}")
         raw_paths = self._expand_paths(task)
@@ -149,9 +143,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             if p.suffix.lower() == ".json":
                 # Try loading as a pre-serialised DoclingDocument
                 try:
-                    doc = DoclingDocument.model_validate_json(
-                        p.read_text(encoding="utf-8")
-                    )
+                    doc = DoclingDocument.model_validate_json(p.read_text(encoding="utf-8"))
                     entry = library.lookup_by_source(source_key)
                     if entry is None:
                         entry = library.store(doc, source_key)
@@ -172,9 +164,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     logger.info(f"Library cache hit: {p.name} → {entry.doc_id}")
                     results.append((cached_doc, entry.doc_id))
                     continue
-                logger.warning(
-                    f"Library entry exists but document missing; reconverting {p.name}"
-                )
+                logger.warning(f"Library entry exists but document missing; reconverting {p.name}")
 
             raw_to_convert.append(p)
 
@@ -228,9 +218,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         Returns updated (doc, doc_id) pairs where each doc is the enriched
         version (``_summarize_items`` returns a hierarchical document).
         """
-        logger.info(
-            f"_ensure_enriched: operations={operations}, docs={len(source_pairs)}"
-        )
+        logger.info(f"_ensure_enriched: operations={operations}, docs={len(source_pairs)}")
         enricher = DoclingEnrichingAgent(
             model_id=self.get_writing_model_id(),
             tools=[],
@@ -268,9 +256,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
         return updated
 
-    def _update_library_meta(
-        self, doc_id: str, doc: DoclingDocument, library: DoclingLibrary
-    ) -> None:
+    def _update_library_meta(self, doc_id: str, doc: DoclingDocument, library: DoclingLibrary) -> None:
         """Extract document-level summary and keywords from enriched doc and persist."""
         logger.info(f"_update_library_meta: doc_id={doc_id!r}")
         summary: str | None = None
@@ -299,9 +285,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     ) -> DoclingDocument:
         logger.info(f"_run_rag: query={task.query!r}, docs={len(source_pairs)}")
         if task.enrich_before_rag:
-            source_pairs = self._ensure_enriched(
-                source_pairs, library, operations=["summarize"]
-            )
+            source_pairs = self._ensure_enriched(source_pairs, library, operations=["summarize"])
 
         docs: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
         rag_agent = DoclingRAGAgent(
@@ -407,9 +391,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         """Use an LLM to decide which mode(s) best serve the query, then execute them."""
         logger.info(f"_run_plan: query={task.query!r}, docs={len(source_pairs)}")
         source_names = [doc.name for doc, _ in source_pairs]
-        sources_text = (
-            "\n".join(f"  - {n}" for n in source_names) if source_names else "  (none)"
-        )
+        sources_text = "\n".join(f"  - {n}" for n in source_names) if source_names else "  (none)"
 
         prompt = (
             f"Query: {task.query}\n\n"
@@ -430,8 +412,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 Requirement(
                     description="Output must contain a JSON object with a 'tasks' list",
                     validation_fn=simple_validate(
-                        lambda r: bool(find_json_dicts(r))
-                        and "tasks" in (find_json_dicts(r) or [{}])[0]
+                        lambda r: bool(find_json_dicts(r)) and "tasks" in (find_json_dicts(r) or [{}])[0]
                     ),
                 )
             ],
@@ -444,18 +425,14 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         planned_tasks = dicts[0]["tasks"]
         logger.info(f"Planner produced {len(planned_tasks)} sub-task(s)")
 
-        name_to_pair: dict[str, _SourcePair] = {
-            doc.name: (doc, did) for doc, did in source_pairs
-        }
+        name_to_pair: dict[str, _SourcePair] = {doc.name: (doc, did) for doc, did in source_pairs}
         results: list[DoclingDocument] = []
 
         for plan in planned_tasks:
             mode = plan.get("mode")
             query = plan.get("query", task.query)
             planned_sources: list[str] = plan.get("sources", source_names)
-            resolved = [
-                name_to_pair[n] for n in planned_sources if n in name_to_pair
-            ] or source_pairs
+            resolved = [name_to_pair[n] for n in planned_sources if n in name_to_pair] or source_pairs
 
             logger.info(f"  sub-task: mode={mode!r}, query={query!r}")
 
@@ -545,8 +522,6 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         name = task.models.reasoning if role == "reasoning" else task.models.writing
         resolved = getattr(model_ids, name, None)
         if resolved is None:
-            logger.warning(
-                f"Unknown model id {name!r}; falling back to OPENAI_GPT_OSS_20B"
-            )
+            logger.warning(f"Unknown model id {name!r}; falling back to OPENAI_GPT_OSS_20B")
             return model_ids.OPENAI_GPT_OSS_20B
         return resolved

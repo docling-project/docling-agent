@@ -70,9 +70,7 @@ def view_linear_context(m: "MelleaSession | _LoggingSession"):
         else:
             rows.append([i, "<unknown>", str(_)[0:64]])
 
-    logger.info(
-        f"linearized chat:\n\n {tabulate(rows, headers=['turn', 'role', 'message'])}"
-    )
+    logger.info(f"linearized chat:\n\n {tabulate(rows, headers=['turn', 'role', 'message'])}")
 
 
 def matches_html_code_block(text: str) -> bool:

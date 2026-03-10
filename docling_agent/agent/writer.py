@@ -1,10 +1,7 @@
 import re
 from pathlib import Path
-from typing import ClassVar, Pattern
-
-from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
+from re import Pattern
+from typing import ClassVar
 
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import ConversionResult
@@ -25,6 +22,9 @@ from docling_core.types.doc.document import (
     TextItem,
     TitleItem,
 )
+from mellea.backends.model_ids import ModelIdentifier
+from mellea.stdlib.requirements import Requirement, simple_validate
+from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -68,9 +68,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         "figure",
         "picture",
     )
-    _OUTLINE_LINE_PATTERN: ClassVar[Pattern[str]] = re.compile(
-        rf"^({'|'.join(_OUTLINE_KINDS)}):\s(.*)\.$"
-    )
+    _OUTLINE_LINE_PATTERN: ClassVar[Pattern[str]] = re.compile(rf"^({'|'.join(_OUTLINE_KINDS)}):\s(.*)\.$")
     _outline_descriptions: ClassVar[list[str]] = [f"{k}:" for k in _OUTLINE_KINDS]
 
     def __init__(self, *, model_id: ModelIdentifier, tools: list):
@@ -99,18 +97,14 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         # Write the actual document item by item
         logger.info(" === Write the content of the document!")
-        result_document: DoclingDocument = self._populate_document_with_content(
-            task=task, outline=outline
-        )
+        result_document: DoclingDocument = self._populate_document_with_content(task=task, outline=outline)
 
         return result_document
 
     def _analyse_task_for_final_destination(self, *, task: str):
         return
 
-    def _make_outline_for_writing(
-        self, *, task: str, loop_budget: int = 5
-    ) -> DoclingDocument:
+    def _make_outline_for_writing(self, *, task: str, loop_budget: int = 5) -> DoclingDocument:
         m = setup_local_session(
             model_id=self.get_reasoning_model_id(),
             system_prompt=self.system_prompt_for_outline,
@@ -126,9 +120,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 Requirement(
                     description="The resulting outline should be in markdown format. If not a title or subheading, start each line with `paragraph: `, `table: `, `picture: ` or `list: ` followed by a single sentence summary.",
                     # validation_fn=simple_validate(validate_outline_format),
-                    validation_fn=simple_validate(
-                        DoclingWritingAgent._validate_outline_format
-                    ),
+                    validation_fn=simple_validate(DoclingWritingAgent._validate_outline_format),
                 ),
             ],
             # user_variables={"name": name, "notes": notes},
@@ -161,9 +153,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         # Parse markdown to DoclingDocument
         try:
             converter = DocumentConverter(allowed_formats=[InputFormat.MD])
-            conv: ConversionResult = converter.convert_string(
-                content=md, format=InputFormat.MD, name="outline.md"
-            )
+            conv: ConversionResult = converter.convert_string(content=md, format=InputFormat.MD, name="outline.md")
         except Exception:
             logger.error(f"could not convert markdown:\n\n{md}")
             return False
@@ -193,9 +183,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         converter = DocumentConverter(allowed_formats=[InputFormat.MD])
 
-        conv: ConversionResult = converter.convert_string(
-            content=md, format=InputFormat.MD, name=f"outline for {task}"
-        )
+        conv: ConversionResult = converter.convert_string(content=md, format=InputFormat.MD, name=f"outline for {task}")
 
         # Build a fresh outline document rather than deep-copying content
         outline = DoclingDocument(name=f"outline for: {conv.document.name}")
@@ -215,9 +203,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 match = pattern.match(item.text)
 
                 if not match:
-                    logger.warning(
-                        f"line `{item.text}` does not match pattern `{pattern}`"
-                    )
+                    logger.warning(f"line `{item.text}` does not match pattern `{pattern}`")
                     invalid_lines.append(item.text)
                     continue
 
@@ -235,9 +221,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     caption = outline.add_text(label=DocItemLabel.CAPTION, text="")
                     data = TableData(table_cells=[], num_rows=0, num_cols=0)
 
-                    _ = outline.add_table(
-                        label=DocItemLabel.TABLE, data=data, caption=caption
-                    )
+                    _ = outline.add_table(label=DocItemLabel.TABLE, data=data, caption=caption)
                     _.meta = meta
 
                 elif label in ["figure", "picture"]:
@@ -267,8 +251,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         if len(invalid_lines) > 0:
             message = (
                 "Every content line should start with one of: "
-                f"{', '.join(self._OUTLINE_KINDS)}. The following lines need to be updated: "
-                + "\n".join(invalid_lines)
+                f"{', '.join(self._OUTLINE_KINDS)}. The following lines need to be updated: " + "\n".join(invalid_lines)
             )
             logger.error(message)
             return None
@@ -314,26 +297,18 @@ class DoclingWritingAgent(BaseDoclingAgent):
     ) -> None:
         h = self._ordered_hierarchy(headers)
         if kind == "paragraph":
-            content = self._write_paragraph(
-                summary=summary, hierarchy=h, loop_budget=loop_budget
-            )
+            content = self._write_paragraph(summary=summary, hierarchy=h, loop_budget=loop_budget)
         elif kind == "table":
-            content = self._write_table(
-                summary=summary, hierarchy=h, loop_budget=loop_budget
-            )
+            content = self._write_table(summary=summary, hierarchy=h, loop_budget=loop_budget)
         elif kind == "list":
-            content = self._write_list(
-                summary=summary, hierarchy=h, loop_budget=loop_budget
-            )
+            content = self._write_list(summary=summary, hierarchy=h, loop_budget=loop_budget)
         else:
             logger.warning(f"Unsupported content kind: {kind}")
             return
 
         self._update_document_with_content(document=document, content=content)
 
-    def _update_headers(
-        self, *, item: SectionHeaderItem, headers: dict[int, str]
-    ) -> dict[int, str]:
+    def _update_headers(self, *, item: SectionHeaderItem, headers: dict[int, str]) -> dict[int, str]:
         for k in [k for k in list(headers.keys()) if k > item.level]:
             del headers[k]
         headers[item.level] = item.text
@@ -417,9 +392,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         return headers
 
-    def _update_document_with_content(
-        self, *, document: DoclingDocument, content: DoclingDocument
-    ) -> DoclingDocument:
+    def _update_document_with_content(self, *, document: DoclingDocument, content: DoclingDocument) -> DoclingDocument:
         to_item: dict[str, NodeItem] = {}
 
         for item, level in content.iterate_items(with_groups=True):
@@ -434,9 +407,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     )
                     to_item[item.self_ref] = g
                 else:
-                    g = document.add_group(
-                        name=item.name, label=item.label, parent=None
-                    )
+                    g = document.add_group(name=item.name, label=item.label, parent=None)
                     to_item[item.self_ref] = g
 
             elif isinstance(item, ListItem):
@@ -470,9 +441,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     except Exception:
                         table_html = ""
 
-                    caption_text = self._generate_caption_for_table(
-                        table_html=table_html
-                    )
+                    caption_text = self._generate_caption_for_table(table_html=table_html)
 
                     caption = document.add_text(
                         label=DocItemLabel.CAPTION,
@@ -494,9 +463,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         return document
 
-    def _generate_caption_for_table(
-        self, *, table_html: str, summary: str | None = None, loop_budget: int = 3
-    ) -> str:
+    def _generate_caption_for_table(self, *, table_html: str, summary: str | None = None, loop_budget: int = 3) -> str:
         """Create a concise, informative caption for a table.
 
         Uses the expert table writer prompt to produce a 1-sentence caption
@@ -528,9 +495,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
             caption = answer.value.strip()  # type: ignore[union-attr]
             # Strip accidental code fences/backticks and condense whitespace
-            caption = re.sub(
-                r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL
-            ).strip()
+            caption = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL).strip()
             caption = re.sub(r"\s+", " ", caption)
             return caption if caption else ""
         except Exception:
@@ -564,9 +529,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
             requirements=[
                 Requirement(
                     description="The resulting markdown paragraph should use latex notation for superscript, subscript or inline equations. This means that every superscript, subscript and inline equation in must start and end with a $ sign.",
-                    validation_fn=simple_validate(
-                        validate_markdown_to_docling_document
-                    ),
+                    validation_fn=simple_validate(validate_markdown_to_docling_document),
                 ),
             ],
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
@@ -641,9 +604,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
             requirements=[
                 Requirement(
                     description="The resulting markdown list should use latex notation for superscript, subscript or inline equations. This means that every superscript, subscript and inline equation in must start and end with a $ sign.",
-                    validation_fn=simple_validate(
-                        validate_markdown_to_docling_document
-                    ),
+                    validation_fn=simple_validate(validate_markdown_to_docling_document),
                 ),
             ],
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),

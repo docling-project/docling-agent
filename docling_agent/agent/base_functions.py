@@ -101,9 +101,7 @@ def create_document_outline(doc: DoclingDocument) -> str:
             lines.append(f"title (reference={item.self_ref}): {item.text}")
 
         elif isinstance(item, SectionHeaderItem):
-            lines.append(
-                f"section-header (level={item.level}, reference={item.self_ref}): {item.text}"
-            )
+            lines.append(f"section-header (level={item.level}, reference={item.self_ref}): {item.text}")
 
         elif isinstance(item, ListItem):
             continue
@@ -113,15 +111,11 @@ def create_document_outline(doc: DoclingDocument) -> str:
 
         elif isinstance(item, TableItem):
             label_counter[item.label] += 1
-            lines.append(
-                f"{item.label} {label_counter[item.label]} (reference={item.self_ref})"
-            )
+            lines.append(f"{item.label} {label_counter[item.label]} (reference={item.self_ref})")
 
         elif isinstance(item, PictureItem):
             label_counter[item.label] += 1
-            lines.append(
-                f"{item.label} {label_counter[item.label]} (reference={item.self_ref})"
-            )
+            lines.append(f"{item.label} {label_counter[item.label]} (reference={item.self_ref})")
 
     outline = "\n\n".join(lines)
 
@@ -156,9 +150,7 @@ def serialize_table_to_html(table: TableItem, doc: DoclingDocument) -> str:
     doc_serializer = HTMLDocSerializer(doc=doc)
 
     # Serialize the table
-    result = table_serializer.serialize(
-        item=table, doc_serializer=doc_serializer, doc=doc
-    )
+    result = table_serializer.serialize(item=table, doc_serializer=doc_serializer, doc=doc)
 
     return result.text
 
@@ -283,9 +275,7 @@ def validate_html_to_docling_document(text: str) -> bool:
     return convert_html_to_docling_document(text) is not None
 
 
-def insert_document(
-    *, item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument
-) -> DoclingDocument:
+def insert_document(*, item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument) -> DoclingDocument:
     logger.info(f"insert_document: item={item.self_ref}")
 
     group_item = GroupItem(
@@ -298,9 +288,7 @@ def insert_document(
         # we should delete all the children of the list-item and put the text to ""
         raise ValueError("ListItem insertion is not yet supported!")
 
-    doc.replace_item(
-        old_item=item, new_item=group_item
-    )  # group_item is being updated here ...
+    doc.replace_item(old_item=item, new_item=group_item)  # group_item is being updated here ...
 
     to_item: dict[str, NodeItem] = {}
     for _item, level in updated_doc.iterate_items(with_groups=True):
@@ -441,9 +429,7 @@ def _copy_table(
         try:
             cap = cap_ref.resolve(source_doc)
             if hasattr(cap, "text"):
-                new_cap = target_doc.add_text(
-                    label=cap.label, text=cap.text, parent=new_table
-                )
+                new_cap = target_doc.add_text(label=cap.label, text=cap.text, parent=new_table)
                 new_cap.meta = cap.meta
                 new_table.captions.append(new_cap.get_ref())
         except Exception as exc:
@@ -464,9 +450,7 @@ def _copy_picture(
         try:
             cap = cap_ref.resolve(source_doc)
             if hasattr(cap, "text"):
-                new_cap = target_doc.add_text(
-                    label=cap.label, text=cap.text, parent=new_pic
-                )
+                new_cap = target_doc.add_text(label=cap.label, text=cap.text, parent=new_pic)
                 new_cap.meta = cap.meta
                 new_pic.captions.append(new_cap.get_ref())
         except Exception as exc:
@@ -500,22 +484,16 @@ def _flatten_into(
             new_item.meta = child.meta
             _flatten_into(child, source_doc, target_doc, target_parent)
         elif isinstance(child, SectionHeaderItem):
-            new_item = target_doc.add_heading(
-                text=child.text, level=child.level, parent=target_parent
-            )
+            new_item = target_doc.add_heading(text=child.text, level=child.level, parent=target_parent)
             new_item.meta = child.meta
             _flatten_into(child, source_doc, target_doc, target_parent)
         elif isinstance(child, ListItem):
-            logger.warning(
-                f"ListItem {child.self_ref} found outside a ListGroup; skipping"
-            )
+            logger.warning(f"ListItem {child.self_ref} found outside a ListGroup; skipping")
         elif isinstance(child, GroupItem):
             # Dissolve other groups (recurse into children without adding the group)
             _flatten_into(child, source_doc, target_doc, target_parent)
         elif hasattr(child, "text"):
-            new_item = target_doc.add_text(
-                label=child.label, text=child.text, parent=target_parent
-            )
+            new_item = target_doc.add_text(label=child.label, text=child.text, parent=target_parent)
             new_item.meta = child.meta
 
 
@@ -604,14 +582,10 @@ def make_hierarchical_document(doc: DoclingDocument) -> DoclingDocument:
             _copy_picture(child, flat, new_doc, _current_parent())
 
         elif hasattr(child, "text"):
-            new_item = new_doc.add_text(
-                label=child.label, text=child.text, parent=_current_parent()
-            )
+            new_item = new_doc.add_text(label=child.label, text=child.text, parent=_current_parent())
             new_item.meta = child.meta
 
         else:
-            logger.warning(
-                f"Unhandled item type {type(child).__name__} in make_hierarchical_document"
-            )
+            logger.warning(f"Unhandled item type {type(child).__name__} in make_hierarchical_document")
 
     return new_doc

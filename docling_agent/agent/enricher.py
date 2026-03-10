@@ -3,11 +3,6 @@ import re
 from pathlib import Path
 from typing import Any, ClassVar
 
-from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
-from pydantic import Field
-
 from docling_core.types.doc.document import (
     BaseMeta,
     DoclingDocument,
@@ -21,6 +16,10 @@ from docling_core.types.doc.document import (
     TextItem,
     TitleItem,
 )
+from mellea.backends.model_ids import ModelIdentifier
+from mellea.stdlib.requirements import Requirement, simple_validate
+from mellea.stdlib.sampling import RejectionSamplingStrategy
+from pydantic import Field
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -44,9 +43,7 @@ _OP_ALIASES: dict[str, str] = {
     "classify_items": "_classify_items",
 }
 
-_ROUTING_OPS = frozenset(
-    ["summarize_items", "find_search_keywords", "detect_key_entities", "classify_items"]
-)
+_ROUTING_OPS = frozenset(["summarize_items", "find_search_keywords", "detect_key_entities", "classify_items"])
 
 
 class DoclingEnrichingAgent(BaseDoclingAgent):
@@ -103,9 +100,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
 
         method_name = _OP_ALIASES.get(operation or "")
         if method_name is None:
-            raise ValueError(
-                f"Unknown enrichment operation: {operation}. Op payload: {op}"
-            )
+            raise ValueError(f"Unknown enrichment operation: {operation}. Op payload: {op}")
         method = getattr(self, method_name)
         return method(document=document) or document
 
@@ -128,12 +123,9 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                 Requirement(
                     description=(
                         "Select exactly one operation and return only one JSON object "
-                        "in a ```json ...``` block with 'operation' set to one of: "
-                        + ", ".join(sorted(_ROUTING_OPS))
+                        "in a ```json ...``` block with 'operation' set to one of: " + ", ".join(sorted(_ROUTING_OPS))
                     ),
-                    validation_fn=simple_validate(
-                        DoclingEnrichingAgent._validate_json_format
-                    ),
+                    validation_fn=simple_validate(DoclingEnrichingAgent._validate_json_format),
                 ),
             ],
         )
@@ -211,13 +203,11 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         loop_budget: int,
         min_text_length: int,
     ) -> None:
-        if isinstance(node, (TitleItem, SectionHeaderItem)):
+        if isinstance(node, TitleItem | SectionHeaderItem):
             if not (node.meta and node.meta.summary):
                 text = collect_subtree_text(node, doc)
                 if len(text) >= min_text_length:
-                    summary = self._generate_summary(
-                        m=m, text=text, loop_budget=loop_budget
-                    )
+                    summary = self._generate_summary(m=m, text=text, loop_budget=loop_budget)
                     if summary:
                         if node.meta is None:
                             node.meta = BaseMeta()
@@ -258,17 +248,9 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                         item.meta = FloatingMeta()
                     item.meta.summary = SummaryMetaField(text=summary)
             elif isinstance(item, PictureItem):
-                captions = [
-                    c.resolve(document).text
-                    for c in item.captions
-                    if hasattr(c.resolve(document), "text")
-                ]
+                captions = [c.resolve(document).text for c in item.captions if hasattr(c.resolve(document), "text")]
                 text = " ".join(captions)
-                summary = (
-                    self._generate_summary(m=m, text=text, loop_budget=loop_budget)
-                    if text
-                    else None
-                )
+                summary = self._generate_summary(m=m, text=text, loop_budget=loop_budget) if text else None
                 if summary:
                     if item.meta is None:
                         item.meta = PictureMeta()
@@ -322,7 +304,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         m = setup_local_session(model_id=self.get_reasoning_model_id())
 
         for item, _ in document.iterate_items():
-            if not isinstance(item, (TitleItem, SectionHeaderItem, TextItem)):
+            if not isinstance(item, TitleItem | SectionHeaderItem | TextItem):
                 continue
             if not hasattr(item, "text") or not item.text:
                 continue
@@ -369,14 +351,10 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     # Stubs
     # ------------------------------------------------------------------
 
-    def _detect_key_entities(
-        self, *, document: DoclingDocument, **kwargs
-    ) -> DoclingDocument:
+    def _detect_key_entities(self, *, document: DoclingDocument, **kwargs) -> DoclingDocument:
         logger.info("_detect_key_entities: not yet implemented")
         return document
 
-    def _classify_items(
-        self, *, document: DoclingDocument, **kwargs
-    ) -> DoclingDocument:
+    def _classify_items(self, *, document: DoclingDocument, **kwargs) -> DoclingDocument:
         logger.info("_classify_items: not yet implemented")
         return document

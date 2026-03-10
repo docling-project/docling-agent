@@ -5,11 +5,9 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
-from pydantic import BaseModel, Field
 
 from docling_core.types.doc.document import DoclingDocument
+from pydantic import BaseModel, Field
 
 from docling_agent.logging import logger  # type: ignore[import-untyped]
 
@@ -31,7 +29,7 @@ class DocLibraryEntry(BaseModel):
     created_at: str  # ISO-8601 UTC
     updated_at: str  # ISO-8601 UTC
     status: DocStatus = Field(default_factory=DocStatus)
-    summary: Optional[str] = None
+    summary: str | None = None
     keywords: list[str] = Field(default_factory=list)
     topics: list[str] = Field(default_factory=list)
 
@@ -81,14 +79,14 @@ class DoclingLibrary:
     # Public API
     # ------------------------------------------------------------------
 
-    def lookup_by_source(self, source_path: str) -> Optional[DocLibraryEntry]:
+    def lookup_by_source(self, source_path: str) -> DocLibraryEntry | None:
         """Return the entry for *source_path*, or None if not in the library."""
         doc_id = self._index.source_to_id.get(source_path)
         if doc_id:
             return self._index.entries.get(doc_id)
         return None
 
-    def get_entry(self, doc_id: str) -> Optional[DocLibraryEntry]:
+    def get_entry(self, doc_id: str) -> DocLibraryEntry | None:
         return self._index.entries.get(doc_id)
 
     def store(
@@ -139,9 +137,7 @@ class DoclingLibrary:
         self._index.source_to_id[source_path] = doc_id
         self._save_index()
 
-        logger.debug(
-            f"Library: stored {doc.name!r} → {doc_id} (source={source_path!r})"
-        )
+        logger.debug(f"Library: stored {doc.name!r} → {doc_id} (source={source_path!r})")
         return entry
 
     def store_in_memory(self, doc: DoclingDocument) -> DocLibraryEntry:
@@ -149,9 +145,7 @@ class DoclingLibrary:
         doc_id = _doc_id_for_name(doc.name)
         doc_dir = self.path / doc_id
         doc_dir.mkdir(exist_ok=True)
-        (doc_dir / self.DOC_FILE).write_text(
-            doc.model_dump_json(indent=2), encoding="utf-8"
-        )
+        (doc_dir / self.DOC_FILE).write_text(doc.model_dump_json(indent=2), encoding="utf-8")
 
         entry = DocLibraryEntry(
             doc_id=doc_id,
@@ -164,16 +158,14 @@ class DoclingLibrary:
         self._save_index()
         return entry
 
-    def load_doc(self, doc_id: str) -> Optional[DoclingDocument]:
+    def load_doc(self, doc_id: str) -> DoclingDocument | None:
         """Load and return the DoclingDocument for *doc_id*, or None."""
         doc_path = self.path / doc_id / self.DOC_FILE
         if not doc_path.exists():
             logger.warning(f"Library: document file missing for {doc_id}")
             return None
         try:
-            return DoclingDocument.model_validate_json(
-                doc_path.read_text(encoding="utf-8")
-            )
+            return DoclingDocument.model_validate_json(doc_path.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.error(f"Library: failed to load {doc_path}: {exc}")
             return None
@@ -182,9 +174,7 @@ class DoclingLibrary:
         """Set status flags on the entry (e.g. ``has_summaries=True``)."""
         entry = self._index.entries.get(doc_id)
         if entry is None:
-            logger.warning(
-                f"Library: update_status called for unknown doc_id={doc_id!r}"
-            )
+            logger.warning(f"Library: update_status called for unknown doc_id={doc_id!r}")
             return
         for field, value in flags.items():
             if hasattr(entry.status, field):
@@ -196,9 +186,9 @@ class DoclingLibrary:
         self,
         doc_id: str,
         *,
-        summary: Optional[str] = None,
-        keywords: Optional[list[str]] = None,
-        topics: Optional[list[str]] = None,
+        summary: str | None = None,
+        keywords: list[str] | None = None,
+        topics: list[str] | None = None,
     ) -> None:
         """Update the document-level summary, keywords, and topics."""
         entry = self._index.entries.get(doc_id)
@@ -231,9 +221,7 @@ class DoclingLibrary:
         index_path = self.path / self.INDEX_FILE
         if index_path.exists():
             try:
-                return DocLibraryIndex.model_validate_json(
-                    index_path.read_text(encoding="utf-8")
-                )
+                return DocLibraryIndex.model_validate_json(index_path.read_text(encoding="utf-8"))
             except Exception as exc:
                 logger.warning(f"Library: could not load index, starting fresh: {exc}")
         return DocLibraryIndex()

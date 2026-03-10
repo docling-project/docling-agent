@@ -32,14 +32,12 @@ class DoclingAgentType(Enum):
         return self.value
 
     @classmethod
-    def from_string(cls, value: str) -> "DoclingAgentType":
+    def from_string(cls, value: str) -> DoclingAgentType:
         """Create AgentType from string value."""
         for agent_type in cls:
             if agent_type.value == value:
                 return agent_type
-        raise ValueError(
-            f"Invalid agent type: {value}. Valid types: {[t.value for t in cls]}"
-        )
+        raise ValueError(f"Invalid agent type: {value}. Valid types: {[t.value for t in cls]}")
 
     @classmethod
     def get_all_types(cls) -> list[str]:
@@ -77,6 +75,6 @@ class BaseDoclingAgent(BaseModel):
         document: DoclingDocument | None = None,
         sources: list[DoclingDocument | Path] = [],
         **kwargs,
-    ) -> "DoclingDocument":
+    ) -> DoclingDocument:
         """Execute the agent for a task and return a document."""
         raise NotImplementedError
