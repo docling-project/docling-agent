@@ -22,7 +22,7 @@ from docling_core.types.doc.document import (
 )
 from docling_core.types.io import DocumentStream
 
-from docling_agent.log import logger
+from docling_agent.logging import logger
 
 
 def find_crefs(text: str) -> list[RefItem]:
@@ -72,7 +72,11 @@ def find_json_dicts(text: str) -> list[dict]:
     for i, json_content in enumerate(matches):
         try:
             # print(f"call {i}: {json_content}")
-            calls.append(json.loads(json_content))
+            parsed = json.loads(json_content)
+            if isinstance(parsed, list):
+                calls.extend(parsed)
+            else:
+                calls.append(parsed)
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse JSON in match {i}: {e}")
 
