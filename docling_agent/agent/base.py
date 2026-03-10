@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
 from mellea.backends.model_ids import ModelIdentifier
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from docling_core.types.doc.document import DoclingDocument
@@ -23,6 +23,9 @@ class DoclingAgentType(Enum):
     DOCLING_DOCUMENT_WRITER = "writer"
     DOCLING_DOCUMENT_EDITOR = "editor"
     DOCLING_DOCUMENT_EXTRACTOR = "extractor"
+    DOCLING_DOCUMENT_ENRICHER = "enricher"
+    DOCLING_DOCUMENT_RAG = "rag"
+    DOCLING_DOCUMENT_ORCHESTRATOR = "orchestrator"
 
     def __str__(self) -> str:
         """Return the string value of the enum."""
@@ -45,6 +48,8 @@ class DoclingAgentType(Enum):
 
 
 class BaseDoclingAgent(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     agent_type: DoclingAgentType
     model_id: ModelIdentifier
     tools: list
@@ -64,9 +69,6 @@ class BaseDoclingAgent(BaseModel):
     def get_writing_model_id(self) -> ModelIdentifier:
         """Return the writing model id, falling back to the primary model."""
         return self.writing_model_id or self.model_id
-
-    class Config:
-        arbitrary_types_allowed = True  # Needed for complex types like Model
 
     @abstractmethod
     def run(

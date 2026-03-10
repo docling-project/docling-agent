@@ -2,8 +2,6 @@ import json
 import re
 from io import BytesIO
 
-# from smolagents import MCPClient, Tool, ToolCollection
-# from smolagents.models import ChatMessage, MessageRole, Model
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
@@ -12,6 +10,7 @@ from docling_core.types.doc.document import (
     DoclingDocument,
     GroupItem,
     GroupLabel,
+    ListGroup,
     ListItem,
     NodeItem,
     PictureItem,
@@ -23,31 +22,14 @@ from docling_core.types.doc.document import (
 )
 from docling_core.types.io import DocumentStream
 
-from docling_agent.log import logger
-
-
-def find_json_dicts(text: str) -> list[dict]:
-    """
-    Extract JSON dictionaries from ```json code blocks
-    """
-    pattern = r"```json\s*(.*?)\s*```"
-    matches = re.findall(pattern, text, re.DOTALL)
-
-    calls = []
-    for i, json_content in enumerate(matches):
-        try:
-            # print(f"call {i}: {json_content}")
-            calls.append(json.loads(json_content))
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON in match {i}: {e}")
-
-    return calls
+from docling_agent.logging import logger
 
 
 def find_crefs(text: str) -> list[RefItem]:
     """
     Check if a string matches the pattern ```markdown(.*)?```
     """
+    logger.info("find_crefs")
     labels: str = "|".join(e.value for e in DocItemLabel)
     pattern = rf"#/({labels})/\d+"
 
@@ -59,10 +41,54 @@ def find_crefs(text: str) -> list[RefItem]:
 
 
 def has_crefs(text: str) -> bool:
+    logger.info("has_crefs")
     return len(find_crefs(text)) > 0
 
 
+def has_json_dicts(text: str) -> bool:
+    """
+    Extract JSON dictionaries from ```json code blocks
+    """
+    logger.info("has_json_dicts")
+    pattern = r"```json\s*(.*?)\s*```"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    calls = []
+    for i, json_content in enumerate(matches):
+        try:
+            calls.append(json.loads(json_content))
+        except Exception as e:
+            logger.error("Failed to parse JSON call block: %s", e)
+            return False
+
+    return len(calls) > 0
+
+
+def find_json_dicts(text: str) -> list[dict]:
+    """
+    Extract JSON dictionaries from ```json code blocks
+    """
+    logger.info("find_json_dicts")
+    pattern = r"```json\s*(.*?)\s*```"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    calls = []
+    for i, json_content in enumerate(matches):
+        try:
+            # print(f"call {i}: {json_content}")
+            parsed = json.loads(json_content)
+            if isinstance(parsed, list):
+                calls.extend(parsed)
+            else:
+                calls.append(parsed)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON in match {i}: {e}")
+
+    return calls
+
+
 def create_document_outline(doc: DoclingDocument) -> str:
+    logger.info("create_document_outline")
     label_counter: dict[DocItemLabel, int] = {
         DocItemLabel.TABLE: 0,
         DocItemLabel.PICTURE: 0,
@@ -104,6 +130,7 @@ def create_document_outline(doc: DoclingDocument) -> str:
 
 def serialize_item_to_markdown(item: TextItem, doc: DoclingDocument) -> str:
     """Serialize a text item to markdown format using existing serializer."""
+    logger.info("serialize_item_to_markdown")
     from docling_core.transforms.serializer.markdown import (
         MarkdownDocSerializer,
         MarkdownParams,
@@ -116,6 +143,7 @@ def serialize_item_to_markdown(item: TextItem, doc: DoclingDocument) -> str:
 
 
 def serialize_table_to_html(table: TableItem, doc: DoclingDocument) -> str:
+    logger.info("serialize_table_to_html")
     from docling_core.transforms.serializer.html import (
         HTMLDocSerializer,
         HTMLTableSerializer,
@@ -139,6 +167,7 @@ def find_html_code_block(text: str) -> str | None:
     """
     Check if a string matches the pattern ```html(.*)?```
     """
+    logger.info("find_html_code_block")
     pattern = r"```html(.*?)```"
     match = re.search(pattern, text, re.DOTALL)
     return match.group(1) if match else None
@@ -148,7 +177,7 @@ def has_html_code_block(text: str) -> bool:
     """
     Check if a string contains a html code block pattern anywhere in the text
     """
-    # logger.info(f"testing has_html_code_block for {text[0:64]}")
+    logger.info("has_html_code_block")
     return find_html_code_block(text) is not None
 
 
@@ -156,6 +185,7 @@ def find_markdown_code_block(text: str) -> str | None:
     """
     Check if a string matches the pattern ```(md|markdown)(.*)?```
     """
+    logger.info("find_markdown_code_block")
     pattern = r"```(md|markdown)(.*?)```"
     match = re.search(pattern, text, re.DOTALL)
     return match.group(2) if match else None
@@ -165,11 +195,12 @@ def has_markdown_code_block(text: str) -> bool:
     """
     Check if a string contains a markdown code block pattern anywhere in the text
     """
-    # logger.info(f"testing has_markdown_code_block for {text[0:64]}")
+    logger.info("has_markdown_code_block")
     return find_markdown_code_block(text) is not None
 
 
 def convert_html_to_docling_table(text: str) -> list[TableItem] | None:
+    logger.info("convert_html_to_docling_table")
     text_ = find_html_code_block(text)
     if text_ is None:
         text_ = text  # assume the entire text is html
@@ -193,11 +224,12 @@ def convert_html_to_docling_table(text: str) -> list[TableItem] | None:
 
 
 def validate_html_to_docling_table(text: str) -> bool:
-    # logger.info(f"validate_html_to_docling_table for {text[0:64]}")
+    logger.info("validate_html_to_docling_table")
     return convert_html_to_docling_table(text) is not None
 
 
 def convert_markdown_to_docling_document(text: str) -> DoclingDocument | None:
+    logger.info("convert_markdown_to_docling_document")
     text_ = find_markdown_code_block(text)
     if text_ is None:
         text_ = text  # assume the entire text is html
@@ -219,11 +251,12 @@ def convert_markdown_to_docling_document(text: str) -> DoclingDocument | None:
 
 
 def validate_markdown_to_docling_document(text: str) -> bool:
-    # logger.info(f"testing validate_markdown_docling_document for {text[0:64]}")
+    logger.info("validate_markdown_to_docling_document")
     return convert_markdown_to_docling_document(text) is not None
 
 
 def convert_html_to_docling_document(text: str) -> DoclingDocument | None:
+    logger.info("convert_html_to_docling_document")
     text_ = find_html_code_block(text)
     if text_ is None:
         text_ = text  # assume the entire text is html
@@ -246,14 +279,14 @@ def convert_html_to_docling_document(text: str) -> DoclingDocument | None:
 
 
 def validate_html_to_docling_document(text: str) -> bool:
-    # logger.info(f"testing validate_html_docling_document for {text[0:64]}")
+    logger.info("validate_html_to_docling_document")
     return convert_html_to_docling_document(text) is not None
 
 
 def insert_document(
     *, item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument
 ) -> DoclingDocument:
-    # logger.info(f"inserting new document at item {item.self_ref}")
+    logger.info(f"insert_document: item={item.self_ref}")
 
     group_item = GroupItem(
         label=GroupLabel.UNSPECIFIED,
@@ -324,3 +357,261 @@ def insert_document(
             logger.warning(f"No support to insert items of type: {type(item).__name__}")
 
     return doc
+
+
+# ---------------------------------------------------------------------------
+# Document tree utilities
+# ---------------------------------------------------------------------------
+
+
+def get_item_by_ref(doc: DoclingDocument, ref: str) -> NodeItem | None:
+    """Resolve a self_ref string to a NodeItem. Returns None on failure."""
+    logger.info(f"get_item_by_ref: ref={ref!r}")
+    try:
+        return RefItem(cref=ref).resolve(doc)
+    except Exception:
+        return None
+
+
+def collect_subtree_text(node: NodeItem, doc: DoclingDocument) -> str:
+    """Recursively collect all text from a node and its descendants.
+
+    Resolves each child RefItem and concatenates text from TextItem instances
+    (which includes TitleItem, SectionHeaderItem, ListItem, TextItem proper).
+    Non-text nodes (TableItem, PictureItem, GroupItem) are traversed for their
+    children but do not contribute text directly.
+    """
+    logger.info(f"collect_subtree_text: node={node.self_ref!r}")
+    parts: list[str] = []
+    if hasattr(node, "text") and node.text:
+        parts.append(node.text)
+    for child_ref in node.children or []:
+        try:
+            child = child_ref.resolve(doc)
+            subtree = collect_subtree_text(child, doc)
+            if subtree:
+                parts.append(subtree)
+        except Exception:
+            pass
+    return "\n".join(parts)
+
+
+def _copy_list_group(
+    source: ListGroup,
+    source_doc: DoclingDocument,
+    target_doc: DoclingDocument,
+    parent: NodeItem,
+) -> ListGroup:
+    logger.info(f"_copy_list_group: source={source.self_ref!r}")
+    new_group = target_doc.add_list_group(parent=parent)
+    new_group.meta = source.meta
+    for child_ref in source.children or []:
+        try:
+            child = child_ref.resolve(source_doc)
+            if isinstance(child, ListItem):
+                new_item = target_doc.add_list_item(
+                    text=child.text,
+                    enumerated=child.enumerated,
+                    parent=new_group,
+                )
+                new_item.meta = child.meta
+                # Recursively copy nested list groups
+                for nested_ref in child.children or []:
+                    try:
+                        nested = nested_ref.resolve(source_doc)
+                        if isinstance(nested, ListGroup):
+                            _copy_list_group(nested, source_doc, target_doc, new_item)
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logger.warning(f"Could not copy list child: {exc}")
+    return new_group
+
+
+def _copy_table(
+    source: TableItem,
+    source_doc: DoclingDocument,
+    target_doc: DoclingDocument,
+    parent: NodeItem,
+) -> TableItem:
+    logger.info(f"_copy_table: source={source.self_ref!r}")
+    new_table = target_doc.add_table(data=source.data, parent=parent)
+    new_table.meta = source.meta
+    for cap_ref in source.captions:
+        try:
+            cap = cap_ref.resolve(source_doc)
+            if hasattr(cap, "text"):
+                new_cap = target_doc.add_text(
+                    label=cap.label, text=cap.text, parent=new_table
+                )
+                new_cap.meta = cap.meta
+                new_table.captions.append(new_cap.get_ref())
+        except Exception as exc:
+            logger.warning(f"Could not copy table caption: {exc}")
+    return new_table
+
+
+def _copy_picture(
+    source: PictureItem,
+    source_doc: DoclingDocument,
+    target_doc: DoclingDocument,
+    parent: NodeItem,
+) -> PictureItem:
+    logger.info(f"_copy_picture: source={source.self_ref!r}")
+    new_pic = target_doc.add_picture(image=source.image, parent=parent)
+    new_pic.meta = source.meta
+    for cap_ref in source.captions:
+        try:
+            cap = cap_ref.resolve(source_doc)
+            if hasattr(cap, "text"):
+                new_cap = target_doc.add_text(
+                    label=cap.label, text=cap.text, parent=new_pic
+                )
+                new_cap.meta = cap.meta
+                new_pic.captions.append(new_cap.get_ref())
+        except Exception as exc:
+            logger.warning(f"Could not copy picture caption: {exc}")
+    return new_pic
+
+
+def _flatten_into(
+    node: NodeItem,
+    source_doc: DoclingDocument,
+    target_doc: DoclingDocument,
+    target_parent: NodeItem,
+) -> None:
+    """Recursively add node's children to target_parent, preserving atomic units."""
+    logger.info(f"_flatten_into: node={node.self_ref!r}")
+    for child_ref in node.children or []:
+        try:
+            child = child_ref.resolve(source_doc)
+        except Exception as exc:
+            logger.warning(f"Could not resolve child {child_ref}: {exc}")
+            continue
+
+        if isinstance(child, ListGroup):
+            _copy_list_group(child, source_doc, target_doc, target_parent)
+        elif isinstance(child, TableItem):
+            _copy_table(child, source_doc, target_doc, target_parent)
+        elif isinstance(child, PictureItem):
+            _copy_picture(child, source_doc, target_doc, target_parent)
+        elif isinstance(child, TitleItem):
+            new_item = target_doc.add_title(text=child.text, parent=target_parent)
+            new_item.meta = child.meta
+            _flatten_into(child, source_doc, target_doc, target_parent)
+        elif isinstance(child, SectionHeaderItem):
+            new_item = target_doc.add_heading(
+                text=child.text, level=child.level, parent=target_parent
+            )
+            new_item.meta = child.meta
+            _flatten_into(child, source_doc, target_doc, target_parent)
+        elif isinstance(child, ListItem):
+            logger.warning(
+                f"ListItem {child.self_ref} found outside a ListGroup; skipping"
+            )
+        elif isinstance(child, GroupItem):
+            # Dissolve other groups (recurse into children without adding the group)
+            _flatten_into(child, source_doc, target_doc, target_parent)
+        elif hasattr(child, "text"):
+            new_item = target_doc.add_text(
+                label=child.label, text=child.text, parent=target_parent
+            )
+            new_item.meta = child.meta
+
+
+def make_flat_document(doc: DoclingDocument) -> DoclingDocument:
+    """Return a new document where every item is a direct child of body.
+
+    Iterates ``doc`` in document order and appends each item to the new body,
+    preserving:
+    - SectionHeaderItem.level  (needed for make_hierarchical_document to invert)
+    - List internal structure  (ListGroup → ListItem nesting is kept)
+    - Table / picture caption children
+    All other parent-child links (section → text) are dissolved.
+    """
+    logger.info(f"make_flat_document: doc={doc.name!r}")
+    new_doc = DoclingDocument(name=doc.name)
+    _flatten_into(doc.body, doc, new_doc, new_doc.body)
+    return new_doc
+
+
+def make_hierarchical_document(doc: DoclingDocument) -> DoclingDocument:
+    """Return a new document with maximal section nesting.
+
+    Iterates ``doc`` in document order (after flattening first).  Maintains a
+    stack of open section headers keyed by their level.  Each non-header item
+    (text, table, picture, list) is appended as a child of the most recently
+    opened section header (or of body if no header has been seen yet).
+    A section header at level N is appended as a child of the nearest ancestor
+    whose level is strictly less than N.
+
+    Lists, table-caption pairs and picture-caption pairs are treated as atomic
+    units and are not split across parent boundaries.
+    """
+    logger.info(f"make_hierarchical_document: doc={doc.name!r}")
+    flat = make_flat_document(doc)
+    new_doc = DoclingDocument(name=doc.name)
+
+    # open_sections maps level -> SectionHeaderItem (only section headers, not title).
+    open_sections: dict[int, NodeItem] = {}
+    # title_node is the most recently seen TitleItem; text before any section header
+    # becomes a child of the title rather than of body.
+    title_node: NodeItem | None = None
+
+    def _current_parent() -> NodeItem:
+        if open_sections:
+            return open_sections[max(open_sections)]
+        if title_node is not None:
+            return title_node
+        return new_doc.body
+
+    def _parent_for_level(level: int) -> NodeItem:
+        # Section headers nest only under other section headers, never under the title.
+        candidates = [lv for lv in open_sections if lv < level]
+        if not candidates:
+            return new_doc.body
+        return open_sections[max(candidates)]
+
+    for child_ref in flat.body.children or []:
+        try:
+            child = child_ref.resolve(flat)
+        except Exception as exc:
+            logger.warning(f"Could not resolve body child {child_ref}: {exc}")
+            continue
+
+        if isinstance(child, TitleItem):
+            new_item = new_doc.add_title(text=child.text, parent=new_doc.body)
+            new_item.meta = child.meta
+            title_node = new_item
+            open_sections = {}
+
+        elif isinstance(child, SectionHeaderItem):
+            level = child.level
+            parent = _parent_for_level(level)
+            new_item = new_doc.add_heading(text=child.text, level=level, parent=parent)
+            new_item.meta = child.meta
+            # Close all open sections at >= this level
+            open_sections = {lv: n for lv, n in open_sections.items() if lv < level}
+            open_sections[level] = new_item
+
+        elif isinstance(child, ListGroup):
+            _copy_list_group(child, flat, new_doc, _current_parent())
+
+        elif isinstance(child, TableItem):
+            _copy_table(child, flat, new_doc, _current_parent())
+
+        elif isinstance(child, PictureItem):
+            _copy_picture(child, flat, new_doc, _current_parent())
+
+        elif hasattr(child, "text"):
+            new_item = new_doc.add_text(
+                label=child.label, text=child.text, parent=_current_parent()
+            )
+            new_item.meta = child.meta
+
+        else:
+            logger.warning(
+                f"Unhandled item type {type(child).__name__} in make_hierarchical_document"
+            )
+
+    return new_doc

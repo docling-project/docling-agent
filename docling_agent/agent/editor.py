@@ -29,7 +29,7 @@ from docling_agent.agent.base_functions import (
     validate_html_to_docling_table,
 )
 from docling_agent.agent_models import setup_local_session, view_linear_context
-from docling_agent.log import logger
+from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
@@ -117,7 +117,10 @@ We first need to:
     - identify from the outline all the document items that are relevant
     - plan the operations needed to update the document
 
-Now, provide me the operations (encapsulated in on ore more ```json...```) and their references to execute the task!"""
+Remember that you can only choose from 4 different operations: update_content, rewrite_content, delete_content, and update_section_heading_level.
+Remember that each operation must be encapusalted in one ```json...``` block.
+Now, provide me with the operations to execute the task!
+"""
 
         prompt = f"{context}{identification}"
 
