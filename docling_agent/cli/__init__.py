@@ -15,7 +15,7 @@ from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
 
-app = typer.Typer(name="docling-agent", add_completion=False)
+app = typer.Typer(name="docling-agent", add_completion=False, pretty_exceptions_show_locals=False)
 
 
 _TASK_TEMPLATE = """\

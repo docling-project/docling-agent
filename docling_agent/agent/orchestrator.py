@@ -15,6 +15,7 @@ from docling_core.types.doc.document import (
 )
 from mellea.backends import model_ids
 from mellea.backends.model_ids import ModelIdentifier
+from mellea.core.base import ModelOutputThunk
 from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 
@@ -42,6 +43,18 @@ from docling_agent.task_model import (
 _SourcePair = tuple[DoclingDocument, str]
 
 
+class _SourcePairs(list):
+    """List of ``_SourcePair`` with a compact repr to avoid polluting rich tracebacks."""
+
+    def __repr__(self) -> str:
+        logger.info("_SourcePairs.__repr__")
+        entries = ", ".join(
+            f"(DoclingDocument(name={doc.name!r}, version={doc.version!r}, body=[]), {did!r})"
+            for doc, did in self
+        )
+        return f"[{entries}]"
+
+
 class DoclingOrchestratorAgent(BaseDoclingAgent):
     """Top-level orchestrator.
 
@@ -60,6 +73,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         tools: list,
         library_path: Path | None = None,
     ) -> None:
+        logger.info(f"DoclingOrchestratorAgent.__init__: model_id={model_id!r}")
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_ORCHESTRATOR,
             model_id=model_id,
@@ -78,6 +92,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> DoclingDocument:
+        logger.info("DoclingOrchestratorAgent.run")
         raise NotImplementedError("Use run_task(AgentTask) instead.")
 
     # ------------------------------------------------------------------
@@ -86,7 +101,11 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
     def run_task(self, task: AgentTask) -> DoclingDocument:
         """Convert sources, enrich lazily, and dispatch to the right sub-agent."""
-        library = DoclingLibrary(path=self.library_path)
+        logger.info(f"DoclingOrchestratorAgent.run_task: mode={task.mode!r}")
+        return self._dispatch(task, DoclingLibrary(path=self.library_path))
+
+    def _dispatch(self, task: AgentTask, library: DoclingLibrary) -> DoclingDocument:
+        logger.info(f"_dispatch: mode={task.mode!r}")
         source_pairs = self._resolve_sources(task, library)
 
         logger.info(f"Orchestrator: mode={task.mode}, sources={len(source_pairs)}")
@@ -116,6 +135,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         self, task: AgentTask, library: DoclingLibrary
     ) -> list[_SourcePair]:
         """Expand paths/globs, load from library cache or convert, return (doc, doc_id) pairs."""
+        logger.info(f"_resolve_sources: sources={task.sources}")
         raw_paths = self._expand_paths(task)
         if not raw_paths and not task.sources:
             return []
@@ -180,6 +200,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
     def _expand_paths(self, task: AgentTask) -> list[Path]:
         """Expand task.sources (with optional glob for directories)."""
+        logger.info("_expand_paths")
         glob_pattern: str = getattr(task, "glob", None) or "**/*"
         raw_paths: list[Path] = []
         for src in task.sources:
@@ -207,6 +228,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         Returns updated (doc, doc_id) pairs where each doc is the enriched
         version (``_summarize_items`` returns a hierarchical document).
         """
+        logger.info(f"_ensure_enriched: operations={operations}, docs={len(source_pairs)}")
         enricher = DoclingEnrichingAgent(
             model_id=self.get_writing_model_id(),
             tools=[],
@@ -248,6 +270,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         self, doc_id: str, doc: DoclingDocument, library: DoclingLibrary
     ) -> None:
         """Extract document-level summary and keywords from enriched doc and persist."""
+        logger.info(f"_update_library_meta: doc_id={doc_id!r}")
         summary: str | None = None
         keywords: list[str] = []
 
@@ -272,6 +295,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         source_pairs: list[_SourcePair],
         library: DoclingLibrary,
     ) -> DoclingDocument:
+        logger.info(f"_run_rag: query={task.query!r}, docs={len(source_pairs)}")
         if task.enrich_before_rag:
             source_pairs = self._ensure_enriched(
                 source_pairs, library, operations=["summarize"]
@@ -291,6 +315,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         task: ExtractTask,
         source_pairs: list[_SourcePair],
     ) -> DoclingDocument:
+        logger.info(f"_run_extract: query={task.query!r}, docs={len(source_pairs)}")
         extractor = DoclingExtractingAgent(
             model_id=self._model_id_for("reasoning", task),
             tools=[],
@@ -304,6 +329,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         task: WriteTask,
         source_pairs: list[_SourcePair],
     ) -> DoclingDocument:
+        logger.info(f"_run_write: query={task.query!r}, docs={len(source_pairs)}")
         writer = DoclingWritingAgent(
             model_id=self._model_id_for("reasoning", task),
             tools=[],
@@ -317,6 +343,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         task: EditingTask,
         source_pairs: list[_SourcePair],
     ) -> DoclingDocument:
+        logger.info(f"_run_edit: query={task.query!r}, docs={len(source_pairs)}")
         editor = DoclingEditingAgent(
             model_id=self._model_id_for("reasoning", task),
             tools=[],
@@ -331,6 +358,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         source_pairs: list[_SourcePair],
         library: DoclingLibrary,
     ) -> DoclingDocument:
+        logger.info(f"_run_enrich: docs={len(source_pairs)}")
         ops: list[str] = list(task.operations)
         enriched_pairs = self._ensure_enriched(source_pairs, library, operations=ops)
 
@@ -375,6 +403,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         library: DoclingLibrary,
     ) -> DoclingDocument:
         """Use an LLM to decide which mode(s) best serve the query, then execute them."""
+        logger.info(f"_run_plan: query={task.query!r}, docs={len(source_pairs)}")
         source_names = [doc.name for doc, _ in source_pairs]
         sources_text = (
             "\n".join(f"  - {n}" for n in source_names) if source_names else "  (none)"
@@ -392,7 +421,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             system_prompt=self._PLANNER_SYSTEM_PROMPT,
         )
 
-        raw = m.instruct(
+        raw: ModelOutputThunk = m.instruct(
             prompt,
             strategy=RejectionSamplingStrategy(loop_budget=3),
             requirements=[
@@ -405,8 +434,8 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 )
             ],
         )
-
-        dicts = find_json_dicts(raw)
+        
+        dicts = find_json_dicts(str(raw))
         if not dicts or "tasks" not in dicts[0]:
             raise ValueError(f"Planner did not return a valid plan; got: {raw!r}")
 
@@ -463,6 +492,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     # ------------------------------------------------------------------
 
     def _model_id_for(self, role: str, task: AgentTask) -> ModelIdentifier:
+        logger.info(f"_model_id_for: role={role!r}")
         name = task.models.reasoning if role == "reasoning" else task.models.writing
         resolved = getattr(model_ids, name, None)
         if resolved is None:
