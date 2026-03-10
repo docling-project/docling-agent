@@ -38,8 +38,15 @@ class AgentTask(BaseModel):
     Subclass to add mode-specific parameters. The ``mode`` field acts as
     a discriminator so ``load_task`` can instantiate the right subclass from
     a YAML file automatically.
+
+    When ``mode`` is ``None`` (or omitted in YAML), the orchestrator enters
+    planning mode and determines the appropriate sub-tasks automatically.
     """
 
+    mode: str | None = Field(
+        None,
+        description="Task mode. None means auto-plan; subclasses override with a Literal.",
+    )
     query: str = Field(..., description="The natural-language query or instruction.")
     sources: list[str] = Field(
         default_factory=list,
@@ -105,7 +112,14 @@ class WriteTask(AgentTask):
     mode: Literal["write"] = "write"
     # sources are optional for writing tasks
 
+    
+class EditingTask(AgentTask):
+    """Edit an existing document."""
 
+    mode: Literal["edit"] = "edit"
+    # sources are optional for editing tasks
+    
+    
 class EnrichTask(AgentTask):
     """Enrich documents with summaries, keywords, or entity annotations."""
 
@@ -124,22 +138,26 @@ class EnrichTask(AgentTask):
 
 # Discriminated union — Pydantic selects the right subclass via the ``mode`` field.
 AnyTask = Annotated[
-    RAGTask | ExtractTask | WriteTask | EnrichTask,
+    RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask,
     Field(discriminator="mode"),
 ]
 
 _task_adapter: TypeAdapter[AnyTask] = TypeAdapter(AnyTask)
 
 
-def load_task(path: Path) -> RAGTask | ExtractTask | WriteTask | EnrichTask:
+def load_task(
+    path: Path,
+) -> "RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | AgentTask":
     """Load and validate a task from a YAML file.
 
-    The ``mode`` key selects the task subclass. If ``mode`` is omitted the
-    file is parsed as a ``RAGTask`` (the most common case).
+    The ``mode`` key selects the task subclass. If ``mode`` is omitted or
+    ``null``, the base ``AgentTask`` is returned with ``mode=None`` and the
+    orchestrator will enter planning mode.
     """
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"Task YAML must be a mapping, got {type(data).__name__}")
-    data.setdefault("mode", "rag")
+    if not data.get("mode"):
+        return AgentTask.model_validate(data)
     return _task_adapter.validate_python(data)

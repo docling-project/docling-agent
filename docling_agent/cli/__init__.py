@@ -10,6 +10,11 @@ from docling_agent.agent_models import configure_llm_logging
 from docling_agent.logging import logger  # type: ignore[import-untyped]
 from docling_agent.task_model import AgentTask, load_task
 
+from mellea.backends import model_ids
+from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
+
+from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
+
 app = typer.Typer(name="docling-agent", add_completion=False)
 
 
@@ -25,7 +30,7 @@ sources:
   - path/to/document.pdf
   # - path/to/directory/
 
-# Task mode: rag | extract | write | enrich  (default: rag)
+# Task mode: rag | extract | write | edit | enrich  (omit to auto-plan)
 # mode: rag
 
 # --- RAG options (mode: rag) -------------------------------------------------
@@ -121,11 +126,6 @@ def main(
 
     logger.info(f"Task loaded: mode={agent_task.mode}, query={agent_task.query!r}")
 
-    # Deferred import: orchestrator is implemented in Feature 04.
-    from mellea.backends import model_ids
-
-    from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
-
     def _resolve_model_id(name: str):
         resolved = getattr(model_ids, name, None)
         if resolved is None:
@@ -145,8 +145,6 @@ def main(
     if agent_task.output.path:
         _write_output(result, agent_task)
     else:
-        from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
-
         print(MarkdownDocSerializer(doc=result).serialize().text)
 
 
