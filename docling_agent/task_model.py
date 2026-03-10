@@ -112,14 +112,14 @@ class WriteTask(AgentTask):
     mode: Literal["write"] = "write"
     # sources are optional for writing tasks
 
-    
+
 class EditingTask(AgentTask):
     """Edit an existing document."""
 
     mode: Literal["edit"] = "edit"
     # sources are optional for editing tasks
-    
-    
+
+
 class EnrichTask(AgentTask):
     """Enrich documents with summaries, keywords, or entity annotations."""
 

@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mellea.backends import model_ids
+from mellea.backends.model_ids import ModelIdentifier
+from mellea.core.base import ModelOutputThunk
+from mellea.stdlib.requirements import Requirement, simple_validate
+from mellea.stdlib.sampling import RejectionSamplingStrategy
+
 from docling.datamodel.base_models import ConversionStatus
 from docling.document_converter import DocumentConverter
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
@@ -13,11 +19,6 @@ from docling_core.types.doc.document import (
     SectionHeaderItem,
     TitleItem,
 )
-from mellea.backends import model_ids
-from mellea.backends.model_ids import ModelIdentifier
-from mellea.core.base import ModelOutputThunk
-from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import find_json_dicts
@@ -37,7 +38,6 @@ from docling_agent.task_model import (
     RAGTask,
     WriteTask,
 )
-
 
 # Internal type alias: a resolved document paired with its library id.
 _SourcePair = tuple[DoclingDocument, str]
@@ -228,7 +228,9 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         Returns updated (doc, doc_id) pairs where each doc is the enriched
         version (``_summarize_items`` returns a hierarchical document).
         """
-        logger.info(f"_ensure_enriched: operations={operations}, docs={len(source_pairs)}")
+        logger.info(
+            f"_ensure_enriched: operations={operations}, docs={len(source_pairs)}"
+        )
         enricher = DoclingEnrichingAgent(
             model_id=self.get_writing_model_id(),
             tools=[],
@@ -384,14 +386,14 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         "Given a user query and an optional list of available documents, decide "
         "which agent mode(s) best handle the request and formulate concrete sub-tasks.\n\n"
         "Available modes:\n"
-        "  rag      – answer questions by querying document content\n"
-        "  extract  – extract structured data from documents\n"
-        "  write    – write or generate a new document\n"
-        "  edit     – edit an existing document\n"
-        "  enrich   – summarize and annotate document content\n\n"
-        "Output ONLY a JSON object in a markdown code block with key \"tasks\" "
-        "containing a list of task objects. Each task must have: \"mode\" (required), "
-        "\"query\" (specific instruction for that sub-task), and \"sources\" "
+        "  rag      - answer questions by querying document content\n"
+        "  extract  - extract structured data from documents\n"
+        "  write    - write or generate a new document\n"
+        "  edit     - edit an existing document\n"
+        "  enrich   - summarize and annotate document content\n\n"
+        'Output ONLY a JSON object in a markdown code block with key "tasks" '
+        'containing a list of task objects. Each task must have: "mode" (required), '
+        '"query" (specific instruction for that sub-task), and "sources" '
         "(list of document names from the provided list; empty list is fine for write tasks)."
     )
 
@@ -434,7 +436,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 )
             ],
         )
-        
+
         dicts = find_json_dicts(str(raw))
         if not dicts or "tasks" not in dicts[0]:
             raise ValueError(f"Planner did not return a valid plan; got: {raw!r}")
@@ -458,20 +460,67 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             logger.info(f"  sub-task: mode={mode!r}, query={query!r}")
 
             if mode == "rag":
-                sub = RAGTask(query=query, sources=task.sources, models=task.models, logging=task.logging)
-                results.append(self._run_rag(task=sub, source_pairs=resolved, library=library))
+                results.append(
+                    self._run_rag(
+                        task=RAGTask(
+                            query=query,
+                            sources=task.sources,
+                            models=task.models,
+                            logging=task.logging,
+                        ),
+                        source_pairs=resolved,
+                        library=library,
+                    )
+                )
             elif mode == "extract":
-                sub = ExtractTask(query=query, sources=task.sources, models=task.models, logging=task.logging)
-                results.append(self._run_extract(task=sub, source_pairs=resolved))
+                results.append(
+                    self._run_extract(
+                        task=ExtractTask(
+                            query=query,
+                            sources=task.sources,
+                            models=task.models,
+                            logging=task.logging,
+                        ),
+                        source_pairs=resolved,
+                    )
+                )
             elif mode == "write":
-                sub = WriteTask(query=query, sources=task.sources, models=task.models, logging=task.logging)
-                results.append(self._run_write(task=sub, source_pairs=resolved))
+                results.append(
+                    self._run_write(
+                        task=WriteTask(
+                            query=query,
+                            sources=task.sources,
+                            models=task.models,
+                            logging=task.logging,
+                        ),
+                        source_pairs=resolved,
+                    )
+                )
             elif mode == "edit":
-                sub = EditingTask(query=query, sources=task.sources, models=task.models, logging=task.logging)
-                results.append(self._run_edit(task=sub, source_pairs=resolved))
+                results.append(
+                    self._run_edit(
+                        task=EditingTask(
+                            query=query,
+                            sources=task.sources,
+                            models=task.models,
+                            logging=task.logging,
+                        ),
+                        source_pairs=resolved,
+                    )
+                )
             elif mode == "enrich":
-                sub = EnrichTask(query=query, sources=task.sources, models=task.models, logging=task.logging)
-                results.append(self._run_enrich(task=sub, source_pairs=resolved, library=library))
+                results.append(
+                    self._run_enrich(
+                        task=EnrichTask(
+                            query=query,
+                            sources=task.sources,
+                            models=task.models,
+                            logging=task.logging,
+                        ),
+                        source_pairs=resolved,
+                        library=library,
+                    )
+                )
             else:
                 logger.warning(f"Planner produced unknown mode {mode!r}, skipping")
 
