@@ -73,15 +73,11 @@ class RAGTask(AgentTask):
     """Query one or more documents using the chunkless RAG loop."""
 
     mode: Literal["rag"] = "rag"
-    max_iterations: int = Field(
-        5, ge=1, description="Maximum section-selection iterations."
-    )
-    enrich_before_rag: bool = Field(
-        True, description="Run summarization enrichment before the RAG loop."
-    )
+    max_iterations: int = Field(5, ge=1, description="Maximum section-selection iterations.")
+    enrich_before_rag: bool = Field(True, description="Run summarization enrichment before the RAG loop.")
 
     @model_validator(mode="after")
-    def sources_required(self) -> "RAGTask":
+    def sources_required(self) -> RAGTask:
         if not self.sources:
             raise ValueError("'sources' must not be empty for RAG tasks")
         return self
@@ -95,12 +91,10 @@ class ExtractTask(AgentTask):
         None,
         description="Optional path to a JSON schema file. If omitted the schema is inferred from the query.",
     )
-    glob: str | None = Field(
-        None, description="Glob pattern applied when sources contain directories."
-    )
+    glob: str | None = Field(None, description="Glob pattern applied when sources contain directories.")
 
     @model_validator(mode="after")
-    def sources_required(self) -> "ExtractTask":
+    def sources_required(self) -> ExtractTask:
         if not self.sources:
             raise ValueError("'sources' must not be empty for extraction tasks")
         return self
@@ -130,7 +124,7 @@ class EnrichTask(AgentTask):
     )
 
     @model_validator(mode="after")
-    def sources_required(self) -> "EnrichTask":
+    def sources_required(self) -> EnrichTask:
         if not self.sources:
             raise ValueError("'sources' must not be empty for enrichment tasks")
         return self
@@ -147,14 +141,14 @@ _task_adapter: TypeAdapter[AnyTask] = TypeAdapter(AnyTask)
 
 def load_task(
     path: Path,
-) -> "RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | AgentTask":
+) -> RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | AgentTask:
     """Load and validate a task from a YAML file.
 
     The ``mode`` key selects the task subclass. If ``mode`` is omitted or
     ``null``, the base ``AgentTask`` is returned with ``mode=None`` and the
     orchestrator will enter planning mode.
     """
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"Task YAML must be a mapping, got {type(data).__name__}")

@@ -3,6 +3,12 @@
 from pathlib import Path
 from typing import Any, ClassVar
 
+from docling_core.types.doc.document import (
+    DocItemLabel,
+    DoclingDocument,
+    SectionHeaderItem,
+    TitleItem,
+)
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
@@ -10,13 +16,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
-
-from docling_core.types.doc.document import (
-    DocItemLabel,
-    DoclingDocument,
-    SectionHeaderItem,
-    TitleItem,
-)
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -96,25 +95,16 @@ class DoclingRAGAgent(BaseDoclingAgent):
             result = self._rag_loop(query=task, doc=doc)
             per_doc_answers.append(result.answer)
             all_iterations.extend(result.iterations)
-            logger.info(
-                f"RAG loop finished: converged={result.converged}, "
-                f"iterations={len(result.iterations)}"
-            )
+            logger.info(f"RAG loop finished: converged={result.converged}, iterations={len(result.iterations)}")
 
         if len(docs) > 1:
-            self._rprint(
-                Rule(
-                    f"[bold cyan]Merging answers from {len(docs)} documents[/bold cyan]"
-                )
-            )
+            self._rprint(Rule(f"[bold cyan]Merging answers from {len(docs)} documents[/bold cyan]"))
 
         final_answer = self._merge_answers(query=task, answers=per_doc_answers)
 
         answer_doc = DoclingDocument(name="rag_answer")
         answer_doc.add_title(text="Answer", parent=answer_doc.body)
-        answer_doc.add_text(
-            label=DocItemLabel.TEXT, text=final_answer, parent=answer_doc.body
-        )
+        answer_doc.add_text(label=DocItemLabel.TEXT, text=final_answer, parent=answer_doc.body)
         return answer_doc
 
     # ------------------------------------------------------------------
@@ -147,9 +137,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
         # Fallback: no section headers → return full doc text
         if not valid_refs:
-            logger.warning(
-                "No section headers found; falling back to full document text."
-            )
+            logger.warning("No section headers found; falling back to full document text.")
             self._rprint(
                 Text(
                     "⚠ No section headers found — returning full document.",
@@ -167,14 +155,10 @@ class DoclingRAGAgent(BaseDoclingAgent):
             unvisited = valid_refs - visited
             if not unvisited:
                 logger.info("All sections visited; stopping early.")
-                self._rprint(
-                    Text("All sections visited — stopping early.", style="yellow")
-                )
+                self._rprint(Text("All sections visited — stopping early.", style="yellow"))
                 break
 
-            self._rprint(
-                Rule(f"[bold]Iteration {i + 1} / {self.max_iterations}[/bold]")
-            )
+            self._rprint(Rule(f"[bold]Iteration {i + 1} / {self.max_iterations}[/bold]"))
 
             selection = self._select_section(
                 m=m,
@@ -187,17 +171,14 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
             self._rprint(
                 Panel(
-                    f"[bold]Selected:[/bold]  {selection.section_ref}\n"
-                    f"[bold]Reason:[/bold]    {selection.reason}",
+                    f"[bold]Selected:[/bold]  {selection.section_ref}\n[bold]Reason:[/bold]    {selection.reason}",
                     title="[cyan]Section Selection[/cyan]",
                     border_style="blue",
                 )
             )
 
             section_text = self._get_section_content(doc, selection.section_ref)
-            preview = section_text[:300].replace("\n", " ") + (
-                " …" if len(section_text) > 300 else ""
-            )
+            preview = section_text[:300].replace("\n", " ") + (" …" if len(section_text) > 300 else "")
             self._rprint(
                 Panel(
                     f"[dim]{preview}[/dim]\n\n[bold]Length:[/bold] {len(section_text)} chars",
@@ -214,9 +195,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
             )
 
             status_color = "green" if attempt.can_answer else "yellow"
-            status_label = (
-                "✓ Can answer" if attempt.can_answer else "✗ Need more context"
-            )
+            status_label = "✓ Can answer" if attempt.can_answer else "✗ Need more context"
             self._rprint(
                 Panel(
                     f"[bold]Status:[/bold]   [{status_color}]{status_label}[/{status_color}]\n"
@@ -271,10 +250,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
             )
         )
         return RAGResult(
-            answer=(
-                f"[Partial answer after {len(iterations)} iteration(s)]\n\n"
-                f"{last.response}"
-            ),
+            answer=(f"[Partial answer after {len(iterations)} iteration(s)]\n\n{last.response}"),
             iterations=iterations,
             converged=False,
         )
@@ -299,7 +275,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
     def _extract_section_refs(self, doc: DoclingDocument) -> set[str]:
         refs: set[str] = set()
         for item, _ in doc.iterate_items():
-            if isinstance(item, (TitleItem, SectionHeaderItem)):
+            if isinstance(item, TitleItem | SectionHeaderItem):
                 refs.add(item.self_ref)
         return refs
 
@@ -345,8 +321,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
             requirements=[
                 Requirement(
                     description=(
-                        f"Return one JSON object with 'reason' (string) and "
-                        f"'section_ref' (one of: {unvisited})"
+                        f"Return one JSON object with 'reason' (string) and 'section_ref' (one of: {unvisited})"
                     ),
                     validation_fn=simple_validate(_validate),
                 ),
@@ -356,10 +331,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
         dicts = find_json_dicts(answer.value)
         d = dicts[0] if dicts else {}
-        if (
-            not isinstance(d.get("reason"), str)
-            or d.get("section_ref") not in unvisited
-        ):
+        if not isinstance(d.get("reason"), str) or d.get("section_ref") not in unvisited:
             # Rejection sampling exhausted without a valid response; pick first unvisited
             return SectionSelection(reason="fallback", section_ref=unvisited[0])
         return SectionSelection(reason=d["reason"], section_ref=d["section_ref"])
@@ -380,9 +352,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         # with level-based sibling scanning below.
         subtree = collect_subtree_text(node, doc)
 
-        if len(node.children or []) == 0 and isinstance(
-            node, (TitleItem, SectionHeaderItem)
-        ):
+        if len(node.children or []) == 0 and isinstance(node, TitleItem | SectionHeaderItem):
             # Flat document: scan forward until next same-or-higher section
             subtree = self._collect_flat_section_text(doc, section_ref)
 
@@ -404,7 +374,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
             if in_section:
                 if (
-                    isinstance(item, (TitleItem, SectionHeaderItem))
+                    isinstance(item, TitleItem | SectionHeaderItem)
                     and section_level is not None
                     and depth <= section_level
                 ):
@@ -439,9 +409,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
             if len(dicts) != 1:
                 return False
             d = dicts[0]
-            return isinstance(d.get("can_answer"), bool) and isinstance(
-                d.get("response"), str
-            )
+            return isinstance(d.get("can_answer"), bool) and isinstance(d.get("response"), str)
 
         answer = m.instruct(
             prompt,

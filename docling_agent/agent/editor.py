@@ -1,12 +1,6 @@
 from pathlib import Path
 from typing import Any, ClassVar
 
-# from smolagents import MCPClient, Tool, ToolCollection
-# from smolagents.models import ChatMessage, MessageRole, Model
-from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
-
 from docling_core.types.doc.document import (
     DocItemLabel,
     DoclingDocument,
@@ -15,6 +9,12 @@ from docling_core.types.doc.document import (
     TableItem,
     TextItem,
 )
+
+# from smolagents import MCPClient, Tool, ToolCollection
+# from smolagents.models import ChatMessage, MessageRole, Model
+from mellea.backends.model_ids import ModelIdentifier
+from mellea.stdlib.requirements import Requirement, simple_validate
+from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -42,9 +42,7 @@ from docling_agent.resources.prompts import (
 
 
 class DoclingEditingAgent(BaseDoclingAgent):
-    system_prompt_for_editing_document: ClassVar[str] = (
-        SYSTEM_PROMPT_FOR_EDITING_DOCUMENT
-    )
+    system_prompt_for_editing_document: ClassVar[str] = SYSTEM_PROMPT_FOR_EDITING_DOCUMENT
     system_prompt_for_editing_table: ClassVar[str] = SYSTEM_PROMPT_FOR_EDITING_TABLE
 
     system_prompt_expert_writer: ClassVar[str] = SYSTEM_PROMPT_EXPERT_WRITER
@@ -77,13 +75,9 @@ class DoclingEditingAgent(BaseDoclingAgent):
                 refs=op["refs"],
             )
         elif op["operation"] == "delete_content":
-            self._delete_content_of_document_items(
-                task=task, document=document, refs=op["refs"]
-            )
+            self._delete_content_of_document_items(task=task, document=document, refs=op["refs"])
         elif op["operation"] == "update_section_heading_level":
-            self._update_section_heading_level(
-                task=task, document=document, to_level=op["to_level"]
-            )
+            self._update_section_heading_level(task=task, document=document, to_level=op["to_level"])
         else:
             message = f"Could not execute operate op: {op}"
             logger.info(message)
@@ -160,9 +154,7 @@ Now, provide me with the operations to execute the task!
             self._update_content_of_textitem(task=task, document=document, item=item)
 
         else:
-            logger.warning(
-                f"Dont know how to update the item (of label={item.label}) for task: {task}"
-            )
+            logger.warning(f"Dont know how to update the item (of label={item.label}) for task: {task}")
 
     def _update_content_of_table(
         self,
@@ -254,9 +246,7 @@ Execute the following task: {task}
 
         document = insert_document(item=item, doc=document, updated_doc=updated_doc)
 
-    def _delete_content_of_document_items(
-        self, task: str, document: DoclingDocument, refs: list[RefItem]
-    ):
+    def _delete_content_of_document_items(self, task: str, document: DoclingDocument, refs: list[RefItem]):
         logger.info("_delete_content_of_document_items")
 
     def _append_content_of_document_items(
@@ -268,9 +258,7 @@ Execute the following task: {task}
     ):
         logger.info("_append_content_of_document_items")
 
-    def _update_section_heading_level(
-        self, task: str, document: DoclingDocument, to_level: dict[str, int]
-    ):
+    def _update_section_heading_level(self, task: str, document: DoclingDocument, to_level: dict[str, int]):
         for sref, level in to_level.items():
             ref = RefItem(cref=sref)
             item = ref.resolve(document)
@@ -278,9 +266,7 @@ Execute the following task: {task}
             if isinstance(item, SectionHeaderItem):
                 item.level = level
             else:
-                logger.warning(
-                    f"{sref} is not SectionHeaderItem (got {type(item).__name__})"
-                )
+                logger.warning(f"{sref} is not SectionHeaderItem (got {type(item).__name__})")
 
     def _rewrite_content(
         self,

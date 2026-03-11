@@ -2,13 +2,6 @@ import json
 from pathlib import Path
 from typing import Any, ClassVar
 
-# from smolagents import MCPClient, Tool, ToolCollection
-# from smolagents.models import ChatMessage, MessageRole, Model
-from mellea.backends.model_ids import ModelIdentifier
-from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
-from pydantic import Field
-
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling.datamodel.base_models import InputFormat
 from docling.document_extractor import DocumentExtractor
@@ -16,6 +9,13 @@ from docling_core.types.doc import (
     CodeLanguageLabel,
     DoclingDocument,
 )
+
+# from smolagents import MCPClient, Tool, ToolCollection
+# from smolagents.models import ChatMessage, MessageRole, Model
+from mellea.backends.model_ids import ModelIdentifier
+from mellea.stdlib.requirements import Requirement, simple_validate
+from mellea.stdlib.sampling import RejectionSamplingStrategy
+from pydantic import Field
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent_models import setup_local_session
@@ -38,9 +38,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             model_id=model_id,
             tools=tools,
         )
-        self.extractor = DocumentExtractor(
-            allowed_formats=[InputFormat.IMAGE, InputFormat.PDF]
-        )
+        self.extractor = DocumentExtractor(allowed_formats=[InputFormat.IMAGE, InputFormat.PDF])
 
     def run(
         self,
@@ -76,9 +74,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
                     self.last_results[str(source)] = items  # key by path string
                     successes += 1
                     total_items += len(items)
-                    logger.info(
-                        f"Completed {source} with {len(items)} item(s) extracted."
-                    )
+                    logger.info(f"Completed {source} with {len(items)} item(s) extracted.")
                 except Exception as e:
                     failures += 1
                     logger.error(f"Failed to extract from {source}: {e}")
