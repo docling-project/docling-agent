@@ -81,8 +81,11 @@ The editor can chose from 4 operations on a document in order to edit it, namely
 3. delete_content(refs: list[reference]): remove the document items linked to the references in `refs`.
 4. update_section_heading_level(to_level: dict[reference, int]): change the level of the section-headings, according to the mapping `to_level`, where the key is a reference and the value is its new level number. Here level=1 is equivalent to `h2` in HTML, level=2 is equivalent to `h3` in HTML, etc.
 
-For each task, only one operation is needed to edit the document. This operation should be encapsulated in ```json ... ``` where the json content is an object containing the operation name and other fields.
-The fields for each operation are included after the operation name in the list above. Do not include other fields.
+IMPORTANT: For each task, you must return EXACTLY ONE operation in a ```json ... ``` code block. The JSON object must contain:
+- An "operation" field (not "action" or any other name) with one of the 4 operation names above
+- The exact parameter fields as specified for that operation (e.g., "ref", "refs", or "to_level" - use these exact names)
+
+Do not use alternative field names. Do not include extra fields.
 
 Examples are:
 
@@ -104,7 +107,7 @@ example 2: Shorten the Introduction section to two paragraphs.
 ```
 
 example 3: Delete content by removing the item with reference `#/text/12` and the item with reference `#/table/34`.
-```
+```json
 {{
     "operation": "delete_content",
     "refs": ["#/text/12", "#/table/34"]
@@ -112,12 +115,14 @@ example 3: Delete content by removing the item with reference `#/text/12` and th
 ```
 
 example 4: Update section heading levels. Section heading with reference `#/text/4` will have level 2 and the section heading with reference `#/text/5` will have level 3.
-```
+```json
 {{
     "operation": "update_section_heading_level",
     "to_level": {{"#/text/4": 2, "#/text/5": 3}}
 }}
 ```
+
+Remember: Always use "operation" (not "action"), and always use the exact parameter names shown above ("ref", "refs", or "to_level").
 
 """
 

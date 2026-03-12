@@ -189,7 +189,9 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         editor.run(
             task=(
                 "Fix the section heading levels so the document hierarchy is correct. "
-                "Level 1 is a top-level section, level 2 a subsection, etc."
+                "Level 1 is a top-level section, level 2 a subsection, level 3 a sub-subsection, etc. "
+                "Use the update_section_heading_level operation with the exact field name 'to_level' "
+                "(not 'level' or 'levels'). Return the operation in the exact format specified in the system prompt."
             ),
             document=document,
         )
@@ -341,7 +343,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                     keywords = json.loads(match.group(1))
                     if item.meta is None:
                         item.meta = BaseMeta()
-                    item.meta.keywords = keywords  # type: ignore[attr-defined]
+                    item.meta.docling_agent__keywords = keywords
             except Exception as exc:
                 logger.warning(f"Keyword extraction failed for {item.self_ref}: {exc}")
 

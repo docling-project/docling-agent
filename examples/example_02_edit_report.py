@@ -1,10 +1,9 @@
 from pathlib import Path
 
-from mellea.backends import model_ids
-
 from docling_core.types.doc.document import (
     DoclingDocument,
 )
+from mellea.backends import model_ids
 
 from docling_agent.agents import DoclingEditingAgent, logger
 
@@ -58,6 +57,6 @@ def main():
         ),
     ]:
         run_task(ipath=ipath, opath=_[1], task=_[0], model_id=model_id)
-    
+
 if __name__ == "__main__":
     main()
