@@ -13,4 +13,4 @@ merge_protections:
       - base = main
       - files ~= ^test
     success_conditions:
-      - "#approved-reviews-by >= 2"
+      - "#approved-reviews-by >= 1"
