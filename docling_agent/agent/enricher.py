@@ -341,7 +341,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                     keywords = json.loads(match.group(1))
                     if item.meta is None:
                         item.meta = BaseMeta()
-                    item.meta.keywords = keywords  # type: ignore[attr-defined]
+                    item.meta.docling_agent__keywords = keywords
             except Exception as exc:
                 logger.warning(f"Keyword extraction failed for {item.self_ref}: {exc}")
 
