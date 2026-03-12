@@ -25,10 +25,10 @@ repos:
     hooks:
       - id: pytest
         name: Pytest
-        entry: uv run --no-sync pytest --cov=docling_agent --cov-report=xml tests
+        entry: uv run --no-sync pytest -m "not slow" --cov=docling_agent --cov-report=xml tests
         pass_filenames: false
         language: system
-        files: '\.py$'	
+        files: '\.py$'
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.8.3
     hooks:

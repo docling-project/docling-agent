@@ -1,6 +1,8 @@
+import re
 from pathlib import Path
 from typing import Any, ClassVar
 
+from docling_core.types.base import _JSON_POINTER_REGEX
 from docling_core.types.doc.document import (
     DocItemLabel,
     DoclingDocument,
@@ -111,9 +113,15 @@ We first need to:
     - identify from the outline all the document items that are relevant
     - plan the operations needed to update the document
 
-Remember that you can only choose from 4 different operations: update_content, rewrite_content, delete_content, and update_section_heading_level.
-Remember that each operation must be encapusalted in one ```json...``` block.
-Now, provide me with the operations to execute the task!
+IMPORTANT: You must return EXACTLY ONE operation in a ```json...``` block with:
+    - Field "operation" (not "action") set to one of: update_content, rewrite_content, delete_content, update_section_heading_level
+    - The exact parameter fields for that operation:
+        * update_content: use "ref" (not "reference")
+        * rewrite_content: use "refs" (not "references")
+        * delete_content: use "refs" (not "references")
+        * update_section_heading_level: use "to_level" (not "level" or "levels")
+
+Now, provide me with the operation to execute the task using the exact field names specified above!
 """
 
         prompt = f"{context}{identification}"
@@ -123,9 +131,64 @@ Now, provide me with the operations to execute the task!
             system_prompt=self.system_prompt_for_editing_document,
         )
 
+        def _validate_operation_format(content: str) -> bool:
+            """Validate that the response contains a valid operation JSON with correct field names."""
+            ops = find_json_dicts(text=content)
+            if len(ops) == 0:
+                return False
+            op = ops[0]
+
+            # Check if "operation" key exists (reject if using "action" instead)
+            if "operation" not in op:
+                return False
+
+            # Compile the JSON pointer regex pattern from docling-core
+            ref_pattern = re.compile(_JSON_POINTER_REGEX)
+
+            # Validate operation-specific fields use exact names
+            operation = op.get("operation")
+            if operation == "update_section_heading_level":
+                # Require exact field name "to_level"
+                if "to_level" not in op:
+                    return False
+                # Validate that all keys in to_level are valid references
+                to_level = op.get("to_level", {})
+                if not isinstance(to_level, dict):
+                    return False
+                for ref_key in to_level.keys():
+                    if not ref_pattern.match(str(ref_key)):
+                        return False
+            elif operation == "update_content":
+                # Require exact field name "ref"
+                if "ref" not in op:
+                    return False
+                # Validate ref format
+                ref = op.get("ref", "")
+                if not ref_pattern.match(str(ref)):
+                    return False
+            elif operation in ["rewrite_content", "delete_content"]:
+                # Require exact field name "refs"
+                if "refs" not in op:
+                    return False
+                # Validate refs format
+                refs = op.get("refs", [])
+                if not isinstance(refs, list):
+                    return False
+                for ref in refs:
+                    if not ref_pattern.match(str(ref)):
+                        return False
+
+            return True
+
         answer = m.instruct(
             prompt,
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            requirements=[
+                Requirement(
+                    description='Return exactly one JSON object in ```json...``` format with an "operation" field',
+                    validation_fn=simple_validate(_validate_operation_format),
+                ),
+            ],
         )
         # logger.info(f"answer: {answer.value}")
 
@@ -136,10 +199,33 @@ Now, provide me with the operations to execute the task!
         if len(ops) == 0:
             raise ValueError("No operation is detected")
 
-        if "operation" not in ops[0]:
-            raise ValueError(f"`operation` not in op: {ops[0]}")
+        op = ops[0]
 
-        return ops[0]
+        # Validate required fields
+        if "operation" not in op:
+            raise ValueError(f"'operation' field missing in response: {op}")
+
+        operation = op.get("operation")
+
+        # Validate operation-specific required fields
+        if operation == "update_section_heading_level":
+            if "to_level" not in op:
+                raise ValueError(
+                    f"'to_level' field missing in update_section_heading_level operation. "
+                    f"Got: {op}. Use 'to_level' (not 'level' or 'levels')."
+                )
+        elif operation == "update_content":
+            if "ref" not in op:
+                raise ValueError(
+                    f"'ref' field missing in update_content operation. Got: {op}. Use 'ref' (not 'reference')."
+                )
+        elif operation in ["rewrite_content", "delete_content"]:
+            if "refs" not in op:
+                raise ValueError(
+                    f"'refs' field missing in {operation} operation. Got: {op}. Use 'refs' (not 'references')."
+                )
+
+        return op
 
     def _update_content(self, task: str, document: DoclingDocument, sref: str):
         logger.info("_update_content_of_document_items")

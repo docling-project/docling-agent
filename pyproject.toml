@@ -192,6 +192,7 @@ testpaths = [
 addopts = "-rA --color=yes --tb=short --maxfail=5"
 markers = [
 "asyncio",
+"slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
 
 [tool.semantic_release]

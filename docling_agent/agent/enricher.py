@@ -189,7 +189,9 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         editor.run(
             task=(
                 "Fix the section heading levels so the document hierarchy is correct. "
-                "Level 1 is a top-level section, level 2 a subsection, etc."
+                "Level 1 is a top-level section, level 2 a subsection, level 3 a sub-subsection, etc. "
+                "Use the update_section_heading_level operation with the exact field name 'to_level' "
+                "(not 'level' or 'levels'). Return the operation in the exact format specified in the system prompt."
             ),
             document=document,
         )
