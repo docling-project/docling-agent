@@ -42,7 +42,7 @@ def advanced_writing_report(task: str):
     # Configure specialized models for reasoning and writing
     agent.reasoning_model_id = reasoning_model_id
     agent.writing_model_id = writing_model_id
-    
+
     document = agent.run(task=task)
 
     # Save the document
@@ -63,12 +63,11 @@ def main():
         "properties, a section on biodegradability and common practices to improve "
         "strength and durability."
     )
-    
+
     # simple_writing_report(task=task)
 
     advanced_writing_report(task=task)
 
-    
-    
+
 if __name__ == "__main__":
     main()

@@ -1,5 +1,5 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 from mellea.backends import model_ids
 
@@ -47,14 +47,14 @@ def main():
         "total": "float",
         "currency": "string",
     }
-    
+
     docdir = Path("./examples/example_03_extract")  # Adjust to your data root
 
     for _ in [
         (
             schema_01,
             "curriculum_vitae",
-        ),        
+        ),
         (
             schema_02,
             "papers",
@@ -62,10 +62,10 @@ def main():
         (
             schema_03,
             "invoices",
-        )        
+        )
     ]:
         cdir = docdir / _[1]
-        
+
         sources: list[Path] = []
         # Collect PDFs and PNGs recursively under each source directory
         sources.extend([p for p in cdir.rglob("*.pdf") if p.is_file()])
@@ -74,7 +74,7 @@ def main():
         sources.extend([p for p in cdir.rglob("*.jpeg") if p.is_file()])
 
         sources = sorted(sources)
-        
+
         logger.info(f"documents [{len(sources)}]:\n\n\t" + ",\n\t".join(str(p) for p in sources))
 
         run_task(
@@ -83,6 +83,6 @@ def main():
             opath=docdir / f"{_[1]}_extraction_report.html",
             model_id=model_id,
         )
-    
+
 if __name__ == "__main__":
     main()

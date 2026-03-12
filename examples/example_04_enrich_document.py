@@ -1,9 +1,8 @@
 import os
 from pathlib import Path
 
-from mellea.backends import model_ids
-
 from docling_core.types.doc.document import DoclingDocument
+from mellea.backends import model_ids
 
 from docling_agent.agents import DoclingEnrichingAgent, logger
 
