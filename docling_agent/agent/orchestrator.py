@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from docling.datamodel.base_models import ConversionStatus
 from docling.document_converter import DocumentConverter
@@ -306,7 +307,10 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             model_id=self._model_id_for("reasoning", task),
             tools=[],
         )
-        sources: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
+        # For extraction, pass the original source paths (not converted DoclingDocuments)
+        # because DocumentExtractor needs raw files to perform extraction
+        raw_paths = self._expand_paths(task)
+        sources: list[DoclingDocument | Path] = cast(list[DoclingDocument | Path], raw_paths)
         return extractor.run(task=task.query, sources=sources)
 
     def _run_write(
