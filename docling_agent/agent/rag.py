@@ -30,7 +30,7 @@ from docling_agent.agent.rag_models import (
     SectionSelection,
 )
 from docling_agent.agent_models import setup_local_session
-from docling_agent.logging import logger  # type: ignore[import-untyped]
+from docling_agent.logging import logger
 
 
 class DoclingRAGAgent(BaseDoclingAgent):

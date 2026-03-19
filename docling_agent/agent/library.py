@@ -9,7 +9,7 @@ from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
 from pydantic import BaseModel, Field
 
-from docling_agent.logging import logger  # type: ignore[import-untyped]
+from docling_agent.logging import logger
 
 
 class DocStatus(BaseModel):

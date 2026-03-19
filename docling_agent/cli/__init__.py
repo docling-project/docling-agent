@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import typer
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
@@ -10,7 +9,7 @@ from mellea.backends import model_ids
 
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent_models import configure_llm_logging
-from docling_agent.logging import logger  # type: ignore[import-untyped]
+from docling_agent.logging import logger
 from docling_agent.task_model import AgentTask, load_task
 
 app = typer.Typer(name="docling-agent", add_completion=False, pretty_exceptions_show_locals=False)

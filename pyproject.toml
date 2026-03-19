@@ -68,6 +68,7 @@ dev = [
     "boto3-stubs[s3]~=1.35",
     "ruff>=0.9.6",
     "types-pyyaml>=6.0.12.20250915",
+    "types-tabulate>=0.10.0.20260308",
 ]
 
 [project.scripts]
