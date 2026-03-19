@@ -118,10 +118,9 @@ class EnrichTask(AgentTask):
     """Enrich documents with summaries, keywords, or entity annotations."""
 
     mode: Literal["enrich"] = "enrich"
-    operations: list[Literal["summarize", "keywords", "entities"]] = Field(
-        default_factory=lambda: ["summarize"],  # type: ignore[arg-type]
-        description="Enrichment operations to apply.",
-    )
+    operations: Annotated[
+        list[Literal["summarize", "keywords", "entities"]], Field(description="Enrichment operations to apply.")
+    ] = ["summarize"]
 
     @model_validator(mode="after")
     def sources_required(self) -> EnrichTask:

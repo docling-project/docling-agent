@@ -36,8 +36,7 @@ classifiers = [
 requires-python = ">=3.10,<4.0"
 dependencies = [
     "docling>=2.61.0",
-    # "docling-core[chunking]>=2.50.1",
-    "docling-core[chunking] @ git+https://github.com/docling-project/docling-core.git@62f8a712c36021a7f28a5b83858b7c4249c5e20b",
+    "docling-core>=2.70",
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
     "typer>=0.12.5",
@@ -68,6 +67,7 @@ dev = [
     "boto3-stubs[s3]~=1.35",
     "ruff>=0.9.6",
     "types-pyyaml>=6.0.12.20250915",
+    "types-tabulate>=0.10.0.20260308",
 ]
 
 [project.scripts]

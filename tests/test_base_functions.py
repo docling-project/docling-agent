@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 
 from docling_core.types.doc.document import DoclingDocument, SectionHeaderItem
+from test_data_gen_flag import GEN_TEST_DATA
 
-from docling_agent.agent.base_functions import find_json_dicts, make_hierarchical_document
+from docling_agent.agent.base_functions import create_document_outline, find_json_dicts, make_hierarchical_document
 
 
 def test_find_json_dicts_with_list_input():
@@ -124,10 +125,6 @@ def test_make_hierarchical_document():
     with open(json_path) as f:
         doc_dict = json.load(f)
 
-    # Adjust version to match SDK if needed (handle version compatibility)
-    if "version" in doc_dict:
-        doc_dict["version"] = "1.8.0"
-
     # Instantiate as DoclingDocument
     original_doc = DoclingDocument.model_validate(doc_dict)
 
@@ -197,3 +194,34 @@ def test_make_hierarchical_document():
                 assert parent.level < item.level, (
                     f"Parent section (level {parent.level}) should have lower level than child (level {item.level})"
                 )
+
+
+def test_create_document_outline():
+    """Test that create_document_outline generates the expected outline format."""
+
+    json_path = Path(__file__).parent / "data" / "2408.09869v5.json"
+    with open(json_path) as f:
+        doc_dict = json.load(f)
+    doc = DoclingDocument.model_validate(doc_dict)
+
+    # Generate the outline
+    outline = create_document_outline(doc)
+
+    ground_truth_path = Path(__file__).parent / "data" / "2408.09869v5_outline.txt"
+    if GEN_TEST_DATA:
+        with open(ground_truth_path, "w") as f:
+            f.write(outline)
+    else:
+        assert ground_truth_path.exists(), f"Ground truth file not found: {ground_truth_path}"
+
+        with open(ground_truth_path) as f:
+            expected_outline = f.read()
+
+        assert outline == expected_outline, "Generated outline does not match ground truth"
+
+    assert isinstance(outline, str), "Outline should be a string"
+    assert len(outline) > 0, "Outline should not be empty"
+    assert "section-header" in outline, "Outline should contain section headers"
+    assert "reference=" in outline, "Outline should contain references"
+    reference_count = outline.count("reference=#/")
+    assert reference_count > 0, "Outline should contain item references"

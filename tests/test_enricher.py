@@ -23,9 +23,6 @@ def test_heading_levels_problem_exists():
     with open(json_path) as f:
         doc_dict = json.load(f)
 
-    # Fix version compatibility issue
-    doc_dict["version"] = "1.8.0"
-
     document = DoclingDocument.model_validate(doc_dict)
 
     # Find the section headers
@@ -99,9 +96,6 @@ def test_fix_heading_levels():
     json_path = Path("tests/data/2408.09869v5.json")
     with open(json_path) as f:
         doc_dict = json.load(f)
-
-    # Fix version compatibility issue
-    doc_dict["version"] = "1.8.0"
 
     document = DoclingDocument.model_validate(doc_dict)
 

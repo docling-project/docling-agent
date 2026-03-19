@@ -145,4 +145,4 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
         )
 
-        return json.loads(answer.value)  # type: ignore[arg-type]
+        return json.loads(answer.value)
