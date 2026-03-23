@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from docling_core.experimental.serializer.outline import OutlineMode
 from docling_core.types.doc.document import DoclingDocument, SectionHeaderItem
 from test_data_gen_flag import GEN_TEST_DATA
 
@@ -197,7 +198,7 @@ def test_make_hierarchical_document():
 
 
 def test_create_document_outline():
-    """Test that create_document_outline generates the expected outline format."""
+    """Test that create_document_outline generates the expected outline format using OutlineDocSerializer."""
 
     json_path = Path(__file__).parent / "data" / "2408.09869v5.json"
     with open(json_path) as f:
@@ -205,23 +206,57 @@ def test_create_document_outline():
     doc = DoclingDocument.model_validate(doc_dict)
 
     # Generate the outline
-    outline = create_document_outline(doc)
+    outline_json = create_document_outline(doc, mode=OutlineMode.OUTLINE)
 
-    ground_truth_path = Path(__file__).parent / "data" / "2408.09869v5_outline.txt"
+    # Path to ground truth file
+    ground_truth_path = Path(__file__).parent / "data" / "2408.09869v5_outline.json"
+
     if GEN_TEST_DATA:
+        # Regenerate ground truth
         with open(ground_truth_path, "w") as f:
-            f.write(outline)
+            f.write(outline_json)
+        print(f"Generated ground truth file: {ground_truth_path}")
     else:
+        # Compare against ground truth
         assert ground_truth_path.exists(), f"Ground truth file not found: {ground_truth_path}"
 
         with open(ground_truth_path) as f:
-            expected_outline = f.read()
+            expected_outline_json = f.read()
 
-        assert outline == expected_outline, "Generated outline does not match ground truth"
+        # Parse both JSON strings to compare as data structures (order-independent)
+        outline_data = json.loads(outline_json)
+        expected_data = json.loads(expected_outline_json)
 
-    assert isinstance(outline, str), "Outline should be a string"
-    assert len(outline) > 0, "Outline should not be empty"
-    assert "section-header" in outline, "Outline should contain section headers"
-    assert "reference=" in outline, "Outline should contain references"
-    reference_count = outline.count("reference=#/")
-    assert reference_count > 0, "Outline should contain item references"
+        assert outline_data == expected_data, "Generated outline does not match ground truth"
+
+    # Additional assertions to verify outline structure
+    assert isinstance(outline_json, str), "Outline should be a JSON string"
+    assert len(outline_json) > 0, "Outline should not be empty"
+
+    # Parse and verify JSON structure
+    outline_data = json.loads(outline_json)
+    assert isinstance(outline_data, list), "Outline should be a JSON array"
+    assert len(outline_data) > 0, "Outline should contain items"
+
+    # Verify each item has required fields
+    for item in outline_data:
+        assert "ref" in item, "Each item should have a 'ref' field"
+        assert "item" in item, "Each item should have an 'item' field (item type)"
+        assert item["ref"].startswith("#/"), "Reference should be a JSON pointer"
+
+    # Verify we have different item types
+    item_types = {item["item"] for item in outline_data}
+    assert len(item_types) > 1, "Outline should contain multiple item types"
+
+    # Verify section headers have title and level
+    section_headers = [item for item in outline_data if item.get("item") == "section_header"]
+    assert len(section_headers) > 0, "Outline should contain section headers"
+    for header in section_headers:
+        assert "title" in header, "Section headers should have a title"
+        assert "level" in header, "Section headers should have a level"
+
+    # Verify the document contains tables and pictures (as we know 2408.09869v5.json has them)
+    tables = [item for item in outline_data if item.get("item") == "table"]
+    pictures = [item for item in outline_data if item.get("item") == "picture"]
+    assert len(tables) > 0, "Outline should contain at least one table"
+    assert len(pictures) > 0, "Outline should contain at least one picture"

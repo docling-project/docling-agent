@@ -5,6 +5,16 @@ from io import BytesIO
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
+from docling_core.experimental.serializer.outline import (
+    OutlineDocSerializer,
+    OutlineFormat,
+    OutlineMode,
+    OutlineParams,
+)
+from docling_core.transforms.serializer.markdown import (
+    MarkdownDocSerializer,
+    MarkdownParams,
+)
 from docling_core.types.doc.document import (
     DocItemLabel,
     DoclingDocument,
@@ -87,48 +97,37 @@ def find_json_dicts(text: str) -> list[dict]:
     return calls
 
 
-def create_document_outline(doc: DoclingDocument) -> str:
-    logger.info("create_document_outline")
-    label_counter: dict[DocItemLabel, int] = {
-        DocItemLabel.TABLE: 0,
-        DocItemLabel.PICTURE: 0,
-        DocItemLabel.TEXT: 0,
-    }
+def create_document_outline(doc: DoclingDocument, mode: OutlineMode = OutlineMode.TABLE_OF_CONTENTS) -> str:
+    """Create a document outline using OutlineDocSerializer from docling-core.
 
-    lines: list[str] = []
-    for item, level in doc.iterate_items(with_groups=True):
-        if isinstance(item, TitleItem):
-            lines.append(f"title (reference={item.self_ref}): {item.text}")
+    This function uses the experimental OutlineDocSerializer with JSON format
+    to generate a structured outline of the document.
 
-        elif isinstance(item, SectionHeaderItem):
-            lines.append(f"section-header (level={item.level}, reference={item.self_ref}): {item.text}")
+    Args:
+        doc: The DoclingDocument to create an outline for.
+        mode: The outline mode, either as a table of contents or as general outline.
+    Returns:
+        A JSON string containing the document outline as an array of objects.
+        Each object contains: ref (reference), item (item type like 'text', 'picture', 'section_header'),
+        title (optional, for headers), level (optional, for headers).
+    """
+    logger.debug("create_document_outline")
 
-        elif isinstance(item, ListItem):
-            continue
+    # Use OutlineDocSerializer with JSON format to get structured data
+    params = OutlineParams(
+        include_non_meta=True,
+        mode=mode,
+        format=OutlineFormat.JSON,
+    )
+    serializer = OutlineDocSerializer(doc=doc, params=params)
+    result = serializer.serialize()
 
-        elif isinstance(item, TextItem):
-            lines.append(f"{item.label} (reference={item.self_ref})")
-
-        elif isinstance(item, TableItem):
-            label_counter[item.label] += 1
-            lines.append(f"{item.label} {label_counter[item.label]} (reference={item.self_ref})")
-
-        elif isinstance(item, PictureItem):
-            label_counter[item.label] += 1
-            lines.append(f"{item.label} {label_counter[item.label]} (reference={item.self_ref})")
-
-    outline = "\n\n".join(lines)
-
-    return outline
+    return result.text
 
 
 def serialize_item_to_markdown(item: TextItem, doc: DoclingDocument) -> str:
     """Serialize a text item to markdown format using existing serializer."""
     logger.info("serialize_item_to_markdown")
-    from docling_core.transforms.serializer.markdown import (
-        MarkdownDocSerializer,
-        MarkdownParams,
-    )
 
     serializer = MarkdownDocSerializer(doc=doc, params=MarkdownParams())
 

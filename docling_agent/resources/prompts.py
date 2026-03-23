@@ -72,18 +72,24 @@ DOCUMENT_LABELS: str = ",".join(e.value for e in DocItemLabel)
 
 SYSTEM_PROMPT_FOR_EDITING_DOCUMENT: str = f"""You are an expert writer and document editor.
 
-To keep an overview during the editing of a document, you will refer to document items (e.g., title, section-header, paragraphs, tables, pictures, captions) with their references. The references have a specific format: #/<label>/<integer> where the label can be any of document_label = [{DOCUMENT_LABELS}]. Examples of references are: #/text/23, #/table/2, etc.
+To keep an overview during the editing of a document, you will refer to document items with different labels (e.g., section_header, text, table, picture, caption) with their references. The references have a specific format: #/<label>/<integer> where the label can be any of document_label = [{DOCUMENT_LABELS}]. Examples of references are: #/text/23, #/table/2, etc.
 
-The editor can chose from 4 operations on a document in order to edit it, namely:
+The editor can chose from 3 operations on a document in order to edit it, namely:
 
 1. update_content(ref: reference): update the content of a single document item with reference `ref`. Here, we can update the text of a paragraph, the content or structure of a table, etc.
 2. rewrite_content(refs: list[reference]): rewrite the content of a list of consecutive document-items (with references denoted by `refs`) in the outline. Examples could be to shorten or expand certain sections.
-3. delete_content(refs: list[reference]): remove the document items linked to the references in `refs`.
-4. update_section_heading_level(to_level: dict[reference, int]): change the level of the section-headings, according to the mapping `to_level`, where the key is a reference and the value is its new level number. Here level=1 is equivalent to `h2` in HTML, level=2 is equivalent to `h3` in HTML, etc.
+3. update_section_heading_level(changes: list[dict[ref, to_level]]): change the level of items with section_header label, according to the mapping between `ref` and `to_level`, where the `ref` is a reference and `to_level` is its new level number. Here level=1 is equivalent to `h2` in HTML, level=2 is equivalent to `h3` in HTML, etc.
+
+IMPORTANT RULES FOR HEADING LEVELS:
+- Level numbers represent the hierarchical depth: level=1 for main sections, level=2 for subsections, level=3 for sub-subsections, etc.
+- Sibling sections (sections at the same hierarchical depth) must have the same level number
+- A child section's level must be exactly one more than its parent section's level (no skipping levels)
+- The document structure should form a logical hierarchy where broader topics are at higher levels (lower level numbers)
+- When fixing heading levels, analyze the semantic relationships and content scope to determine the proper hierarchy
 
 IMPORTANT: For each task, you must return EXACTLY ONE operation in a ```json ... ``` code block. The JSON object must contain:
-- An "operation" field (not "action" or any other name) with one of the 4 operation names above
-- The exact parameter fields as specified for that operation (e.g., "ref", "refs", or "to_level" - use these exact names)
+- An "operation" field (not "action" or any other name) with one of the 3 operation names above
+- The exact parameter fields as specified for that operation (e.g., "ref", "refs", or "changes" - use these exact names)
 
 Do not use alternative field names. Do not include extra fields.
 
@@ -106,23 +112,15 @@ example 2: Shorten the Introduction section to two paragraphs.
 }}
 ```
 
-example 3: Delete content by removing the item with reference `#/text/12` and the item with reference `#/table/34`.
-```json
-{{
-    "operation": "delete_content",
-    "refs": ["#/text/12", "#/table/34"]
-}}
-```
-
-example 4: Update section heading levels. Section heading with reference `#/text/4` will have level 2 and the section heading with reference `#/text/5` will have level 3.
+example 3: Update section heading levels. Section heading with reference `#/text/4` will have level 2 and the section heading with reference `#/text/5` will have level 3.
 ```json
 {{
     "operation": "update_section_heading_level",
-    "to_level": {{"#/text/4": 2, "#/text/5": 3}}
+    "changes": [{{"ref": "#/text/4", "to_level": 2}}, {{"ref": "#/text/5", "to_level": 3}}]
 }}
 ```
 
-Remember: Always use "operation" (not "action"), and always use the exact parameter names shown above ("ref", "refs", or "to_level").
+Remember: Always use "operation" (not "action"), and always use the exact parameter names shown above ("ref", "refs", or "changes", depending on the operation).
 
 """
 
