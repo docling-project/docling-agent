@@ -1,0 +1,455 @@
+picture 1 (reference=#/pictures/0)
+
+section-header (level=1, reference=#/texts/1): Docling Technical Report
+
+section-header (level=1, reference=#/texts/2): Version 1.0
+
+text (reference=#/texts/3)
+
+text (reference=#/texts/4)
+
+section-header (level=1, reference=#/texts/5): Abstract
+
+text (reference=#/texts/6)
+
+section-header (level=1, reference=#/texts/7): 1 Introduction
+
+text (reference=#/texts/8)
+
+text (reference=#/texts/9)
+
+text (reference=#/texts/12)
+
+section-header (level=1, reference=#/texts/19): 2 Getting Started
+
+text (reference=#/texts/20)
+
+text (reference=#/texts/21)
+
+text (reference=#/texts/22)
+
+code (reference=#/texts/23)
+
+text (reference=#/texts/24)
+
+section-header (level=1, reference=#/texts/25): 3 Processing pipeline
+
+text (reference=#/texts/26)
+
+section-header (level=1, reference=#/texts/27): 3.1 PDF backends
+
+text (reference=#/texts/28)
+
+footnote (reference=#/texts/29)
+
+picture 2 (reference=#/pictures/1)
+
+caption (reference=#/texts/31)
+
+text (reference=#/texts/47)
+
+text (reference=#/texts/48)
+
+section-header (level=1, reference=#/texts/49): 3.2 AI models
+
+text (reference=#/texts/50)
+
+section-header (level=1, reference=#/texts/51): Layout Analysis Model
+
+text (reference=#/texts/52)
+
+text (reference=#/texts/53)
+
+section-header (level=1, reference=#/texts/54): Table Structure Recognition
+
+text (reference=#/texts/55)
+
+text (reference=#/texts/57)
+
+section-header (level=1, reference=#/texts/58): OCR
+
+text (reference=#/texts/59)
+
+text (reference=#/texts/60)
+
+section-header (level=1, reference=#/texts/61): 3.3 Assembly
+
+text (reference=#/texts/62)
+
+section-header (level=1, reference=#/texts/63): 3.4 Extensibility
+
+text (reference=#/texts/64)
+
+text (reference=#/texts/65)
+
+section-header (level=1, reference=#/texts/66): 4 Performance
+
+text (reference=#/texts/67)
+
+text (reference=#/texts/68)
+
+text (reference=#/texts/69)
+
+text (reference=#/texts/71)
+
+table 1 (reference=#/tables/0)
+
+caption (reference=#/texts/72)
+
+section-header (level=1, reference=#/texts/73): 5 Applications
+
+text (reference=#/texts/74)
+
+section-header (level=1, reference=#/texts/75): 6 Future work and contributions
+
+text (reference=#/texts/76)
+
+text (reference=#/texts/77)
+
+section-header (level=1, reference=#/texts/78): References
+
+text (reference=#/texts/82)
+
+section-header (level=1, reference=#/texts/98): Appendix
+
+text (reference=#/texts/99)
+
+picture 3 (reference=#/pictures/2)
+
+text (reference=#/texts/595)
+
+caption (reference=#/texts/596)
+
+text (reference=#/texts/598)
+
+text (reference=#/texts/599)
+
+text (reference=#/texts/600)
+
+text (reference=#/texts/601)
+
+text (reference=#/texts/602)
+
+text (reference=#/texts/603)
+
+text (reference=#/texts/604)
+
+text (reference=#/texts/605)
+
+text (reference=#/texts/606)
+
+text (reference=#/texts/607)
+
+text (reference=#/texts/608)
+
+text (reference=#/texts/609)
+
+text (reference=#/texts/610)
+
+text (reference=#/texts/611)
+
+text (reference=#/texts/612)
+
+text (reference=#/texts/613)
+
+text (reference=#/texts/614)
+
+text (reference=#/texts/615)
+
+text (reference=#/texts/616)
+
+text (reference=#/texts/617)
+
+text (reference=#/texts/618)
+
+text (reference=#/texts/619)
+
+text (reference=#/texts/620)
+
+text (reference=#/texts/621)
+
+text (reference=#/texts/622)
+
+text (reference=#/texts/623)
+
+text (reference=#/texts/624)
+
+text (reference=#/texts/625)
+
+text (reference=#/texts/626)
+
+text (reference=#/texts/627)
+
+text (reference=#/texts/628)
+
+text (reference=#/texts/629)
+
+text (reference=#/texts/630)
+
+text (reference=#/texts/631)
+
+text (reference=#/texts/632)
+
+text (reference=#/texts/633)
+
+text (reference=#/texts/634)
+
+text (reference=#/texts/635)
+
+text (reference=#/texts/636)
+
+text (reference=#/texts/637)
+
+text (reference=#/texts/638)
+
+text (reference=#/texts/639)
+
+text (reference=#/texts/640)
+
+text (reference=#/texts/641)
+
+text (reference=#/texts/642)
+
+text (reference=#/texts/643)
+
+text (reference=#/texts/644)
+
+text (reference=#/texts/645)
+
+text (reference=#/texts/646)
+
+text (reference=#/texts/647)
+
+text (reference=#/texts/648)
+
+text (reference=#/texts/649)
+
+text (reference=#/texts/650)
+
+text (reference=#/texts/651)
+
+text (reference=#/texts/652)
+
+text (reference=#/texts/653)
+
+text (reference=#/texts/654)
+
+text (reference=#/texts/655)
+
+text (reference=#/texts/656)
+
+text (reference=#/texts/657)
+
+text (reference=#/texts/658)
+
+text (reference=#/texts/659)
+
+text (reference=#/texts/660)
+
+text (reference=#/texts/661)
+
+text (reference=#/texts/662)
+
+text (reference=#/texts/663)
+
+text (reference=#/texts/664)
+
+text (reference=#/texts/665)
+
+text (reference=#/texts/666)
+
+text (reference=#/texts/667)
+
+text (reference=#/texts/668)
+
+text (reference=#/texts/669)
+
+text (reference=#/texts/670)
+
+text (reference=#/texts/671)
+
+text (reference=#/texts/672)
+
+text (reference=#/texts/673)
+
+text (reference=#/texts/674)
+
+text (reference=#/texts/675)
+
+text (reference=#/texts/676)
+
+text (reference=#/texts/677)
+
+text (reference=#/texts/678)
+
+text (reference=#/texts/679)
+
+text (reference=#/texts/680)
+
+text (reference=#/texts/681)
+
+text (reference=#/texts/682)
+
+text (reference=#/texts/683)
+
+text (reference=#/texts/684)
+
+text (reference=#/texts/685)
+
+text (reference=#/texts/686)
+
+text (reference=#/texts/687)
+
+text (reference=#/texts/688)
+
+text (reference=#/texts/689)
+
+text (reference=#/texts/690)
+
+text (reference=#/texts/691)
+
+text (reference=#/texts/692)
+
+text (reference=#/texts/693)
+
+text (reference=#/texts/694)
+
+text (reference=#/texts/695)
+
+caption (reference=#/texts/696)
+
+text (reference=#/texts/697)
+
+table 2 (reference=#/tables/1)
+
+text (reference=#/texts/698)
+
+section-header (level=1, reference=#/texts/699): 5 EXPERIMENTS
+
+text (reference=#/texts/700)
+
+picture 4 (reference=#/pictures/3)
+
+caption (reference=#/texts/701)
+
+text (reference=#/texts/702)
+
+text (reference=#/texts/703)
+
+section-header (level=1, reference=#/texts/704): Baselines for Object Detection
+
+text (reference=#/texts/705)
+
+table 3 (reference=#/tables/2)
+
+caption (reference=#/texts/706)
+
+text (reference=#/texts/708)
+
+text (reference=#/texts/709)
+
+text (reference=#/texts/710)
+
+text (reference=#/texts/711)
+
+text (reference=#/texts/712)
+
+text (reference=#/texts/713)
+
+text (reference=#/texts/714)
+
+text (reference=#/texts/715)
+
+text (reference=#/texts/716)
+
+text (reference=#/texts/717)
+
+text (reference=#/texts/718)
+
+text (reference=#/texts/719)
+
+text (reference=#/texts/720)
+
+text (reference=#/texts/721)
+
+text (reference=#/texts/722)
+
+text (reference=#/texts/723)
+
+text (reference=#/texts/724)
+
+text (reference=#/texts/725)
+
+text (reference=#/texts/726)
+
+text (reference=#/texts/727)
+
+text (reference=#/texts/728)
+
+text (reference=#/texts/729)
+
+text (reference=#/texts/730)
+
+text (reference=#/texts/731)
+
+text (reference=#/texts/732)
+
+text (reference=#/texts/733)
+
+text (reference=#/texts/734)
+
+text (reference=#/texts/735)
+
+text (reference=#/texts/736)
+
+text (reference=#/texts/737)
+
+text (reference=#/texts/738)
+
+text (reference=#/texts/739)
+
+text (reference=#/texts/740)
+
+text (reference=#/texts/741)
+
+text (reference=#/texts/742)
+
+text (reference=#/texts/743)
+
+text (reference=#/texts/744)
+
+text (reference=#/texts/745)
+
+text (reference=#/texts/746)
+
+picture 5 (reference=#/pictures/4)
+
+text (reference=#/texts/1180)
+
+text (reference=#/texts/1181)
+
+text (reference=#/texts/1182)
+
+text (reference=#/texts/1183)
+
+text (reference=#/texts/1184)
+
+text (reference=#/texts/1185)
+
+text (reference=#/texts/1186)
+
+text (reference=#/texts/1187)
+
+text (reference=#/texts/1188)
+
+text (reference=#/texts/1189)
+
+caption (reference=#/texts/1190)
+
+text (reference=#/texts/1191)
+
+text (reference=#/texts/1192)
+
+text (reference=#/texts/1193)
+
+text (reference=#/texts/1194)

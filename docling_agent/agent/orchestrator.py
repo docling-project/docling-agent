@@ -29,7 +29,7 @@ from docling_agent.agent.library import DoclingLibrary
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
 from docling_agent.agent_models import setup_local_session
-from docling_agent.logging import logger  # type: ignore[import-untyped]
+from docling_agent.logging import logger
 from docling_agent.task_model import (
     AgentTask,
     EditingTask,

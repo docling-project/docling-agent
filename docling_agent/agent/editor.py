@@ -1,10 +1,8 @@
-import re
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 from docling_core.types.base import _JSON_POINTER_REGEX
 from docling_core.types.doc.document import (
-    DocItemLabel,
     DoclingDocument,
     RefItem,
     SectionHeaderItem,
@@ -17,6 +15,7 @@ from docling_core.types.doc.document import (
 from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -40,7 +39,40 @@ from docling_agent.resources.prompts import (
     SYSTEM_PROMPT_FOR_EDITING_TABLE,
 )
 
-# Use shared logger from docling_agent.agents
+
+# Pydantic models for operation validation
+class UpdateContentOperation(BaseModel):
+    """Operation to update content of a single document item."""
+
+    operation: Literal["update_content"]
+    ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
+
+
+class RewriteContentOperation(BaseModel):
+    """Operation to rewrite content of multiple document items."""
+
+    operation: Literal["rewrite_content"]
+    refs: list[Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]]
+
+
+class SectionHeadingLevelChange(BaseModel):
+    """A single section heading level change."""
+
+    ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
+    to_level: Annotated[int, Field(ge=0)]
+
+
+class UpdateSectionHeadingLevelOperation(BaseModel):
+    """Operation to update section heading levels."""
+
+    operation: Literal["update_section_heading_level"]
+    changes: list[SectionHeadingLevelChange]
+
+
+DocumentOperation = Annotated[
+    UpdateContentOperation | RewriteContentOperation | UpdateSectionHeadingLevelOperation,
+    Field(discriminator="operation"),
+]
 
 
 class DoclingEditingAgent(BaseDoclingAgent):
@@ -68,20 +100,19 @@ class DoclingEditingAgent(BaseDoclingAgent):
 
         op = self._identify_document_items(task=task, document=document)
 
-        if op["operation"] == "update_content":
-            self._update_content(task=task, document=document, sref=op["ref"])
-        elif op["operation"] == "rewrite_content":
+        # Type-safe dispatch using Pydantic models
+        if isinstance(op, UpdateContentOperation):
+            self._update_content(task=task, document=document, sref=op.ref)
+        elif isinstance(op, RewriteContentOperation):
             self._rewrite_content(
                 task=task,
                 document=document,
-                refs=op["refs"],
+                refs=op.refs,
             )
-        elif op["operation"] == "delete_content":
-            self._delete_content_of_document_items(task=task, document=document, refs=op["refs"])
-        elif op["operation"] == "update_section_heading_level":
-            self._update_section_heading_level(task=task, document=document, to_level=op["to_level"])
+        elif isinstance(op, UpdateSectionHeadingLevelOperation):
+            self._update_section_heading_level(task=task, document=document, changes=op.changes)
         else:
-            message = f"Could not execute operate op: {op}"
+            message = f"Could not execute operation: {op}"
             logger.info(message)
             raise ValueError(message)
 
@@ -92,13 +123,14 @@ class DoclingEditingAgent(BaseDoclingAgent):
         task: str,
         document: DoclingDocument,
         loop_budget: int = 5,
-    ) -> dict[str, Any]:
+    ) -> DocumentOperation:
         logger.info(f"task: {task}")
 
         outline = create_document_outline(doc=document)
         logger.info(f"outline: {outline}")
 
-        context = rf"""Given the current outline of the document:
+        context = rf"""Given the current outline of the document in JSON format:
+
 ```
 {outline}
 ```
@@ -109,17 +141,21 @@ class DoclingEditingAgent(BaseDoclingAgent):
 
 {task}
 
-We first need to:
-    - identify from the outline all the document items that are relevant
-    - plan the operations needed to update the document
+Analyze the document outline above and:
+    1. Identify all document items that are relevant to this task
+    2. Determine the specific operation needed (update_content, rewrite_content, or update_section_heading_level)
+    3. Plan the exact changes required
 
-IMPORTANT: You must return EXACTLY ONE operation in a ```json...``` block with:
-    - Field "operation" (not "action") set to one of: update_content, rewrite_content, delete_content, update_section_heading_level
-    - The exact parameter fields for that operation:
-        * update_content: use "ref" (not "reference")
-        * rewrite_content: use "refs" (not "references")
-        * delete_content: use "refs" (not "references")
-        * update_section_heading_level: use "to_level" (not "level" or "levels")
+For heading level tasks specifically:
+    - Examine the hierarchical structure of all section_header items in the outline
+    - Determine the correct level for each section based on its position in the document hierarchy
+    - Remember: sibling sections should have the same level, child sections should be one level deeper than their parent
+    - Include ALL section_header items that need level adjustments in your changes list
+
+IMPORTANT: You must return EXACTLY ONE operation in a ```json...``` block with 1 JSON object containing the fields:
+    - "operation" (not "action") set to one of: update_content, rewrite_content, update_section_heading_level
+    - "ref", "refs", or "changes", depending on the operation
+    - For update_section_heading_level: provide a complete "changes" list with all sections that need adjustment
 
 Now, provide me with the operation to execute the task using the exact field names specified above!
 """
@@ -133,56 +169,29 @@ Now, provide me with the operation to execute the task using the exact field nam
 
         def _validate_operation_format(content: str) -> bool:
             """Validate that the response contains a valid operation JSON with correct field names."""
-            ops = find_json_dicts(text=content)
+            ops: list[dict] = find_json_dicts(text=content)
             if len(ops) == 0:
-                return False
-            op = ops[0]
-
-            # Check if "operation" key exists (reject if using "action" instead)
-            if "operation" not in op:
+                logger.debug("No JSON objects found in response")
                 return False
 
-            # Compile the JSON pointer regex pattern from docling-core
-            ref_pattern = re.compile(_JSON_POINTER_REGEX)
+            op: dict = ops[0]
 
-            # Validate operation-specific fields use exact names
-            operation = op.get("operation")
-            if operation == "update_section_heading_level":
-                # Require exact field name "to_level"
-                if "to_level" not in op:
-                    return False
-                # Validate that all keys in to_level are valid references
-                to_level = op.get("to_level", {})
-                if not isinstance(to_level, dict):
-                    return False
-                for ref_key in to_level.keys():
-                    if not ref_pattern.match(str(ref_key)):
-                        return False
-            elif operation == "update_content":
-                # Require exact field name "ref"
-                if "ref" not in op:
-                    return False
-                # Validate ref format
-                ref = op.get("ref", "")
-                if not ref_pattern.match(str(ref)):
-                    return False
-            elif operation in ["rewrite_content", "delete_content"]:
-                # Require exact field name "refs"
-                if "refs" not in op:
-                    return False
-                # Validate refs format
-                refs = op.get("refs", [])
-                if not isinstance(refs, list):
-                    return False
-                for ref in refs:
-                    if not ref_pattern.match(str(ref)):
-                        return False
+            try:
+                TypeAdapter(DocumentOperation).validate_python(op)
+                logger.debug(f"Successfully validated operation: {op.get('operation')}")
+                return True
 
-            return True
+            except ValidationError as e:
+                logger.debug(f"Validation error for operation: {e}")
+                return False
+            except Exception as e:
+                logger.debug(f"Unexpected error during validation: {e}")
+                return False
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            # strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            strategy=RejectionSamplingStrategy(loop_budget=1),
             requirements=[
                 Requirement(
                     description='Return exactly one JSON object in ```json...``` format with an "operation" field',
@@ -190,42 +199,21 @@ Now, provide me with the operation to execute the task using the exact field nam
                 ),
             ],
         )
-        # logger.info(f"answer: {answer.value}")
+        logger.info(f"answer: {answer.value}")
 
         view_linear_context(m)
 
-        ops = find_json_dicts(text=answer.value)  # type: ignore[arg-type]
+        ops: list[dict] = find_json_dicts(text=answer.value)
 
         if len(ops) == 0:
             raise ValueError("No operation is detected")
 
-        op = ops[0]
+        op: dict = ops[0]
 
-        # Validate required fields
-        if "operation" not in op:
-            raise ValueError(f"'operation' field missing in response: {op}")
-
-        operation = op.get("operation")
-
-        # Validate operation-specific required fields
-        if operation == "update_section_heading_level":
-            if "to_level" not in op:
-                raise ValueError(
-                    f"'to_level' field missing in update_section_heading_level operation. "
-                    f"Got: {op}. Use 'to_level' (not 'level' or 'levels')."
-                )
-        elif operation == "update_content":
-            if "ref" not in op:
-                raise ValueError(
-                    f"'ref' field missing in update_content operation. Got: {op}. Use 'ref' (not 'reference')."
-                )
-        elif operation in ["rewrite_content", "delete_content"]:
-            if "refs" not in op:
-                raise ValueError(
-                    f"'refs' field missing in {operation} operation. Got: {op}. Use 'refs' (not 'references')."
-                )
-
-        return op
+        try:
+            return TypeAdapter(DocumentOperation).validate_python(op)
+        except ValidationError as e:
+            raise ValueError(f"Operation validation failed: {e}") from e
 
     def _update_content(self, task: str, document: DoclingDocument, sref: str):
         logger.info("_update_content_of_document_items")
@@ -285,7 +273,7 @@ Execute the following task: {task}
 
         logger.info(f"response: {answer.value}")
 
-        new_tables = convert_html_to_docling_table(text=answer.value)  # type: ignore[arg-type]
+        new_tables = convert_html_to_docling_table(text=answer.value)
 
         if new_tables and len(new_tables) == 1:
             table.data = new_tables[0].data
@@ -325,34 +313,24 @@ Execute the following task: {task}
         )
         # logger.info(f"response: {answer.value}")
 
-        updated_doc = convert_markdown_to_docling_document(text=answer.value)  # type: ignore[arg-type]
+        updated_doc = convert_markdown_to_docling_document(text=answer.value)
         if updated_doc is None:
             logger.warning("No valid document produced for updated content.")
             return
 
         document = insert_document(item=item, doc=document, updated_doc=updated_doc)
 
-    def _delete_content_of_document_items(self, task: str, document: DoclingDocument, refs: list[RefItem]):
-        logger.info("_delete_content_of_document_items")
-
-    def _append_content_of_document_items(
-        self,
-        task: str,
-        document: DoclingDocument,
-        ref: RefItem,
-        labels: list[DocItemLabel],
+    def _update_section_heading_level(
+        self, task: str, document: DoclingDocument, changes: list[SectionHeadingLevelChange]
     ):
-        logger.info("_append_content_of_document_items")
-
-    def _update_section_heading_level(self, task: str, document: DoclingDocument, to_level: dict[str, int]):
-        for sref, level in to_level.items():
-            ref = RefItem(cref=sref)
+        for change in changes:
+            ref = RefItem(cref=change.ref)
             item = ref.resolve(document)
 
             if isinstance(item, SectionHeaderItem):
-                item.level = level
+                item.level = change.to_level
             else:
-                logger.warning(f"{sref} is not SectionHeaderItem (got {type(item).__name__})")
+                logger.warning(f"{change.ref} is not SectionHeaderItem (got {type(item).__name__})")
 
     def _rewrite_content(
         self,
@@ -372,7 +350,7 @@ Execute the following task: {task}
 
         text = "\n\n".join(texts)
 
-        prompt = f"""Given the following text-section in markdown,
+        prompt = f"""Given the following text section in markdown,
 
 ```md
 {text}
@@ -393,7 +371,7 @@ Execute the following task: {task}
         )
         logger.info(f"response: {answer.value}")
 
-        updated_doc = convert_markdown_to_docling_document(text=answer.value)  # type: ignore[arg-type]
+        updated_doc = convert_markdown_to_docling_document(text=answer.value)
         if updated_doc is None:
             logger.warning("No valid document produced for rewrite.")
             return

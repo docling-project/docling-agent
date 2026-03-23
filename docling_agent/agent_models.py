@@ -1,4 +1,5 @@
 import re
+from typing import TYPE_CHECKING
 
 from mellea import MelleaSession
 from mellea.backends import model_ids
@@ -8,9 +9,12 @@ from mellea.stdlib.components import Message
 from mellea.stdlib.context import ChatContext
 from mellea.stdlib.requirements import Requirement, simple_validate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
-from tabulate import tabulate  # type: ignore[import-untyped]
+from tabulate import tabulate
 
 from docling_agent.logging import logger
+
+if TYPE_CHECKING:
+    from mellea.core import CBlock, Component
 
 # Use shared logger from docling_agent.agents
 
@@ -59,16 +63,18 @@ def setup_local_session(
     return _LoggingSession(m)
 
 
-def view_linear_context(m: "MelleaSession | _LoggingSession"):
+def view_linear_context(m: MelleaSession | _LoggingSession):
     rows = []
-    for i, _ in enumerate(m.ctx.view_for_generation()):  # type: ignore[arg-type]
-        if isinstance(_, Message):
-            if len(_.content) > 64:
-                rows.append([i, _.role, (_.content[0:32] + " ... " + _.content[-32:])])
+    context_components: list[Component | CBlock] | None = m.ctx.view_for_generation()
+    if context_components:
+        for idx, comp in enumerate(context_components):
+            if isinstance(comp, Message):
+                if len(comp.content) > 64:
+                    rows.append([idx, comp.role, (comp.content[0:32] + " ... " + comp.content[-32:])])
+                else:
+                    rows.append([idx, comp.role, comp.content])
             else:
-                rows.append([i, _.role, _.content])
-        else:
-            rows.append([i, "<unknown>", str(_)[0:64]])
+                rows.append([idx, "<unknown>", str(comp)[0:64]])
 
     logger.info(f"linearized chat:\n\n {tabulate(rows, headers=['turn', 'role', 'message'])}")
 
@@ -121,7 +127,7 @@ def main():
     # print(answer)
 
     try:
-        for i, _ in enumerate(m.ctx.view_for_generation()):  # type: ignore[arg-type]
+        for i, _ in enumerate(m.ctx.view_for_generation()):
             print(i, ": ", _)
     except Exception:
         print("fail ...")
