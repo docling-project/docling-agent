@@ -35,21 +35,17 @@ def main():
     for task, output in [
         (
             "Put the polymer abbreviations in a separate column in the first table.",
-            out_dir / Path(ipath.stem + "_updated_table.html")
+            out_dir / Path(ipath.stem + "_updated_table.html"),
         ),
-        ("Make the title longer!",
-            out_dir / Path(ipath.stem + "_updated_title.html")
-        ),
+        ("Make the title longer!", out_dir / Path(ipath.stem + "_updated_title.html")),
         (
             "Ensure that the section headings have the correct level!",
-            out_dir / Path(ipath.stem + "_updated_headings.html")
+            out_dir / Path(ipath.stem + "_updated_headings.html"),
         ),
-        (
-            "Expand the Introduction to three paragraphs.",
-            out_dir / Path(ipath.stem + "_updated_introduction.html")
-        ),
+        ("Expand the Introduction to three paragraphs.", out_dir / Path(ipath.stem + "_updated_introduction.html")),
     ]:
         run_task(ipath=ipath, opath=output, task=task, model_id=model_id)
+
 
 if __name__ == "__main__":
     main()
