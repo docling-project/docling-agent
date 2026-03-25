@@ -1,16 +1,19 @@
 fail_fast: true
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.7
+  - repo: local
     hooks:
       - id: ruff-check
         name: "Ruff linter"
-        args: [--exit-non-zero-on-fix, --fix, --config=pyproject.toml]
+        entry: uv run --no-sync ruff check --exit-non-zero-on-fix --fix --config=pyproject.toml
+        language: system
         files: '^(docling_agent|tests|examples).*\.(py|ipynb)$'
+        pass_filenames: false
       - id: ruff-format
         name: "Ruff formatter"
-        args: [--exit-non-zero-on-fix, --config=pyproject.toml]
+        entry: uv run --no-sync ruff format --config=pyproject.toml
+        language: system
         files: '^(docling_agent|tests|examples).*\.(py|ipynb)$'
+        pass_filenames: false
   - repo: local
     hooks:
       - id: mypy
