@@ -3,6 +3,15 @@
 from pathlib import Path
 from typing import Any, ClassVar
 
+from docling_core.experimental.serializer.outline import (
+    OutlineDocSerializer,
+    OutlineFormat,
+    OutlineMode,
+    OutlineParams,
+)
+from docling_core.transforms.serializer.markdown import (
+    MarkdownDocSerializer,
+)
 from docling_core.types.doc.document import (
     DocItemLabel,
     DoclingDocument,
@@ -20,6 +29,7 @@ from rich.text import Text
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
     collect_subtree_text,
+    create_document_outline,
     find_json_dicts,
     get_item_by_ref,
 )
@@ -120,7 +130,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         visited: set[str] = set()
         iterations: list[RAGIteration] = []
 
-        outline_text = self._build_outline(doc)
+        outline_text = create_document_outline(doc, format=OutlineFormat.MARKDOWN)
         logger.debug(f"[RAG OUTLINE — {doc.name!r}]\n{outline_text}")
         valid_refs = self._extract_section_refs(doc)
 
@@ -143,9 +153,6 @@ class DoclingRAGAgent(BaseDoclingAgent):
                     "⚠ No section headers found — returning full document.",
                     style="yellow",
                 )
-            )
-            from docling_core.transforms.serializer.markdown import (
-                MarkdownDocSerializer,
             )
 
             full_text = MarkdownDocSerializer(doc=doc).serialize().text
@@ -260,12 +267,6 @@ class DoclingRAGAgent(BaseDoclingAgent):
     # ------------------------------------------------------------------
 
     def _build_outline(self, doc: DoclingDocument) -> str:
-        from docling_core.experimental.serializer.outline import (
-            OutlineDocSerializer,
-            OutlineMode,
-            OutlineParams,
-        )
-
         serializer = OutlineDocSerializer(
             doc=doc,
             params=OutlineParams(mode=OutlineMode.OUTLINE),

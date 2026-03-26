@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 
+from docling_core.experimental.serializer.outline import OutlineFormat
 from docling_core.types.base import _JSON_POINTER_REGEX
 from docling_core.types.doc.document import (
     DoclingDocument,
@@ -122,14 +123,15 @@ class DoclingEditingAgent(BaseDoclingAgent):
         self,
         task: str,
         document: DoclingDocument,
-        loop_budget: int = 5,
+        loop_budget: int = 3,
     ) -> DocumentOperation:
         logger.info(f"task: {task}")
 
-        outline = create_document_outline(doc=document)
-        logger.info(f"outline: {outline}")
+        # TODO: check best format for describing the outline (MARKDOWN vs JSON) for short and long documents
+        outline = create_document_outline(doc=document, format=OutlineFormat.MARKDOWN)
+        logger.debug(f"outline: {outline}")
 
-        context = rf"""Given the current outline of the document in JSON format:
+        context = rf"""Given the current outline of the document:
 
 ```
 {outline}
@@ -155,7 +157,7 @@ For heading level tasks specifically:
 IMPORTANT: You must return EXACTLY ONE operation in a ```json...``` block with 1 JSON object containing the fields:
     - "operation" (not "action") set to one of: update_content, rewrite_content, update_section_heading_level
     - "ref", "refs", or "changes", depending on the operation
-    - For update_section_heading_level: provide a complete "changes" list with all sections that need adjustment
+    - For update_section_heading_level: provide a complete "changes" list with all sections that need adjustment.
 
 Now, provide me with the operation to execute the task using the exact field names specified above!
 """
@@ -190,8 +192,7 @@ Now, provide me with the operation to execute the task using the exact field nam
 
         answer = m.instruct(
             prompt,
-            # strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
-            strategy=RejectionSamplingStrategy(loop_budget=1),
+            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
             requirements=[
                 Requirement(
                     description='Return exactly one JSON object in ```json...``` format with an "operation" field',
@@ -235,7 +236,7 @@ Now, provide me with the operation to execute the task using the exact field nam
         task: str,
         document: DoclingDocument,
         table: TableItem,
-        loop_budget: int = 5,
+        loop_budget: int = 3,
     ):
         logger.info("_update_content_of_table")
 
@@ -286,7 +287,7 @@ Execute the following task: {task}
         task: str,
         document: DoclingDocument,
         item: TextItem,
-        loop_budget: int = 5,
+        loop_budget: int = 3,
     ):
         logger.info("_update_content_of_text")
 
@@ -337,7 +338,7 @@ Execute the following task: {task}
         task: str,
         document: DoclingDocument,
         refs: list[str],
-        loop_budget: int = 5,
+        loop_budget: int = 3,
     ):
         logger.info("_update_content_of_text")
 

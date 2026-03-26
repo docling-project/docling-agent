@@ -41,10 +41,7 @@ def main():
         "skills": "string",
     }
 
-    schema_02: dict[str, str] = {
-        "title": "string",
-        "authors": "string"
-    }
+    schema_02: dict[str, str] = {"title": "string", "authors": "string"}
 
     schema_03: dict[str, str] = {
         "invoice-number": "string",
@@ -64,7 +61,7 @@ def main():
         (
             schema_03,
             "invoices",
-        )
+        ),
     ]:
         cdir = doc_dir / type
 
@@ -77,7 +74,9 @@ def main():
 
         sources = sorted(sources)
 
-        logger.info(f"Extract {list(schema)} from documents [{len(sources)}]:\n\n\t" + ",\n\t".join(str(p) for p in sources))
+        logger.info(
+            f"Extract {list(schema)} from documents [{len(sources)}]:\n\n\t" + ",\n\t".join(str(p) for p in sources)
+        )
 
         run_task(
             schema=schema,
@@ -85,6 +84,7 @@ def main():
             opath=out_dir / f"{type}_extraction_report.html",
             model_id=model_id,
         )
+
 
 if __name__ == "__main__":
     main()

@@ -18,14 +18,17 @@ def simple_writing_report(task: str, out: Path, model_id: ModelIdentifier) -> No
     # Save the document
     fname = datetime.now().strftime("%Y_%m_%d_%H:%M:%S")
 
-    document.save_as_json(filename= out / Path(f"{fname}.json"))
+    document.save_as_json(filename=out / Path(f"{fname}.json"))
     document.save_as_markdown(filename=out / Path(f"{fname}.md"), text_width=72)
     out_html = out / Path(f"{fname}.html")
     document.save_as_html(filename=out_html)
 
     logger.info(f"report written to `{out_html}`")
 
-def advanced_writing_report(task: str, out: Path, reasoning_model: ModelIdentifier, writing_model: ModelIdentifier) -> None:
+
+def advanced_writing_report(
+    task: str, out: Path, reasoning_model: ModelIdentifier, writing_model: ModelIdentifier
+) -> None:
     tools = []
 
     # Initialize the agent with a base model id
@@ -39,12 +42,13 @@ def advanced_writing_report(task: str, out: Path, reasoning_model: ModelIdentifi
     # Save the document
     fname = datetime.now().strftime("%Y_%m_%d_%H:%M:%S")
 
-    document.save_as_json(filename= out / Path(f"{fname}.json"))
+    document.save_as_json(filename=out / Path(f"{fname}.json"))
     document.save_as_markdown(filename=out / Path(f"{fname}.md"), text_width=72)
     out_html = out / Path(f"{fname}.html")
     document.save_as_html(filename=out_html)
 
     logger.info(f"report written to `{out_html}`")
+
 
 def main():
     out_dir = Path("scratch/example_01")
@@ -61,7 +65,7 @@ def main():
 
     # simple_writing_report(task=task, out = out_dir, model_id=writing_model_id)
 
-    advanced_writing_report(task=task, out = out_dir, reasoning_model=reasoning_model_id, writing_model=writing_model_id)
+    advanced_writing_report(task=task, out=out_dir, reasoning_model=reasoning_model_id, writing_model=writing_model_id)
 
 
 if __name__ == "__main__":

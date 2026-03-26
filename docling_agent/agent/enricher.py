@@ -178,15 +178,16 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         min_text_length: int = 100,
         loop_budget: int = 5,
     ) -> DoclingDocument:
-        logger.info("_summarize_items: starting")
-
         if fix_heading_levels:
+            logger.info("_summarize_items: fix heading levels")
             self._fix_heading_levels(document=document)
 
+        logger.info("_summarize_items: make hierarchical document")
         hier_doc = make_hierarchical_document(document)
 
         m = setup_local_session(model_id=self.get_reasoning_model_id())
 
+        logger.info("_summarize_items: summarize the document")
         self._walk_and_summarize(
             node=hier_doc.body,
             doc=hier_doc,

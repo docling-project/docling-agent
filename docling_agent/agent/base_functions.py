@@ -97,19 +97,19 @@ def find_json_dicts(text: str) -> list[dict]:
     return calls
 
 
-def create_document_outline(doc: DoclingDocument, mode: OutlineMode = OutlineMode.TABLE_OF_CONTENTS) -> str:
-    """Create a document outline using OutlineDocSerializer from docling-core.
+def create_document_outline(
+    doc: DoclingDocument, mode: OutlineMode = OutlineMode.TABLE_OF_CONTENTS, format: OutlineFormat = OutlineFormat.JSON
+) -> str:
+    """Create a document outline.
 
-    This function uses the experimental OutlineDocSerializer with JSON format
-    to generate a structured outline of the document.
+    This function uses the experimental OutlineDocSerializer to generate a structured outline of the document.
 
     Args:
         doc: The DoclingDocument to create an outline for.
         mode: The outline mode, either as a table of contents or as general outline.
+        format: The outline format, including markdown, indented text, and JSON.
     Returns:
-        A JSON string containing the document outline as an array of objects.
-        Each object contains: ref (reference), item (item type like 'text', 'picture', 'section_header'),
-        title (optional, for headers), level (optional, for headers).
+        A text representation of a document outline.
     """
     logger.debug("create_document_outline")
 
@@ -117,7 +117,7 @@ def create_document_outline(doc: DoclingDocument, mode: OutlineMode = OutlineMod
     params = OutlineParams(
         include_non_meta=True,
         mode=mode,
-        format=OutlineFormat.JSON,
+        format=format,
     )
     serializer = OutlineDocSerializer(doc=doc, params=params)
     result = serializer.serialize()
