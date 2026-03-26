@@ -44,7 +44,7 @@ dependencies = [
     "boto3~=1.35",
     "pandas~=2.2",
     "fastparquet~=2024.11",
-    "pyarrow~=19.0",
+    "pyarrow>=19.0",
     "httpx~=0.28",
     "mellea>=0.3",
 ]
