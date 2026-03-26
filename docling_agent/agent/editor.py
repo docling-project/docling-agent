@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 
+from docling_core.experimental.serializer.outline import OutlineFormat
 from docling_core.types.base import _JSON_POINTER_REGEX
 from docling_core.types.doc.document import (
     DoclingDocument,
@@ -126,10 +127,10 @@ class DoclingEditingAgent(BaseDoclingAgent):
     ) -> DocumentOperation:
         logger.info(f"task: {task}")
 
-        outline = create_document_outline(doc=document)
-        logger.info(f"outline: {outline}")
+        outline = create_document_outline(doc=document, format=OutlineFormat.MARKDOWN)
+        logger.debug(f"outline: {outline}")
 
-        context = rf"""Given the current outline of the document in JSON format:
+        context = rf"""Given the current outline of the document:
 
 ```
 {outline}
@@ -155,7 +156,7 @@ For heading level tasks specifically:
 IMPORTANT: You must return EXACTLY ONE operation in a ```json...``` block with 1 JSON object containing the fields:
     - "operation" (not "action") set to one of: update_content, rewrite_content, update_section_heading_level
     - "ref", "refs", or "changes", depending on the operation
-    - For update_section_heading_level: provide a complete "changes" list with all sections that need adjustment
+    - For update_section_heading_level: provide a complete "changes" list with all sections that need adjustment.
 
 Now, provide me with the operation to execute the task using the exact field names specified above!
 """
