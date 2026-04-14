@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from typing import Any
 
-from eval import EvalResult, evaluate
+import typer
+
+from docling_agent.eval import EvalResult, evaluate
+
+eval_app = typer.Typer(help="Evaluate extraction quality against ground-truth JSON files.")
 
 
 def _load_json_file(path: Path) -> dict[str, Any]:
@@ -23,9 +26,9 @@ def _load_json_map(directory: Path) -> dict[str, dict[str, Any]]:
 
 
 def _print_report(result: EvalResult) -> None:
-    print("field\tprecision\trecall\tf1\ttp\tfp\tfn")
+    typer.echo("field\tprecision\trecall\tf1\ttp\tfp\tfn")
     for field_result in result.field_metrics:
-        print(
+        typer.echo(
             f"{field_result.field}\t"
             f"{field_result.precision:.4f}\t"
             f"{field_result.recall:.4f}\t"
@@ -33,8 +36,8 @@ def _print_report(result: EvalResult) -> None:
             f"{field_result.tp}\t{field_result.fp}\t{field_result.fn}"
         )
 
-    print("")
-    print(
+    typer.echo("")
+    typer.echo(
         "macro\t"
         f"{result.macro_precision:.4f}\t"
         f"{result.macro_recall:.4f}\t"
@@ -42,54 +45,22 @@ def _print_report(result: EvalResult) -> None:
     )
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Evaluate extraction quality against ground-truth JSON files."
-    )
-    parser.add_argument(
-        "--predictions",
-        type=Path,
-        required=True,
-        help="Directory containing predicted extraction JSON files.",
-    )
-    parser.add_argument(
-        "--ground-truth",
-        type=Path,
-        required=True,
-        help="Directory containing ground-truth JSON files.",
-    )
-    parser.add_argument(
-        "--fuzzy",
-        action="store_true",
-        help="Enable fuzzy value matching.",
-    )
-    parser.add_argument(
+@eval_app.callback(invoke_without_command=True)
+def eval_main(
+    predictions: Path = typer.Option(..., "--predictions", help="Directory containing predicted extraction JSON files."),
+    ground_truth: Path = typer.Option(..., "--ground-truth", help="Directory containing ground-truth JSON files."),
+    fuzzy: bool = typer.Option(False, "--fuzzy", help="Enable fuzzy value matching."),
+    fuzzy_threshold: float = typer.Option(
+        0.85,
         "--fuzzy-threshold",
-        type=float,
-        default=0.85,
-        help="Similarity threshold for fuzzy matching (0.0 to 1.0).",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="Optional output path for EvalResult JSON.",
-    )
-    return parser
-
-
-def main() -> int:
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    if not 0.0 <= args.fuzzy_threshold <= 1.0:
-        parser.error("--fuzzy-threshold must be between 0.0 and 1.0")
-
-    try:
-        pred_map = _load_json_map(args.predictions)
-        gt_map = _load_json_map(args.ground_truth)
-    except ValueError as exc:
-        parser.error(str(exc))
+        min=0.0,
+        max=1.0,
+        help="Similarity threshold for fuzzy matching.",
+    ),
+    output: Path | None = typer.Option(None, "--output", help="Optional output path for EvalResult JSON."),
+) -> None:
+    pred_map = _load_json_map(predictions)
+    gt_map = _load_json_map(ground_truth)
 
     pred_names = set(pred_map)
     gt_names = set(gt_map)
@@ -101,7 +72,7 @@ def main() -> int:
             details.append(f"Missing predictions for: {', '.join(missing_in_pred)}")
         if missing_in_gt:
             details.append(f"Missing ground truth for: {', '.join(missing_in_gt)}")
-        parser.error(" ; ".join(details))
+        raise typer.BadParameter(" ; ".join(details))
 
     ordered_names = sorted(pred_names)
     predictions_list = [pred_map[name] for name in ordered_names]
@@ -110,18 +81,12 @@ def main() -> int:
     result = evaluate(
         predictions_list,
         ground_truth_list,
-        fuzzy=args.fuzzy,
-        fuzzy_threshold=args.fuzzy_threshold,
+        fuzzy=fuzzy,
+        fuzzy_threshold=fuzzy_threshold,
     )
     _print_report(result)
 
-    if args.output is not None:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
-        print(f"Saved evaluation JSON to {args.output}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        typer.echo(f"Saved evaluation JSON to {output}")

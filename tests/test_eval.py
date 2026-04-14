@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
-from pathlib import Path
 
-from eval import evaluate, values_match
+from typer.testing import CliRunner
+
+from docling_agent.cli import app
+from docling_agent.eval import evaluate, values_match
 
 
 def _metrics_by_field(result):
@@ -86,7 +86,7 @@ def test_evaluate_multi_document_aggregation():
     assert name_metrics.fn == 1
 
 
-def test_run_eval_cli_runs_and_writes_output(tmp_path):
+def test_eval_cli_runs_and_writes_output(tmp_path):
     pred_dir = tmp_path / "pred"
     gt_dir = tmp_path / "gt"
     pred_dir.mkdir()
@@ -96,12 +96,12 @@ def test_run_eval_cli_runs_and_writes_output(tmp_path):
     (gt_dir / "doc1.json").write_text(json.dumps({"field": "value"}), encoding="utf-8")
 
     output = tmp_path / "result.json"
-    script = Path(__file__).parent / "run_eval.py"
 
-    result = subprocess.run(
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
         [
-            sys.executable,
-            str(script),
+            "eval",
             "--predictions",
             str(pred_dir),
             "--ground-truth",
@@ -109,11 +109,8 @@ def test_run_eval_cli_runs_and_writes_output(tmp_path):
             "--output",
             str(output),
         ],
-        capture_output=True,
-        text=True,
-        check=False,
     )
 
-    assert result.returncode == 0
-    assert "macro" in result.stdout
+    assert result.exit_code == 0
+    assert "macro" in result.output
     assert output.exists()
