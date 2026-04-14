@@ -9,12 +9,10 @@ from mellea.backends import model_ids
 
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent_models import configure_llm_logging
-from docling_agent.cli.eval_cli import eval_app
 from docling_agent.logging import logger
 from docling_agent.task_model import AgentTask, load_task
 
 app = typer.Typer(name="docling-agent", add_completion=False, pretty_exceptions_show_locals=False)
-app.add_typer(eval_app, name="eval")
 
 
 _TASK_TEMPLATE = """\
