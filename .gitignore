@@ -1,6 +1,11 @@
+# Backup files created by text editors
 *~
+
+# macOS
 *.DS_Store
-examples/example_02_edit_resources/*.html
+
+# VS Code
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
