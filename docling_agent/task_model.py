@@ -14,12 +14,21 @@ class OutputConfig(BaseModel):
     format: Literal["markdown", "html", "json"] = "markdown"
 
 
+class BackendConfig(BaseModel):
+    """Backend selection and connection settings."""
+
+    type: Literal["ollama", "lmstudio", "litellm", "mellea"] = "mellea"
+    base_url: str | None = None
+    timeout: int | None = None
+    api_key_env: str | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
 class ModelConfig(BaseModel):
     """Model identifiers for the different reasoning roles."""
 
     reasoning: str = "OPENAI_GPT_OSS_20B"
     writing: str = "OPENAI_GPT_OSS_20B"
-    backend: Literal["ollama", "lmstudio"] = "ollama"
 
 
 class LoggingConfig(BaseModel):
@@ -53,6 +62,7 @@ class AgentTask(BaseModel):
         description="Paths to documents or directories.",
     )
     output: OutputConfig = Field(default_factory=OutputConfig)
+    backend: BackendConfig = Field(default_factory=BackendConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     extra: dict[str, Any] = Field(

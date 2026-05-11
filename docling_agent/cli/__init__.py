@@ -49,11 +49,17 @@ sources:
 #   path: result.md   # omit to print to stdout
 #   format: markdown  # markdown | html | json
 
+# Backend configuration -------------------------------------------------------
+# backend:
+#   type: mellea     # mellea | ollama | lmstudio | litellm
+#   base_url:
+#   timeout:
+#   api_key_env:
+#
 # Model configuration ---------------------------------------------------------
 # models:
 #   reasoning: OPENAI_GPT_OSS_20B
 #   writing: OPENAI_GPT_OSS_20B
-#   backend: ollama  # ollama | lmstudio
 
 # Logging configuration -------------------------------------------------------
 # logging:

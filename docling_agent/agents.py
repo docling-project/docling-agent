@@ -5,9 +5,18 @@ from docling_agent.agent.extractor import DoclingExtractingAgent
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
+from docling_agent.backends import (
+    BaseBackend,
+    LiteLLMBackend,
+    LMStudioBackend,
+    MelleaBackend,
+    OllamaBackend,
+    create_backend,
+)
 from docling_agent.logging import logger
 from docling_agent.task_model import (
     AgentTask,
+    BackendConfig,
     EnrichTask,
     ExtractTask,
     ModelConfig,
@@ -19,6 +28,8 @@ from docling_agent.task_model import (
 
 __all__ = [
     "AgentTask",
+    "BackendConfig",
+    "BaseBackend",
     "DoclingEditingAgent",
     "DoclingEnrichingAgent",
     "DoclingExtractingAgent",
@@ -27,10 +38,15 @@ __all__ = [
     "DoclingWritingAgent",
     "EnrichTask",
     "ExtractTask",
+    "LMStudioBackend",
+    "LiteLLMBackend",
+    "MelleaBackend",
     "ModelConfig",
+    "OllamaBackend",
     "OutputConfig",
     "RAGTask",
     "WriteTask",
+    "create_backend",
     "load_task",
     "logger",
 ]
