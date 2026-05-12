@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-from mellea.stdlib.requirements import Requirement
-
 from docling_agent.backends.openai_compatible import OpenAICompatibleBackend
+from docling_agent.task_model import BackendConfig
 
 
 class LMStudioBackend(OpenAICompatibleBackend):
-    """Direct LM Studio backend placeholder for the Phase 1 abstraction."""
+    """Direct LM Studio backend."""
 
     backend_type = "lmstudio"
 
-    def instruct(
-        self,
-        prompt: str,
-        *,
-        model: str,
-        system_prompt: str | None = None,
-        requirements: list[Requirement] | None = None,
-        retry_budget: int = 1,
-    ) -> str:
-        raise NotImplementedError("LMStudioBackend direct execution is not implemented in Phase 1.")
+    @classmethod
+    def from_config(cls, config: BackendConfig) -> LMStudioBackend:
+        config = config.model_copy(
+            update={
+                "base_url": config.base_url or "http://localhost:1234/v1",
+            }
+        )
+        return cls(config=config)

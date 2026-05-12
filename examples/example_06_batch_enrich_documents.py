@@ -20,10 +20,9 @@ from pathlib import Path
 from docling.datamodel.base_models import ConversionStatus
 from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import DoclingDocument
-from mellea.backends import model_ids
 from tqdm import tqdm
 
-from docling_agent.agents import DoclingEnrichingAgent, logger
+from docling_agent.agents import BackendConfig, DoclingEnrichingAgent, ModelConfig, create_backend, logger
 
 
 def load_document(file_path: Path) -> DoclingDocument | None:
@@ -123,7 +122,7 @@ def get_input_files(input_dir: Path, pattern: str = "*") -> list[Path]:
 def process_documents(
     input_dir: Path,
     output_dir: Path,
-    model_id=model_ids.OPENAI_GPT_OSS_20B,
+    model_name: str = "OPENAI_GPT_OSS_20B",
     file_pattern: str = "*",
 ) -> dict[str, int]:
     """
@@ -132,7 +131,7 @@ def process_documents(
     Args:
         input_dir: Directory containing input documents
         output_dir: Directory to save enriched documents
-        model_id: Model identifier for the enriching agent
+        model_name: Backend model name for the enriching agent
         file_pattern: Glob pattern for file matching
 
     Returns:
@@ -151,7 +150,15 @@ def process_documents(
     logger.info(f"Found {len(input_files)} file(s) to process")
 
     # Initialize the enriching agent
-    agent = DoclingEnrichingAgent(model_id=model_id, tools=[])
+    agent = DoclingEnrichingAgent(
+        backend=create_backend(
+            BackendConfig(
+                type="mellea",
+                models=ModelConfig(reasoning=model_name, writing=model_name),
+            )
+        ),
+        tools=[],
+    )
 
     # Statistics
     stats = {"total": len(input_files), "success": 0, "failed": 0, "skipped": 0}
@@ -207,7 +214,7 @@ def main():
     # Configuration
     input_dir = Path("examples/data/papers")  # Change this to your input directory
     output_dir = Path("scratch/example_06")  # Change this to your output directory
-    model_id = model_ids.OPENAI_GPT_OSS_20B
+    model_name = "OPENAI_GPT_OSS_20B"
     file_pattern = "*"  # Process all files; use "*.pdf" for PDFs only, etc.
 
     # You can also get these from command line arguments
@@ -224,14 +231,14 @@ def main():
     logger.info(f"Input directory:  {input_dir}")
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"File pattern:     {file_pattern}")
-    logger.info(f"Model:            {model_id}")
+    logger.info(f"Model:            {model_name}")
     logger.info("=" * 60)
 
     # Process all documents
     stats = process_documents(
         input_dir=input_dir,
         output_dir=output_dir,
-        model_id=model_id,
+        model_name=model_name,
         file_pattern=file_pattern,
     )
 

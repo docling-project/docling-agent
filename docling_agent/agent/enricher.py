@@ -15,9 +15,7 @@ from docling_core.types.doc.document import (
     TableItem,
     TitleItem,
 )
-from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 from pydantic import Field
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
@@ -28,7 +26,8 @@ from docling_agent.agent.base_functions import (
     make_hierarchical_document,
     serialize_table_to_html,
 )
-from docling_agent.agent_models import _LoggingSession, setup_local_session, view_linear_context
+from docling_agent.agent_models import view_linear_context
+from docling_agent.backends.base import BaseSession
 from docling_agent.logging import logger
 
 
@@ -36,7 +35,7 @@ class _GenerateFn(Protocol):
     """Protocol for content generation functions."""
 
     def __call__(
-        self, *, m: _LoggingSession, text: str, loop_budget: int
+        self, *, m: BaseSession, text: str, loop_budget: int
     ) -> str | list[str] | list[dict[str, str]] | None: ...
 
 
@@ -83,10 +82,15 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
 
     last_operation: dict[str, Any] = Field(default_factory=dict)
 
-    def __init__(self, *, model_id: ModelIdentifier, tools: list):
+    def __init__(
+        self,
+        *,
+        tools: list,
+        backend=None,
+    ):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_ENRICHER,
-            model_id=model_id,
+            backend=backend or self.default_backend(),
             tools=tools,
         )
 
@@ -127,14 +131,10 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _choose_operation(self, *, task: str, loop_budget: int = 5) -> dict[str, Any]:
         logger.info(f"task: {task}")
 
-        m = setup_local_session(
-            model_id=self.get_reasoning_model_id(),
-            system_prompt=self.system_prompt_for_enrichment_routing,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_enrichment_routing)
 
         answer = m.instruct(
             task,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
             requirements=[
                 Requirement(
                     description="Put the resulting function calls in the format ```json <insert-content>```",
@@ -148,11 +148,12 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                     validation_fn=simple_validate(DoclingEnrichingAgent._validate_json_format),
                 ),
             ],
+            retry_budget=loop_budget,
         )
 
         view_linear_context(m)
 
-        ops = find_json_dicts(text=answer.value)
+        ops = find_json_dicts(text=answer)
         if not ops:
             raise ValueError("No routing operation detected in model response")
         if "operation" not in ops[0]:
@@ -185,7 +186,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         logger.info("_summarize_items: make hierarchical document")
         hier_doc = make_hierarchical_document(document)
 
-        m = setup_local_session(model_id=self.get_reasoning_model_id())
+        m = self._create_reasoning_session()
 
         logger.info("_summarize_items: summarize the document")
         self._walk_and_summarize(
@@ -206,7 +207,10 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _fix_heading_levels(self, *, document: DoclingDocument) -> None:
         from docling_agent.agent.editor import DoclingEditingAgent
 
-        editor = DoclingEditingAgent(model_id=self.get_reasoning_model_id(), tools=[])
+        editor = DoclingEditingAgent(
+            backend=self.backend,
+            tools=[],
+        )
         editor.run(
             task=("Ensure the section headings have the correct level."),
             document=document,
@@ -217,7 +221,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         *,
         node: NodeItem,
         doc: DoclingDocument,
-        m: _LoggingSession,
+        m: BaseSession,
         loop_budget: int,
         min_text_length: int,
         meta_attr: str,
@@ -254,7 +258,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _enrich_leaf_items(
         self,
         *,
-        m: _LoggingSession,
+        m: BaseSession,
         document: DoclingDocument,
         loop_budget: int,
         meta_attr: str,
@@ -290,7 +294,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         *,
         node: NodeItem,
         doc: DoclingDocument,
-        m: _LoggingSession,
+        m: BaseSession,
         loop_budget: int,
         min_text_length: int,
     ) -> None:
@@ -313,7 +317,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _summarize_leaf_items(
         self,
         *,
-        m: _LoggingSession,
+        m: BaseSession,
         document: DoclingDocument,
         loop_budget: int,
     ) -> None:
@@ -334,7 +338,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _generate_content(
         self,
         *,
-        m: _LoggingSession,
+        m: BaseSession,
         text: str,
         task_prompt: str,
         requirement_description: str,
@@ -347,15 +351,15 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         try:
             answer = m.instruct(
                 ctask,
-                strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
                 requirements=[
                     Requirement(
                         description=requirement_description,
                         validation_fn=simple_validate(validation_fn),
                     ),
                 ],
+                retry_budget=loop_budget,
             )
-            return answer.value.strip() or None
+            return answer.strip() or None
         except Exception as exc:
             logger.warning(f"Content generation failed: {exc}")
             return None
@@ -363,7 +367,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _generate_summary(
         self,
         *,
-        m: _LoggingSession,
+        m: BaseSession,
         text: str,
         loop_budget: int = 5,
     ) -> str | None:
@@ -386,7 +390,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _generate_keywords(
         self,
         *,
-        m: _LoggingSession,
+        m: BaseSession,
         text: str,
         loop_budget: int = 5,
     ) -> list[str] | None:
@@ -441,7 +445,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
 
         hier_doc = make_hierarchical_document(document)
 
-        m = setup_local_session(model_id=self.get_reasoning_model_id())
+        m = self._create_reasoning_session()
 
         self._walk_and_extract_keywords(
             node=hier_doc.body,
@@ -463,7 +467,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         *,
         node: NodeItem,
         doc: DoclingDocument,
-        m: _LoggingSession,
+        m: BaseSession,
         loop_budget: int,
         min_text_length: int,
     ) -> None:
@@ -486,7 +490,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _extract_keywords_from_leaf_items(
         self,
         *,
-        m: _LoggingSession,
+        m: BaseSession,
         document: DoclingDocument,
         loop_budget: int,
     ) -> None:
@@ -523,7 +527,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
 
         hier_doc = make_hierarchical_document(document)
 
-        m = setup_local_session(model_id=self.get_reasoning_model_id())
+        m = self._create_reasoning_session()
 
         self._walk_and_extract_entities(
             node=hier_doc.body,
@@ -545,7 +549,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         *,
         node: NodeItem,
         doc: DoclingDocument,
-        m: _LoggingSession,
+        m: BaseSession,
         loop_budget: int,
         min_text_length: int,
     ) -> None:
@@ -568,7 +572,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _extract_entities_from_leaf_items(
         self,
         *,
-        m: _LoggingSession,
+        m: BaseSession,
         document: DoclingDocument,
         loop_budget: int,
     ) -> None:
@@ -589,7 +593,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _generate_entities(
         self,
         *,
-        m: _LoggingSession,
+        m: BaseSession,
         text: str,
         loop_budget: int = 5,
     ) -> list[dict[str, str]] | None:

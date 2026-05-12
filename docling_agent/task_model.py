@@ -7,11 +7,30 @@ import yaml
 from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
 
 
+def _default_output_formats() -> list[Literal["markdown", "html", "json"]]:
+    return ["markdown", "html", "json"]
+
+
 class OutputConfig(BaseModel):
     """Where and how to write the result."""
 
     path: Path | None = None
-    format: Literal["markdown", "html", "json"] = "markdown"
+    dir: Path = Path("./outputs")
+    formats: list[Literal["markdown", "html", "json"]] = Field(default_factory=_default_output_formats)
+
+    @model_validator(mode="after")
+    def normalize_formats(self) -> OutputConfig:
+        self.formats = list(dict.fromkeys(self.formats))
+        if not self.formats:
+            raise ValueError("'output.formats' must contain at least one format")
+        return self
+
+
+class ModelConfig(BaseModel):
+    """Model identifiers for the different reasoning roles."""
+
+    reasoning: str = "OPENAI_GPT_OSS_20B"
+    writing: str = "OPENAI_GPT_OSS_20B"
 
 
 class BackendConfig(BaseModel):
@@ -22,13 +41,7 @@ class BackendConfig(BaseModel):
     timeout: int | None = None
     api_key_env: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
-
-
-class ModelConfig(BaseModel):
-    """Model identifiers for the different reasoning roles."""
-
-    reasoning: str = "OPENAI_GPT_OSS_20B"
-    writing: str = "OPENAI_GPT_OSS_20B"
+    models: ModelConfig = Field(default_factory=ModelConfig)
 
 
 class LoggingConfig(BaseModel):
@@ -63,7 +76,6 @@ class AgentTask(BaseModel):
     )
     output: OutputConfig = Field(default_factory=OutputConfig)
     backend: BackendConfig = Field(default_factory=BackendConfig)
-    models: ModelConfig = Field(default_factory=ModelConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     extra: dict[str, Any] = Field(
         default_factory=dict,

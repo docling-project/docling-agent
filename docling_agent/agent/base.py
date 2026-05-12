@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
-from mellea.backends.model_ids import ModelIdentifier
 from pydantic import BaseModel, ConfigDict
+
+from docling_agent.backends import BaseBackend, create_backend
+from docling_agent.task_model import BackendConfig
 
 if TYPE_CHECKING:
     from docling_core.types.doc.document import DoclingDocument
@@ -49,24 +51,35 @@ class BaseDoclingAgent(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     agent_type: DoclingAgentType
-    model_id: ModelIdentifier
+    backend: BaseBackend
     tools: list
-
-    # model needed for reasoning/instruction following
-    reasoning_model_id: ModelIdentifier | None = None
-
-    # model needed for writing, summarizing, etc
-    writing_model_id: ModelIdentifier | None = None
 
     max_iteration: int = 16
 
-    def get_reasoning_model_id(self) -> ModelIdentifier:
-        """Return the reasoning model id, falling back to the primary model."""
-        return self.reasoning_model_id or self.model_id
+    @staticmethod
+    def default_backend() -> BaseBackend:
+        """Build the default backend used by existing agent constructors."""
+        return create_backend(BackendConfig(type="mellea"))
 
-    def get_writing_model_id(self) -> ModelIdentifier:
-        """Return the writing model id, falling back to the primary model."""
-        return self.writing_model_id or self.model_id
+    def get_reasoning_model_id(self) -> str:
+        """Return the backend-scoped reasoning model id."""
+        return self.backend.models.reasoning
+
+    def get_writing_model_id(self) -> str:
+        """Return the backend-scoped writing model id."""
+        return self.backend.models.writing
+
+    def _create_reasoning_session(self, *, system_prompt: str | None = None):
+        return self.backend.create_session(
+            model=self.get_reasoning_model_id(),
+            system_prompt=system_prompt,
+        )
+
+    def _create_writing_session(self, *, system_prompt: str | None = None):
+        return self.backend.create_session(
+            model=self.get_writing_model_id(),
+            system_prompt=system_prompt,
+        )
 
     @abstractmethod
     def run(

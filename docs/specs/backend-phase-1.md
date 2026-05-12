@@ -11,7 +11,7 @@ This phase introduces:
 - backend factory and registry
 - `MelleaBackend`
 - placeholder direct backends for `ollama`, `lmstudio`, and `litellm`
-- top-level task `backend` configuration
+- top-level task `backend` configuration with nested model roles
 
 This phase does not yet introduce:
 
@@ -96,12 +96,14 @@ Fields:
 - `options`
   - backend-specific free-form settings
 
-The model role block remains:
+Backend-scoped model role configuration lives inside the backend block:
 
 ```yaml
-models:
-  reasoning: ...
-  writing: ...
+backend:
+  type: ...
+  models:
+    reasoning: ...
+    writing: ...
 ```
 
 ## Factory behavior

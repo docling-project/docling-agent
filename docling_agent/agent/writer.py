@@ -22,9 +22,7 @@ from docling_core.types.doc.document import (
     TextItem,
     TitleItem,
 )
-from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -37,7 +35,6 @@ from docling_agent.agent.base_functions import (
     validate_html_to_docling_document,
     validate_markdown_to_docling_document,
 )
-from docling_agent.agent_models import setup_local_session
 from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
@@ -71,10 +68,15 @@ class DoclingWritingAgent(BaseDoclingAgent):
     _OUTLINE_LINE_PATTERN: ClassVar[Pattern[str]] = re.compile(rf"^({'|'.join(_OUTLINE_KINDS)}):\s(.*)\.$")
     _outline_descriptions: ClassVar[list[str]] = [f"{k}:" for k in _OUTLINE_KINDS]
 
-    def __init__(self, *, model_id: ModelIdentifier, tools: list):
+    def __init__(
+        self,
+        *,
+        tools: list,
+        backend=None,
+    ):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_WRITER,
-            model_id=model_id,
+            backend=backend or self.default_backend(),
             tools=tools,
         )
 
@@ -105,10 +107,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         return
 
     def _make_outline_for_writing(self, *, task: str, loop_budget: int = 5) -> DoclingDocument:
-        m = setup_local_session(
-            model_id=self.get_reasoning_model_id(),
-            system_prompt=self.system_prompt_for_outline,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_outline)
 
         answer = m.instruct(
             f"{task}",
@@ -123,11 +122,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(DoclingWritingAgent._validate_outline_format),
                 ),
             ],
-            # user_variables={"name": name, "notes": notes},
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        outline = self._find_outline(text=answer.value, task=task)
+        outline = self._find_outline(text=answer, task=task)
 
         if outline is None:
             raise ValueError("Failed to generate a valid outline document.")
@@ -471,10 +469,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         to the table.
         """
         try:
-            m = setup_local_session(
-                model_id=self.get_writing_model_id(),
-                system_prompt=self.system_prompt_expert_table_writer,
-            )
+            m = self._create_writing_session(system_prompt=self.system_prompt_expert_table_writer)
 
             context = ""
             if table_html:
@@ -490,10 +485,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
             answer = m.instruct(
                 f"{context}{prompt}",
-                strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+                retry_budget=loop_budget,
             )
 
-            caption = answer.value.strip()
+            caption = answer.strip()
             # Strip accidental code fences/backticks and condense whitespace
             caption = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL).strip()
             caption = re.sub(r"\s+", " ", caption)
@@ -516,10 +511,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         if len(context) > 0:
             context = rf"Given the current context in the document:\n\n```markdown\n{context}```\n\n"
 
-        m = setup_local_session(
-            model_id=self.get_writing_model_id(),
-            system_prompt=self.system_prompt_expert_writer,
-        )
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
 
         prompt = f"{context}Write me a single paragraph that expands the following summary: {summary}"
         # logger.info(f"prompt: {prompt}")
@@ -532,10 +524,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(validate_markdown_to_docling_document),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        result = convert_markdown_to_docling_document(text=answer.value)
+        result = convert_markdown_to_docling_document(text=answer)
         return result if result is not None else DoclingDocument(name="content")
 
     def _write_table(
@@ -550,11 +542,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         for level, header in hierarchy.items():
             context += "#" * (level + 1) + header + "\n"
 
-        m = setup_local_session(
-            # model_id=self.model_id,
-            model_id=self.get_writing_model_id(),
-            system_prompt=self.system_prompt_expert_writer,
-        )
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
 
         prompt = f"Given the current context in the document:\n\n```{context}```\n\nwrite me a single HTML table that expands the following summary: {summary}"
         # logger.info(f"prompt: {prompt}")
@@ -571,10 +559,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(validate_html_to_docling_document),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        result = convert_html_to_docling_document(text=answer.value)
+        result = convert_html_to_docling_document(text=answer)
 
         return result if result is not None else DoclingDocument(name="content")
 
@@ -590,11 +578,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         for level, header in hierarchy.items():
             context += "#" * (level + 1) + header + "\n"
 
-        m = setup_local_session(
-            # model_id=self.model_id,
-            model_id=self.get_writing_model_id(),
-            system_prompt=self.system_prompt_expert_writer,
-        )
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
 
         prompt = f"Given the current context in the document:\n\n```{context}```\n\nwrite me a list (can be nested) in markdown that expands the following summary: {summary}"
         # logger.info(f"prompt: {prompt}")
@@ -607,9 +591,9 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(validate_markdown_to_docling_document),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        result = convert_markdown_to_docling_document(text=answer.value)
+        result = convert_markdown_to_docling_document(text=answer)
 
         return result if result is not None else DoclingDocument(name="content")

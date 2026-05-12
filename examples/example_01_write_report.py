@@ -4,15 +4,21 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from mellea.backends import ModelIdentifier, model_ids
-
-from docling_agent.agents import DoclingWritingAgent, logger
+from docling_agent.agents import BackendConfig, DoclingWritingAgent, ModelConfig, create_backend, logger
 
 
-def simple_writing_report(task: str, out: Path, model_id: ModelIdentifier) -> None:
+def simple_writing_report(task: str, out: Path, model_name: str) -> None:
     tools = []
 
-    agent = DoclingWritingAgent(model_id=model_id, tools=tools)
+    agent = DoclingWritingAgent(
+        backend=create_backend(
+            BackendConfig(
+                type="mellea",
+                models=ModelConfig(reasoning=model_name, writing=model_name),
+            )
+        ),
+        tools=tools,
+    )
     document = agent.run(task=task)
 
     # Save the document
@@ -26,16 +32,18 @@ def simple_writing_report(task: str, out: Path, model_id: ModelIdentifier) -> No
     logger.info(f"report written to `{out_html}`")
 
 
-def advanced_writing_report(
-    task: str, out: Path, reasoning_model: ModelIdentifier, writing_model: ModelIdentifier
-) -> None:
+def advanced_writing_report(task: str, out: Path, reasoning_model: str, writing_model: str) -> None:
     tools = []
 
-    # Initialize the agent with a base model id
-    agent = DoclingWritingAgent(model_id=reasoning_model, tools=tools)
-    # Configure specialized models for reasoning and writing
-    agent.reasoning_model_id = reasoning_model
-    agent.writing_model_id = writing_model
+    agent = DoclingWritingAgent(
+        backend=create_backend(
+            BackendConfig(
+                type="mellea",
+                models=ModelConfig(reasoning=reasoning_model, writing=writing_model),
+            )
+        ),
+        tools=tools,
+    )
 
     document = agent.run(task=task)
 
@@ -53,8 +61,8 @@ def advanced_writing_report(
 def main():
     out_dir = Path("scratch/example_01")
     os.makedirs(out_dir, exist_ok=True)
-    reasoning_model_id = model_ids.OPENAI_GPT_OSS_20B
-    writing_model_id = model_ids.IBM_GRANITE_4_MICRO_3B
+    reasoning_model_name = "OPENAI_GPT_OSS_20B"
+    writing_model_name = "IBM_GRANITE_4_MICRO_3B"
 
     task = (
         "Write me a document on polymers in food-packaging. Please make sure "
@@ -63,9 +71,14 @@ def main():
         "strength and durability."
     )
 
-    # simple_writing_report(task=task, out = out_dir, model_id=writing_model_id)
+    # simple_writing_report(task=task, out=out_dir, model_name=writing_model_name)
 
-    advanced_writing_report(task=task, out=out_dir, reasoning_model=reasoning_model_id, writing_model=writing_model_id)
+    advanced_writing_report(
+        task=task,
+        out=out_dir,
+        reasoning_model=reasoning_model_name,
+        writing_model=writing_model_name,
+    )
 
 
 if __name__ == "__main__":

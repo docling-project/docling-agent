@@ -14,11 +14,7 @@ from docling_core.types.doc.document import (
     SectionHeaderItem,
     TitleItem,
 )
-from mellea.backends import model_ids
-from mellea.backends.model_ids import ModelIdentifier
-from mellea.core.base import ModelOutputThunk
 from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import find_json_dicts
@@ -28,7 +24,6 @@ from docling_agent.agent.extractor import DoclingExtractingAgent
 from docling_agent.agent.library import DoclingLibrary
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
-from docling_agent.agent_models import setup_local_session
 from docling_agent.logging import logger
 from docling_agent.task_model import (
     AgentTask,
@@ -67,19 +62,16 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     def __init__(
         self,
         *,
-        model_id: ModelIdentifier,
-        writing_model_id: ModelIdentifier | None = None,
         tools: list,
+        backend=None,
         library_path: Path | None = None,
     ) -> None:
-        logger.info(f"DoclingOrchestratorAgent.__init__: model_id={model_id!r}")
+        logger.info("DoclingOrchestratorAgent.__init__")
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_ORCHESTRATOR,
-            model_id=model_id,
+            backend=backend or self.default_backend(),
             tools=tools,
         )
-        if writing_model_id is not None:
-            self.writing_model_id = writing_model_id
         if library_path is not None:
             self.library_path = library_path
 
@@ -221,7 +213,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         """
         logger.info(f"_ensure_enriched: operations={operations}, docs={len(source_pairs)}")
         enricher = DoclingEnrichingAgent(
-            model_id=self.get_writing_model_id(),
+            backend=self.backend,
             tools=[],
         )
 
@@ -290,7 +282,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
         docs: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
         rag_agent = DoclingRAGAgent(
-            model_id=self._model_id_for("reasoning", task),
+            backend=self.backend,
             tools=[],
             max_iterations=task.max_iterations,
         )
@@ -304,7 +296,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     ) -> DoclingDocument:
         logger.info(f"_run_extract: query={task.query!r}, docs={len(source_pairs)}")
         extractor = DoclingExtractingAgent(
-            model_id=self._model_id_for("reasoning", task),
+            backend=self.backend,
             tools=[],
         )
         # For extraction, pass the original source paths (not converted DoclingDocuments)
@@ -321,7 +313,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     ) -> DoclingDocument:
         logger.info(f"_run_write: query={task.query!r}, docs={len(source_pairs)}")
         writer = DoclingWritingAgent(
-            model_id=self._model_id_for("reasoning", task),
+            backend=self.backend,
             tools=[],
         )
         sources: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
@@ -335,7 +327,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     ) -> DoclingDocument:
         logger.info(f"_run_edit: query={task.query!r}, docs={len(source_pairs)}")
         editor = DoclingEditingAgent(
-            model_id=self._model_id_for("reasoning", task),
+            backend=self.backend,
             tools=[],
         )
         sources: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
@@ -404,14 +396,10 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             "Output your plan as a JSON code block."
         )
 
-        m = setup_local_session(
-            model_id=self.get_reasoning_model_id(),
-            system_prompt=self._PLANNER_SYSTEM_PROMPT,
-        )
+        m = self._create_reasoning_session(system_prompt=self._PLANNER_SYSTEM_PROMPT)
 
-        raw: ModelOutputThunk = m.instruct(
+        raw = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=3),
             requirements=[
                 Requirement(
                     description="Output must contain a JSON object with a 'tasks' list",
@@ -420,9 +408,10 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     ),
                 )
             ],
+            retry_budget=3,
         )
 
-        dicts = find_json_dicts(str(raw))
+        dicts = find_json_dicts(raw)
         if not dicts or "tasks" not in dicts[0]:
             raise ValueError(f"Planner did not return a valid plan; got: {raw!r}")
 
@@ -446,7 +435,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                         task=RAGTask(
                             query=query,
                             sources=task.sources,
-                            models=task.models,
+                            backend=task.backend,
                             logging=task.logging,
                         ),
                         source_pairs=resolved,
@@ -459,7 +448,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                         task=ExtractTask(
                             query=query,
                             sources=task.sources,
-                            models=task.models,
+                            backend=task.backend,
                             logging=task.logging,
                         ),
                         source_pairs=resolved,
@@ -471,7 +460,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                         task=WriteTask(
                             query=query,
                             sources=task.sources,
-                            models=task.models,
+                            backend=task.backend,
                             logging=task.logging,
                         ),
                         source_pairs=resolved,
@@ -483,7 +472,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                         task=EditingTask(
                             query=query,
                             sources=task.sources,
-                            models=task.models,
+                            backend=task.backend,
                             logging=task.logging,
                         ),
                         source_pairs=resolved,
@@ -495,7 +484,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                         task=EnrichTask(
                             query=query,
                             sources=task.sources,
-                            models=task.models,
+                            backend=task.backend,
                             logging=task.logging,
                         ),
                         source_pairs=resolved,
@@ -520,12 +509,3 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    def _model_id_for(self, role: str, task: AgentTask) -> ModelIdentifier:
-        logger.info(f"_model_id_for: role={role!r}")
-        name = task.models.reasoning if role == "reasoning" else task.models.writing
-        resolved = getattr(model_ids, name, None)
-        if resolved is None:
-            logger.warning(f"Unknown model id {name!r}; falling back to OPENAI_GPT_OSS_20B")
-            return model_ids.OPENAI_GPT_OSS_20B
-        return resolved

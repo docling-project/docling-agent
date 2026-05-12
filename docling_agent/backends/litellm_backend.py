@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-from mellea.stdlib.requirements import Requirement
-
 from docling_agent.backends.openai_compatible import OpenAICompatibleBackend
+from docling_agent.task_model import BackendConfig
 
 
 class LiteLLMBackend(OpenAICompatibleBackend):
-    """Direct LiteLLM backend placeholder for the Phase 1 abstraction."""
+    """Direct LiteLLM backend."""
 
     backend_type = "litellm"
 
-    def instruct(
-        self,
-        prompt: str,
-        *,
-        model: str,
-        system_prompt: str | None = None,
-        requirements: list[Requirement] | None = None,
-        retry_budget: int = 1,
-    ) -> str:
-        raise NotImplementedError("LiteLLMBackend direct execution is not implemented in Phase 1.")
+    @classmethod
+    def from_config(cls, config: BackendConfig) -> LiteLLMBackend:
+        config = config.model_copy(
+            update={
+                "base_url": config.base_url or "http://localhost:4000/v1",
+            }
+        )
+        return cls(config=config)

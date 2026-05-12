@@ -13,9 +13,7 @@ from docling_core.types.doc.document import (
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
-from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
@@ -30,7 +28,7 @@ from docling_agent.agent.base_functions import (
     serialize_table_to_html,
     validate_html_to_docling_table,
 )
-from docling_agent.agent_models import setup_local_session, view_linear_context
+from docling_agent.agent_models import view_linear_context
 from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
@@ -82,10 +80,15 @@ class DoclingEditingAgent(BaseDoclingAgent):
 
     system_prompt_expert_writer: ClassVar[str] = SYSTEM_PROMPT_EXPERT_WRITER
 
-    def __init__(self, *, model_id: ModelIdentifier, tools: list):
+    def __init__(
+        self,
+        *,
+        tools: list,
+        backend=None,
+    ):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_EDITOR,
-            model_id=model_id,
+            backend=backend or self.default_backend(),
             tools=tools,
         )
 
@@ -164,10 +167,7 @@ Now, provide me with the operation to execute the task using the exact field nam
 
         prompt = f"{context}{identification}"
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_for_editing_document,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_document)
 
         def _validate_operation_format(content: str) -> bool:
             """Validate that the response contains a valid operation JSON with correct field names."""
@@ -192,19 +192,19 @@ Now, provide me with the operation to execute the task using the exact field nam
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
             requirements=[
                 Requirement(
                     description='Return exactly one JSON object in ```json...``` format with an "operation" field',
                     validation_fn=simple_validate(_validate_operation_format),
                 ),
             ],
+            retry_budget=loop_budget,
         )
-        logger.info(f"answer: {answer.value}")
+        logger.info(f"answer: {answer}")
 
         view_linear_context(m)
 
-        ops: list[dict] = find_json_dicts(text=answer.value)
+        ops: list[dict] = find_json_dicts(text=answer)
 
         if len(ops) == 0:
             raise ValueError("No operation is detected")
@@ -252,14 +252,10 @@ Execute the following task: {task}
 """
         # logger.info(f"prompt: {prompt}")
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_for_editing_table,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_table)
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
             requirements=[
                 Requirement(
                     description="Put the resulting HTML table in the format ```html <insert-content>```",
@@ -270,11 +266,12 @@ Execute the following task: {task}
                     validation_fn=simple_validate(validate_html_to_docling_table),
                 ),
             ],
+            retry_budget=loop_budget,
         )
 
-        logger.info(f"response: {answer.value}")
+        logger.info(f"response: {answer}")
 
-        new_tables = convert_html_to_docling_table(text=answer.value)
+        new_tables = convert_html_to_docling_table(text=answer)
 
         if new_tables and len(new_tables) == 1:
             table.data = new_tables[0].data
@@ -303,18 +300,15 @@ Execute the following task: {task}
 """
         # logger.info(f"prompt: {prompt}")
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_for_editing_table,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_table)
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
-        # logger.info(f"response: {answer.value}")
+        # logger.info(f"response: {answer}")
 
-        updated_doc = convert_markdown_to_docling_document(text=answer.value)
+        updated_doc = convert_markdown_to_docling_document(text=answer)
         if updated_doc is None:
             logger.warning("No valid document produced for updated content.")
             return
@@ -361,18 +355,15 @@ Execute the following task: {task}
 """
         logger.info(f"prompt: {prompt}")
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_expert_writer,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_expert_writer)
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
-        logger.info(f"response: {answer.value}")
+        logger.info(f"response: {answer}")
 
-        updated_doc = convert_markdown_to_docling_document(text=answer.value)
+        updated_doc = convert_markdown_to_docling_document(text=answer)
         if updated_doc is None:
             logger.warning("No valid document produced for rewrite.")
             return

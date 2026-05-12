@@ -2,19 +2,25 @@ import json
 import os
 from pathlib import Path
 
-from mellea.backends import ModelIdentifier, model_ids
-
-from docling_agent.agents import DoclingExtractingAgent, logger
+from docling_agent.agents import BackendConfig, DoclingExtractingAgent, ModelConfig, create_backend, logger
 
 
 def run_task(
     schema: dict,
     sources: list[Path],
     opath: Path,
-    model_id=model_ids.OPENAI_GPT_OSS_20B,
+    model_name: str = "OPENAI_GPT_OSS_20B",
     tools: list | None = None,
 ):
-    agent = DoclingExtractingAgent(model_id=model_id, tools=tools or [])
+    agent = DoclingExtractingAgent(
+        backend=create_backend(
+            BackendConfig(
+                type="mellea",
+                models=ModelConfig(reasoning=model_name, writing=model_name),
+            )
+        ),
+        tools=tools or [],
+    )
 
     document = agent.run(
         task=json.dumps(schema),
@@ -29,7 +35,7 @@ def main():
     doc_dir: Path = Path("examples/data")
     out_dir: Path = Path("scratch/example_03")
     os.makedirs(out_dir, exist_ok=True)
-    model_id: ModelIdentifier = model_ids.OPENAI_GPT_OSS_20B
+    model_name = "OPENAI_GPT_OSS_20B"
 
     schema_01: dict[str, str] = {
         "name": "string",
@@ -82,7 +88,7 @@ def main():
             schema=schema,
             sources=sources,
             opath=out_dir / f"{type}_extraction_report.html",
-            model_id=model_id,
+            model_name=model_name,
         )
 
 

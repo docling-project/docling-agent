@@ -2,16 +2,15 @@ import os
 from pathlib import Path
 
 from docling_core.types.doc.document import DoclingDocument
-from mellea.backends import model_ids
 
-from docling_agent.agents import DoclingRAGAgent, logger
+from docling_agent.agents import BackendConfig, DoclingRAGAgent, ModelConfig, create_backend, logger
 
 
 def run_task(
     ipath: Path,
     opath: Path,
     query: str,
-    model_id=model_ids.OPENAI_GPT_OSS_20B,
+    model_name: str = "OPENAI_GPT_OSS_20B",
     tools: list | None = None,
     max_iterations: int = 5,
     verbose: bool = True,
@@ -22,7 +21,7 @@ def run_task(
         ipath: Path to the input DoclingDocument JSON file
         opath: Path to save the output HTML file
         query: The question to answer from the document
-        model_id: The model identifier to use
+        model_name: The backend model name to use
         tools: Optional list of tools for the agent
         max_iterations: Maximum number of RAG iterations
         verbose: Whether to print detailed progress information
@@ -30,7 +29,12 @@ def run_task(
     document = DoclingDocument.load_from_json(ipath)
 
     agent = DoclingRAGAgent(
-        model_id=model_id,
+        backend=create_backend(
+            BackendConfig(
+                type="mellea",
+                models=ModelConfig(reasoning=model_name, writing=model_name),
+            )
+        ),
         tools=tools or [],
         max_iterations=max_iterations,
         verbose=verbose,
@@ -46,7 +50,7 @@ def run_task(
 def main():
     out_dir = Path("scratch/example_05")
     os.makedirs(out_dir, exist_ok=True)
-    model_id = model_ids.OPENAI_GPT_OSS_20B
+    model_name = "OPENAI_GPT_OSS_20B"
 
     ipath = Path("tests/data/2408.09869v5-hierarchical-with-summaries.json")
 
@@ -76,7 +80,7 @@ def main():
             ipath=ipath,
             opath=output,
             query=query,
-            model_id=model_id,
+            model_name=model_name,
             max_iterations=5,
             verbose=True,
         )

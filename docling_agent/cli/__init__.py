@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import typer
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
-from mellea.backends import model_ids
 
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent_models import configure_llm_logging
+from docling_agent.backends import create_backend
 from docling_agent.logging import logger
 from docling_agent.task_model import AgentTask, load_task
 
@@ -46,8 +47,9 @@ sources:
 
 # Output configuration --------------------------------------------------------
 # output:
-#   path: result.md   # omit to print to stdout
-#   format: markdown  # markdown | html | json
+#   dir: ./outputs                    # default output directory
+#   path: result                      # optional explicit output path or basename
+#   formats: [markdown, html, json]   # markdown | html | json
 
 # Backend configuration -------------------------------------------------------
 # backend:
@@ -55,11 +57,9 @@ sources:
 #   base_url:
 #   timeout:
 #   api_key_env:
-#
-# Model configuration ---------------------------------------------------------
-# models:
-#   reasoning: OPENAI_GPT_OSS_20B
-#   writing: OPENAI_GPT_OSS_20B
+#   models:
+#     reasoning: OPENAI_GPT_OSS_20B
+#     writing: OPENAI_GPT_OSS_20B
 
 # Logging configuration -------------------------------------------------------
 # logging:
@@ -110,45 +110,57 @@ def main(
 
     # CLI overrides
     if model:
-        agent_task.models.reasoning = model
-        agent_task.models.writing = model
+        agent_task.backend.models.reasoning = model
+        agent_task.backend.models.writing = model
     if output:
         agent_task.output.path = output
 
     logger.info(f"Task loaded: mode={agent_task.mode}, query={agent_task.query!r}")
 
-    def _resolve_model_id(name: str):
-        resolved = getattr(model_ids, name, None)
-        if resolved is None:
-            logger.warning(f"Unknown model id '{name}', falling back to OPENAI_GPT_OSS_20B")
-            return model_ids.OPENAI_GPT_OSS_20B
-        return resolved
-
     orchestrator = DoclingOrchestratorAgent(
-        model_id=_resolve_model_id(agent_task.models.reasoning),
-        writing_model_id=_resolve_model_id(agent_task.models.writing),
+        backend=create_backend(agent_task.backend),
         tools=[],
     )
     result = orchestrator.run_task(agent_task)
 
-    if agent_task.output.path:
-        _write_output(result, agent_task)
-    else:
-        print(MarkdownDocSerializer(doc=result).serialize().text)
+    _write_output(result, agent_task, task)
 
 
-def _write_output(doc, task: AgentTask) -> None:
-    path = task.output.path
-    if path is None:
-        return
-    fmt = task.output.format
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if fmt == "html":
-        doc.save_as_html(filename=path)
-    elif fmt == "json":
-        path.write_text(doc.model_dump_json(indent=2), encoding="utf-8")
-    else:
-        from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
+def _write_output(doc, task: AgentTask, task_path: Path) -> None:
+    base_path = _resolve_output_base_path(task.output, task_path)
+    written_paths: list[Path] = []
 
-        path.write_text(MarkdownDocSerializer(doc=doc).serialize().text, encoding="utf-8")
-    logger.info(f"Output written to {path}")
+    for fmt in task.output.formats:
+        path = _path_for_format(base_path, fmt)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if fmt == "html":
+            doc.save_as_html(filename=path)
+        elif fmt == "json":
+            path.write_text(doc.model_dump_json(indent=2), encoding="utf-8")
+        else:
+            path.write_text(MarkdownDocSerializer(doc=doc).serialize().text, encoding="utf-8")
+        written_paths.append(path)
+
+    logger.info("Output written to: " + ", ".join(str(path) for path in written_paths))
+
+
+def _resolve_output_base_path(output, task_path: Path) -> Path:
+    if output.path is not None:
+        return output.path
+
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
+    return output.dir / f"{task_path.stem}_{timestamp}"
+
+
+def _path_for_format(base_path: Path, fmt: str) -> Path:
+    suffix_map = {
+        "markdown": ".md",
+        "html": ".html",
+        "json": ".json",
+    }
+    suffix = suffix_map[fmt]
+    if base_path.suffix == suffix:
+        return base_path
+    if base_path.suffix:
+        return base_path.with_suffix(suffix)
+    return base_path.parent / f"{base_path.name}{suffix}"

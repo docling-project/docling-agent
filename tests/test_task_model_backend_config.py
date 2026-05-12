@@ -11,9 +11,9 @@ query: "Summarize this document"
 backend:
   type: lmstudio
   base_url: http://localhost:1234/v1
-models:
-  reasoning: granite-3.3-8b-instruct
-  writing: granite-3.3-8b-instruct
+  models:
+    reasoning: granite-3.3-8b-instruct
+    writing: granite-3.3-8b-instruct
 """.strip(),
         encoding="utf-8",
     )
@@ -23,4 +23,4 @@ models:
     assert isinstance(task, AgentTask)
     assert task.backend.type == "lmstudio"
     assert task.backend.base_url == "http://localhost:1234/v1"
-    assert task.models.reasoning == "granite-3.3-8b-instruct"
+    assert task.backend.models.reasoning == "granite-3.3-8b-instruct"
