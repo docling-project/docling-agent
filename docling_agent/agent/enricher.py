@@ -1,18 +1,27 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, ClassVar, Protocol
+from typing import Any, ClassVar, Protocol, cast
 
 from docling_core.types.doc.document import (
     BaseMeta,
+    CodeLanguageLabel,
+    CodeMetaField,
+    DocItemLabel,
     DoclingDocument,
     FloatingMeta,
+    GroupItem,
     NodeItem,
+    PictureClassificationMetaField,
+    PictureClassificationPrediction,
     PictureItem,
     PictureMeta,
     SectionHeaderItem,
     SummaryMetaField,
+    TableData,
     TableItem,
+    TabularChartMetaField,
+    TextItem,
     TitleItem,
 )
 from mellea.stdlib.requirements import Requirement, simple_validate
@@ -60,6 +69,7 @@ _OP_ALIASES: dict[str, str] = {
     "detect_key_entities": "_detect_key_entities",
     "entities": "_detect_key_entities",
     "classify_items": "_classify_items",
+    "classify": "_classify_items",
 }
 
 _ROUTING_OPS = frozenset(["summarize_items", "find_search_keywords", "detect_key_entities", "classify_items"])
@@ -79,6 +89,23 @@ You are a precise document enrichment router. Given a natural language task desc
 
 Return no extra commentary. If multiple seem plausible, choose the single best fit.
     """
+    _PICTURE_CLASS_NAMES: ClassVar[tuple[str, ...]] = (
+        "bar-chart",
+        "line-chart",
+        "pie-chart",
+        "scatter-chart",
+        "spider-chart",
+        "flowchart",
+        "diagram",
+        "schematic",
+        "illustration",
+        "photo",
+        "table-image",
+        "other",
+    )
+    _SUPPORTED_CHART_TYPES: ClassVar[frozenset[str]] = frozenset(
+        {"bar-chart", "line-chart", "pie-chart", "scatter-chart", "spider-chart"}
+    )
 
     last_operation: dict[str, Any] = Field(default_factory=dict)
 
@@ -176,7 +203,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         *,
         document: DoclingDocument,
         fix_heading_levels: bool = True,
-        min_text_length: int = 100,
+        min_text_length: int = 40,
         loop_budget: int = 5,
     ) -> DoclingDocument:
         if fix_heading_levels:
@@ -229,10 +256,22 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         set_meta_fn: _SetMetaFn,
     ) -> None:
         """Generic method to walk document tree and enrich nodes with metadata."""
+        should_enrich = False
+        threshold = min_text_length
+
         if isinstance(node, TitleItem | SectionHeaderItem):
+            should_enrich = True
+        elif isinstance(node, TextItem):
+            should_enrich = node.label != DocItemLabel.CAPTION
+            threshold = min(min_text_length, 40)
+        elif isinstance(node, GroupItem):
+            should_enrich = node.self_ref != "#/body"
+            threshold = min(min_text_length, 40)
+
+        if should_enrich:
             if not (node.meta and hasattr(node.meta, meta_attr) and getattr(node.meta, meta_attr)):
                 text = collect_subtree_text(node, doc)
-                if len(text) >= min_text_length:
+                if len(text) >= threshold:
                     result = generate_fn(m=m, text=text, loop_budget=loop_budget)
                     if result:
                         if node.meta is None:
@@ -633,3 +672,288 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                 except Exception as exc:
                     logger.warning(f"Failed to parse entities JSON: {exc}")
         return None
+
+    # ------------------------------------------------------------------
+    # Picture Classification
+    # ------------------------------------------------------------------
+
+    def _classify_items(
+        self,
+        *,
+        document: DoclingDocument,
+        loop_budget: int = 5,
+    ) -> DoclingDocument:
+        logger.info("_classify_items: starting")
+
+        for item, _ in document.iterate_items():
+            if not isinstance(item, PictureItem):
+                continue
+
+            text = self._picture_context(item=item, document=document)
+            if not text:
+                logger.info("Skipping picture classification without textual context")
+                continue
+
+            meta = self._ensure_picture_meta(item)
+
+            classification = self._classify_picture_context(text=text, loop_budget=loop_budget)
+            if classification is not None:
+                meta.classification = classification
+
+            chart_type = self._primary_chart_type(classification)
+            chart_meta: TabularChartMetaField | None = None
+            if chart_type is not None:
+                chart_meta = self._extract_tabular_chart(text=text, chart_type=chart_type, loop_budget=loop_budget)
+                if chart_meta is not None:
+                    meta.tabular_chart = chart_meta
+
+            code_meta = self._generate_picture_code(
+                text=text,
+                classification=classification,
+                chart_meta=chart_meta,
+                loop_budget=loop_budget,
+            )
+            if code_meta is not None:
+                meta.code = code_meta
+
+        return document
+
+    def _metadata_origin(self) -> str:
+        return f"docling-agent:{self.backend.backend_type}:{self.get_reasoning_model_id()}"
+
+    def _ensure_picture_meta(self, item: PictureItem) -> PictureMeta:
+        if isinstance(item.meta, PictureMeta):
+            return item.meta
+
+        summary = item.meta.summary if item.meta and getattr(item.meta, "summary", None) else None
+        item.meta = PictureMeta(summary=summary)
+        return item.meta
+
+    def _picture_context(self, *, item: PictureItem, document: DoclingDocument) -> str:
+        parts: list[str] = []
+
+        if item.meta and item.meta.summary and item.meta.summary.text:
+            parts.append(f"Summary: {item.meta.summary.text}")
+
+        captions = [c.resolve(document).text for c in item.captions if hasattr(c.resolve(document), "text")]
+        if captions:
+            parts.append("Captions:\n" + "\n".join(f"- {caption}" for caption in captions))
+
+        return "\n\n".join(part for part in parts if part).strip()
+
+    def _classify_picture_context(
+        self,
+        *,
+        text: str,
+        loop_budget: int,
+    ) -> PictureClassificationMetaField | None:
+        def _validate(content: str) -> bool:
+            payload = self._extract_single_json_dict(content)
+            if payload is None:
+                return False
+            predictions = payload.get("predictions")
+            return isinstance(predictions, list) and all(
+                isinstance(label, str) and label in self._PICTURE_CLASS_NAMES for label in predictions
+            )
+
+        m = self._create_reasoning_session()
+        answer = m.instruct(
+            (
+                "Classify the following picture description.\n\n"
+                f"{text}\n\n"
+                "Return a JSON object in a ```json``` block with the form:\n"
+                '{"predictions": ["<class-name>", "..."]}\n'
+                "Choose one to three labels from this closed set only:\n" + ", ".join(self._PICTURE_CLASS_NAMES)
+            ),
+            requirements=[
+                Requirement(
+                    description="Return a valid picture-classification JSON object in a ```json``` block.",
+                    validation_fn=simple_validate(_validate),
+                ),
+            ],
+            retry_budget=loop_budget,
+        )
+
+        payload = self._extract_single_json_dict(answer)
+        if payload is None:
+            return None
+
+        labels = payload.get("predictions")
+        if not isinstance(labels, list):
+            return None
+
+        deduped = [label for label in dict.fromkeys(labels) if isinstance(label, str)]
+        if not deduped:
+            return None
+
+        return PictureClassificationMetaField(
+            predictions=[
+                PictureClassificationPrediction(class_name=label, created_by=self._metadata_origin())
+                for label in deduped
+            ]
+        )
+
+    def _primary_chart_type(self, classification: PictureClassificationMetaField | None) -> str | None:
+        if classification is None:
+            return None
+
+        for prediction in classification.predictions:
+            if prediction.class_name in self._SUPPORTED_CHART_TYPES:
+                return prediction.class_name
+        return None
+
+    def _extract_tabular_chart(
+        self,
+        *,
+        text: str,
+        chart_type: str,
+        loop_budget: int,
+    ) -> TabularChartMetaField | None:
+        def _validate(content: str) -> bool:
+            payload = self._extract_single_json_dict(content)
+            return self._is_valid_chart_payload(payload)
+
+        m = self._create_reasoning_session()
+        answer = m.instruct(
+            (
+                f"The following picture is classified as a {chart_type}.\n\n"
+                f"{text}\n\n"
+                "Extract its chart data and return a JSON object in a ```json``` block with the form:\n"
+                "{"
+                '"title": "<chart title or null>", '
+                '"columns": ["<column-1>", "<column-2>", "..."], '
+                '"rows": [["<value>", "<value>", "..."], ["<value>", "<value>", "..."]]'
+                "}"
+            ),
+            requirements=[
+                Requirement(
+                    description="Return valid chart-data JSON with title, columns, and rows.",
+                    validation_fn=simple_validate(_validate),
+                ),
+            ],
+            retry_budget=loop_budget,
+        )
+
+        payload = self._extract_single_json_dict(answer)
+        if not self._is_valid_chart_payload(payload):
+            return None
+
+        payload_dict = cast(dict[str, Any], payload)
+        columns = cast(list[str], payload_dict["columns"])
+        rows = cast(list[list[str | int | float]], payload_dict["rows"])
+        title = payload_dict.get("title")
+
+        return TabularChartMetaField(
+            title=title if isinstance(title, str) else None,
+            chart_data=self._table_data_from_rows(columns=columns, rows=rows),
+            created_by=self._metadata_origin(),
+        )
+
+    def _generate_picture_code(
+        self,
+        *,
+        text: str,
+        classification: PictureClassificationMetaField | None,
+        chart_meta: TabularChartMetaField | None,
+        loop_budget: int,
+    ) -> CodeMetaField | None:
+        def _validate(content: str) -> bool:
+            return self._extract_python_code_block(content) is not None
+
+        labels = ", ".join(pred.class_name for pred in classification.predictions) if classification else "unknown"
+        chart_payload = ""
+        if chart_meta is not None:
+            chart_payload = f"\n\nChart data:\n```json\n{chart_meta.chart_data.model_dump_json(indent=2)}\n```"
+
+        m = self._create_reasoning_session()
+        answer = m.instruct(
+            (
+                "Write Python code that recreates the described picture as closely as possible. "
+                "Prefer matplotlib. Return only a ```python``` code block.\n\n"
+                f"Picture classes: {labels}\n\n"
+                f"Picture description:\n{text}"
+                f"{chart_payload}"
+            ),
+            requirements=[
+                Requirement(
+                    description="Return only a Python code block fenced with ```python```.",
+                    validation_fn=simple_validate(_validate),
+                ),
+            ],
+            retry_budget=loop_budget,
+        )
+
+        code = self._extract_python_code_block(answer)
+        if code is None:
+            return None
+
+        return CodeMetaField(
+            text=code,
+            language=CodeLanguageLabel("Python"),
+            created_by=self._metadata_origin(),
+        )
+
+    def _extract_single_json_dict(self, text: str) -> dict[str, Any] | None:
+        payloads = find_json_dicts(text=text)
+        if len(payloads) != 1:
+            return None
+        payload = payloads[0]
+        return payload if isinstance(payload, dict) else None
+
+    def _extract_python_code_block(self, text: str) -> str | None:
+        match = re.search(r"```python\s*(.*?)\s*```", text, re.DOTALL)
+        if not match:
+            return None
+        code = match.group(1).strip()
+        return code or None
+
+    def _is_valid_chart_payload(self, payload: dict[str, Any] | None) -> bool:
+        if payload is None:
+            return False
+        columns = payload.get("columns")
+        rows = payload.get("rows")
+        if not isinstance(columns, list) or len(columns) < 2 or not all(isinstance(col, str) for col in columns):
+            return False
+        if not isinstance(rows, list) or not rows:
+            return False
+        return all(
+            isinstance(row, list)
+            and len(row) == len(columns)
+            and all(isinstance(value, str | int | float) for value in row)
+            for row in rows
+        )
+
+    def _table_data_from_rows(self, *, columns: list[str], rows: list[list[str | int | float]]) -> TableData:
+        table_cells: list[dict[str, Any]] = []
+
+        for col_idx, value in enumerate(columns):
+            table_cells.append(
+                {
+                    "start_row_offset_idx": 0,
+                    "end_row_offset_idx": 1,
+                    "start_col_offset_idx": col_idx,
+                    "end_col_offset_idx": col_idx + 1,
+                    "text": value,
+                    "column_header": True,
+                }
+            )
+
+        for row_idx, row in enumerate(rows, start=1):
+            for col_idx, cell_value in enumerate(row):
+                table_cells.append(
+                    {
+                        "start_row_offset_idx": row_idx,
+                        "end_row_offset_idx": row_idx + 1,
+                        "start_col_offset_idx": col_idx,
+                        "end_col_offset_idx": col_idx + 1,
+                        "text": str(cell_value),
+                    }
+                )
+
+        return TableData.model_validate(
+            {
+                "table_cells": table_cells,
+                "num_rows": len(rows) + 1,
+                "num_cols": len(columns),
+            }
+        )

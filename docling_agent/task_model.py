@@ -141,7 +141,8 @@ class EnrichTask(AgentTask):
 
     mode: Literal["enrich"] = "enrich"
     operations: Annotated[
-        list[Literal["summarize", "keywords", "entities"]], Field(description="Enrichment operations to apply.")
+        list[Literal["summarize", "keywords", "entities", "classify", "classify_items"]],
+        Field(description="Enrichment operations to apply."),
     ] = ["summarize"]
 
     @model_validator(mode="after")

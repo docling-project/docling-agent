@@ -44,6 +44,7 @@ sources:
 #   - summarize   # attach 2-3 sentence summaries to each document node
 #   - keywords    # extract keywords per item
 #   - entities    # detect key entities per item
+#   - classify    # classify pictures and attach chart/code metadata when possible
 
 # Output configuration --------------------------------------------------------
 # output:
@@ -129,19 +130,30 @@ def main(
 def _write_output(doc, task: AgentTask, task_path: Path) -> None:
     base_path = _resolve_output_base_path(task.output, task_path)
     written_paths: list[Path] = []
+    errors: list[str] = []
 
     for fmt in task.output.formats:
         path = _path_for_format(base_path, fmt)
         path.parent.mkdir(parents=True, exist_ok=True)
-        if fmt == "html":
-            doc.save_as_html(filename=path)
-        elif fmt == "json":
-            path.write_text(doc.model_dump_json(indent=2), encoding="utf-8")
-        else:
-            path.write_text(MarkdownDocSerializer(doc=doc).serialize().text, encoding="utf-8")
-        written_paths.append(path)
+        try:
+            if fmt == "html":
+                doc.save_as_html(filename=path)
+            elif fmt == "json":
+                path.write_text(doc.model_dump_json(indent=2), encoding="utf-8")
+            else:
+                path.write_text(MarkdownDocSerializer(doc=doc).serialize().text, encoding="utf-8")
+            written_paths.append(path)
+        except Exception as exc:
+            message = f"Skipping output format {fmt!r} for {path}: {exc}"
+            logger.error(message)
+            errors.append(message)
 
-    logger.info("Output written to: " + ", ".join(str(path) for path in written_paths))
+    if written_paths:
+        logger.info("Output written to: " + ", ".join(str(path) for path in written_paths))
+    if errors and written_paths:
+        logger.warning("Some output formats were skipped due to serialization errors.")
+    if not written_paths:
+        raise RuntimeError("All requested output formats failed to serialize.")
 
 
 def _resolve_output_base_path(output, task_path: Path) -> Path:
