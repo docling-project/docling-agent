@@ -69,6 +69,10 @@ class BaseDoclingAgent(BaseModel):
         """Return the backend-scoped writing model id."""
         return self.backend.models.writing
 
+    def get_extraction_model_id(self) -> str:
+        """Return the backend-scoped extraction model id."""
+        return self.backend.models.extraction
+
     def _create_reasoning_session(self, *, system_prompt: str | None = None):
         return self.backend.create_session(
             model=self.get_reasoning_model_id(),
@@ -78,6 +82,12 @@ class BaseDoclingAgent(BaseModel):
     def _create_writing_session(self, *, system_prompt: str | None = None):
         return self.backend.create_session(
             model=self.get_writing_model_id(),
+            system_prompt=system_prompt,
+        )
+
+    def _create_extraction_session(self, *, system_prompt: str | None = None):
+        return self.backend.create_session(
+            model=self.get_extraction_model_id(),
             system_prompt=system_prompt,
         )
 

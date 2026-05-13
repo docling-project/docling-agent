@@ -9,6 +9,8 @@ from docling_core.types.doc.document import (
     CodeMetaField,
     DocItemLabel,
     DoclingDocument,
+    EntitiesMetaField,
+    EntityMention,
     FloatingMeta,
     GroupItem,
     NodeItem,
@@ -72,7 +74,12 @@ _OP_ALIASES: dict[str, str] = {
     "classify": "_classify_items",
 }
 
-_ROUTING_OPS = frozenset(["summarize_items", "find_search_keywords", "detect_key_entities", "classify_items"])
+_ROUTING_OPS = (
+    "summarize_items",
+    "find_search_keywords",
+    "detect_key_entities",
+    "classify_items",
+)
 
 
 class DoclingEnrichingAgent(BaseDoclingAgent):
@@ -80,14 +87,14 @@ class DoclingEnrichingAgent(BaseDoclingAgent):
     entities, and classifications."""
 
     system_prompt_for_enrichment_routing: ClassVar[str] = """
-You are a precise document enrichment router. Given a natural language task description, select exactly one operation to run and return only one JSON object in a ```json ...``` block, with the following schema:
+You are a precise document enrichment router. Given a natural language task description, select one or more enrichment operations to run and return only one JSON object in a ```json ...``` block, with the following schema:
 
 {
-  "operation": "summarize_items" | "find_search_keywords" | "detect_key_entities" | "classify_items",
-  "args": { }
+  "operations": ["summarize_items" | "find_search_keywords" | "detect_key_entities" | "classify_items", ...],
+  "reason": "short explanation"
 }
 
-Return no extra commentary. If multiple seem plausible, choose the single best fit.
+Return no extra commentary. Include all operations that are materially requested by the task. Preserve execution order.
     """
     _PICTURE_CLASS_NAMES: ClassVar[tuple[str, ...]] = (
         "bar-chart",
@@ -134,28 +141,38 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         # Explicit operations list bypasses LLM routing entirely
         operations: list[str] | None = kwargs.get("operations")
         if operations is not None:
-            result = document
-            for op_name in operations:
-                method_name = _OP_ALIASES.get(op_name)
-                if method_name is None:
-                    raise ValueError(f"Unknown operation: {op_name!r}")
-                method = getattr(self, method_name)
-                result = method(document=result) or result
-            return result
+            return self._run_operations(task=task, document=document, operations=operations)
 
-        op = self._choose_operation(task=task)
-        self.last_operation = op
+        plan = self._choose_operations(task=task)
+        self.last_operation = plan
+        inferred_operations = plan.get("operations", [])
+        logger.info(f"Chosen enrichment operations: {inferred_operations}")
+        return self._run_operations(
+            task=task,
+            document=document,
+            operations=inferred_operations,
+        )
 
-        operation = op.get("operation")
-        logger.info(f"Chosen enrichment operation: {operation}")
+    def _run_operations(
+        self,
+        *,
+        task: str,
+        document: DoclingDocument,
+        operations: list[str],
+    ) -> DoclingDocument:
+        result = document
+        for op_name in operations:
+            method_name = _OP_ALIASES.get(op_name)
+            if method_name is None:
+                raise ValueError(f"Unknown operation: {op_name!r}")
+            method = getattr(self, method_name)
+            method_kwargs: dict[str, Any] = {"document": result}
+            if method_name == "_detect_key_entities":
+                method_kwargs["task"] = task
+            result = method(**method_kwargs) or result
+        return result
 
-        method_name = _OP_ALIASES.get(operation or "")
-        if method_name is None:
-            raise ValueError(f"Unknown enrichment operation: {operation}. Op payload: {op}")
-        method = getattr(self, method_name)
-        return method(document=document) or document
-
-    def _choose_operation(self, *, task: str, loop_budget: int = 5) -> dict[str, Any]:
+    def _choose_operations(self, *, task: str, loop_budget: int = 5) -> dict[str, Any]:
         logger.info(f"task: {task}")
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_enrichment_routing)
@@ -169,10 +186,11 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                 ),
                 Requirement(
                     description=(
-                        "Select exactly one operation and return only one JSON object "
-                        "in a ```json ...``` block with 'operation' set to one of: " + ", ".join(sorted(_ROUTING_OPS))
+                        "Select one or more operations and return only one JSON object "
+                        "in a ```json ...``` block with 'operations' as a list containing only: "
+                        + ", ".join(sorted(_ROUTING_OPS))
                     ),
-                    validation_fn=simple_validate(DoclingEnrichingAgent._validate_json_format),
+                    validation_fn=simple_validate(DoclingEnrichingAgent._validate_json_plan),
                 ),
             ],
             retry_budget=loop_budget,
@@ -183,16 +201,21 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         ops = find_json_dicts(text=answer)
         if not ops:
             raise ValueError("No routing operation detected in model response")
-        if "operation" not in ops[0]:
-            raise ValueError(f"`operation` not found in routing result: {ops[0]}")
+        if "operations" not in ops[0]:
+            raise ValueError(f"`operations` not found in routing result: {ops[0]}")
         return ops[0]
 
     @staticmethod
-    def _validate_json_format(content: str) -> bool:
+    def _validate_json_plan(content: str) -> bool:
         ops = find_json_dicts(text=content)
         if len(ops) != 1:
             return False
-        return ops[0].get("operation") in _ROUTING_OPS
+        planned = ops[0].get("operations")
+        return (
+            isinstance(planned, list)
+            and len(planned) >= 1
+            and all(isinstance(op, str) and op in _ROUTING_OPS for op in planned)
+        )
 
     # ------------------------------------------------------------------
     # Summarization
@@ -213,7 +236,7 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         logger.info("_summarize_items: make hierarchical document")
         hier_doc = make_hierarchical_document(document)
 
-        m = self._create_reasoning_session()
+        m = self._create_extraction_session()
 
         logger.info("_summarize_items: summarize the document")
         self._walk_and_summarize(
@@ -554,8 +577,9 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
     def _detect_key_entities(
         self,
         *,
+        task: str | None = None,
         document: DoclingDocument,
-        fix_heading_levels: bool = True,
+        fix_heading_levels: bool = False,
         min_text_length: int = 100,
         loop_budget: int = 5,
     ) -> DoclingDocument:
@@ -567,6 +591,11 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         hier_doc = make_hierarchical_document(document)
 
         m = self._create_reasoning_session()
+        entity_targets = self._infer_entity_targets(
+            m=m,
+            task=task,
+            loop_budget=loop_budget,
+        )
 
         self._walk_and_extract_entities(
             node=hier_doc.body,
@@ -574,14 +603,66 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
             m=m,
             loop_budget=loop_budget,
             min_text_length=min_text_length,
+            entity_targets=entity_targets,
         )
         self._extract_entities_from_leaf_items(
             m=m,
             document=hier_doc,
             loop_budget=loop_budget,
+            entity_targets=entity_targets,
         )
 
         return hier_doc
+
+    def _infer_entity_targets(
+        self,
+        *,
+        m: BaseSession,
+        task: str | None,
+        loop_budget: int,
+    ) -> dict[str, Any] | None:
+        if not task:
+            return None
+
+        def _validate_entity_target_spec(content: str) -> bool:
+            matches = find_json_dicts(text=content)
+            if len(matches) != 1:
+                return False
+            spec = matches[0]
+            labels = spec.get("labels", [])
+            focus_terms = spec.get("focus_terms", [])
+            generic = spec.get("generic", False)
+            return (
+                isinstance(generic, bool)
+                and isinstance(labels, list)
+                and all(isinstance(label, str) for label in labels)
+                and isinstance(focus_terms, list)
+                and all(isinstance(term, str) for term in focus_terms)
+            )
+
+        answer = self._generate_content(
+            m=m,
+            text=task,
+            task_prompt=(
+                "You are interpreting a document enrichment request. "
+                "Identify which entities the user actually wants extracted. "
+                "Return one JSON object in a ```json ...``` block with this schema: "
+                '{"generic": boolean, "labels": [string, ...], "focus_terms": [string, ...], "instructions": string}. '
+                "Set generic=true only if the request does not narrow the entity scope beyond generic named entities."
+            ),
+            requirement_description=(
+                "Return one JSON object in a ```json ...``` block with keys "
+                "generic, labels, focus_terms, and instructions."
+            ),
+            validation_fn=_validate_entity_target_spec,
+            loop_budget=loop_budget,
+        )
+
+        if not answer:
+            return None
+
+        specs = find_json_dicts(text=answer)
+        return specs[0] if specs else None
 
     def _walk_and_extract_entities(
         self,
@@ -591,11 +672,20 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         m: BaseSession,
         loop_budget: int,
         min_text_length: int,
+        entity_targets: dict[str, Any] | None,
     ) -> None:
         """Walk document tree and add entities to sections."""
 
         def set_entities(meta: BaseMeta, result: Any) -> None:
-            meta.docling_agent__entities = result
+            meta.entities = result
+
+        def generate_entities(*, m: BaseSession, text: str, loop_budget: int):
+            return self._generate_entities(
+                m=m,
+                text=text,
+                loop_budget=loop_budget,
+                entity_targets=entity_targets,
+            )
 
         self._walk_and_enrich(
             node=node,
@@ -603,8 +693,8 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
             m=m,
             loop_budget=loop_budget,
             min_text_length=min_text_length,
-            meta_attr="docling_agent__entities",
-            generate_fn=self._generate_entities,
+            meta_attr="entities",
+            generate_fn=generate_entities,
             set_meta_fn=set_entities,
         )
 
@@ -614,18 +704,27 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         m: BaseSession,
         document: DoclingDocument,
         loop_budget: int,
+        entity_targets: dict[str, Any] | None,
     ) -> None:
         """Add entities to leaf items (tables, pictures)."""
 
         def set_entities(meta: BaseMeta, result: Any) -> None:
-            meta.docling_agent__entities = result
+            meta.entities = result
+
+        def generate_entities(*, m: BaseSession, text: str, loop_budget: int):
+            return self._generate_entities(
+                m=m,
+                text=text,
+                loop_budget=loop_budget,
+                entity_targets=entity_targets,
+            )
 
         self._enrich_leaf_items(
             m=m,
             document=document,
             loop_budget=loop_budget,
-            meta_attr="docling_agent__entities",
-            generate_fn=self._generate_entities,
+            meta_attr="entities",
+            generate_fn=generate_entities,
             set_meta_fn=set_entities,
         )
 
@@ -634,8 +733,9 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
         *,
         m: BaseSession,
         text: str,
+        entity_targets: dict[str, Any] | None = None,
         loop_budget: int = 5,
-    ) -> list[dict[str, str]] | None:
+    ) -> EntitiesMetaField | None:
         def _validate_entities(content: str) -> bool:
             match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
             if not match:
@@ -644,22 +744,37 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
                 val = json.loads(match.group(1))
                 if not isinstance(val, list):
                     return False
-                # Check that each item has entity_type and mention
-                return all(isinstance(item, dict) and "entity_type" in item and "mention" in item for item in val)
+                return all(isinstance(item, dict) and "text" in item for item in val)
             except Exception:
                 return False
+
+        target_clause = ""
+        if entity_targets:
+            labels = entity_targets.get("labels", [])
+            focus_terms = entity_targets.get("focus_terms", [])
+            instructions = entity_targets.get("instructions", "")
+            generic = entity_targets.get("generic", False)
+            if not generic or labels or focus_terms or instructions:
+                target_clause = (
+                    "\nFocus only on entities relevant to this query-derived extraction brief:\n"
+                    f"- labels: {labels}\n"
+                    f"- focus_terms: {focus_terms}\n"
+                    f"- instructions: {instructions}\n"
+                    "If an entity is not relevant to that brief, omit it."
+                )
 
         result = self._generate_content(
             m=m,
             text=text,
             task_prompt=(
                 "Extract named entities from the following content. "
-                "For each entity, identify its type (PERSON, ORGANIZATION, LOCATION, DATE, MONEY, etc.) and the exact mention text. "
-                "Return them as a JSON array of objects with 'entity_type' and 'mention' fields in a ```json ...``` block. "
+                "For each entity, identify the exact mention text and its label/category. "
+                "Return them as a JSON array of objects with keys 'text', 'label', and optional 'original' in a ```json ...``` block. "
                 "Only include significant entities, avoid generic terms. "
                 "Do not repeat the same entity even if it appears multiple times."
+                f"{target_clause}"
             ),
-            requirement_description="Return entities as a JSON array of objects with 'entity_type' and 'mention' fields in a ```json ...``` block.",
+            requirement_description="Return entities as a JSON array of objects with keys 'text', 'label', and optional 'original' in a ```json ...``` block.",
             validation_fn=_validate_entities,
             loop_budget=loop_budget,
         )
@@ -668,7 +783,18 @@ Return no extra commentary. If multiple seem plausible, choose the single best f
             match = re.search(r"```json\s*(.*?)\s*```", result, re.DOTALL)
             if match:
                 try:
-                    return json.loads(match.group(1))
+                    payload = json.loads(match.group(1))
+                    mentions = [
+                        EntityMention(
+                            text=str(item["text"]).strip(),
+                            original=str(item["original"]).strip() if item.get("original") else None,
+                            label=str(item["label"]).strip() if item.get("label") else None,
+                        )
+                        for item in payload
+                        if isinstance(item, dict) and str(item.get("text", "")).strip()
+                    ]
+                    if mentions:
+                        return EntitiesMetaField(mentions=mentions)
                 except Exception as exc:
                     logger.warning(f"Failed to parse entities JSON: {exc}")
         return None

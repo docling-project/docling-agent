@@ -31,6 +31,13 @@ class ModelConfig(BaseModel):
 
     reasoning: str = "OPENAI_GPT_OSS_20B"
     writing: str = "OPENAI_GPT_OSS_20B"
+    extraction: str | None = None
+
+    @model_validator(mode="after")
+    def default_extraction_model(self) -> ModelConfig:
+        if self.extraction is None:
+            self.extraction = self.reasoning
+        return self
 
 
 class BackendConfig(BaseModel):
@@ -51,6 +58,10 @@ class LoggingConfig(BaseModel):
     log_llm_io: bool = Field(
         True,
         description="Log every LLM request and response at DEBUG level.",
+    )
+    linear_chat_log_path: Path | None = Field(
+        None,
+        description="Optional file path to append linearized chat contexts during a run.",
     )
 
 
@@ -141,9 +152,9 @@ class EnrichTask(AgentTask):
 
     mode: Literal["enrich"] = "enrich"
     operations: Annotated[
-        list[Literal["summarize", "keywords", "entities", "classify", "classify_items"]],
+        list[Literal["summarize", "keywords", "entities", "classify", "classify_items"]] | None,
         Field(description="Enrichment operations to apply."),
-    ] = ["summarize"]
+    ] = None
 
     @model_validator(mode="after")
     def sources_required(self) -> EnrichTask:

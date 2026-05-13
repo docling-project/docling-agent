@@ -128,7 +128,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             except Exception:
                 return False
 
-        m = self._create_reasoning_session(system_prompt=self.system_prompt_schema_extraction)
+        m = self._create_extraction_session(system_prompt=self.system_prompt_schema_extraction)
 
         prompt = f"{task}"
         logger.info(f"prompt: {prompt}")

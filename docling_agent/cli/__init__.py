@@ -8,7 +8,7 @@ import typer
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
 
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
-from docling_agent.agent_models import configure_llm_logging
+from docling_agent.agent_models import configure_linear_chat_logging, configure_llm_logging
 from docling_agent.backends import create_backend
 from docling_agent.logging import logger
 from docling_agent.task_model import AgentTask, load_task
@@ -61,11 +61,13 @@ sources:
 #   models:
 #     reasoning: OPENAI_GPT_OSS_20B
 #     writing: OPENAI_GPT_OSS_20B
+#     extraction: OPENAI_GPT_OSS_20B
 
 # Logging configuration -------------------------------------------------------
 # logging:
 #   level: INFO        # DEBUG | INFO | WARNING | ERROR
 #   log_llm_io: true   # log every LLM request and response at DEBUG level
+#   linear_chat_log_path: ./outputs/linear_chats.log
 """
 
 
@@ -108,6 +110,7 @@ def main(
     log_level = logging.DEBUG if verbose else getattr(logging, agent_task.logging.level, logging.INFO)
     logger.setLevel(log_level)
     configure_llm_logging(agent_task.logging.log_llm_io)
+    configure_linear_chat_logging(agent_task.logging.linear_chat_log_path)
 
     # CLI overrides
     if model:

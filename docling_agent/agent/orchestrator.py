@@ -341,8 +341,28 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         library: DoclingLibrary,
     ) -> DoclingDocument:
         logger.info(f"_run_enrich: docs={len(source_pairs)}")
-        ops: list[str] = list(task.operations)
-        enriched_pairs = self._ensure_enriched(source_pairs, library, operations=ops)
+        if task.operations is None:
+            enriched_pairs = []
+            for doc, doc_id in source_pairs:
+                enricher = DoclingEnrichingAgent(backend=self.backend, tools=[])
+                logger.info(f"Enriching {doc.name!r} by inferred operations from query")
+                enriched_doc = enricher.run(task=task.query, document=doc)
+                entry = library.get_entry(doc_id)
+                library.store(enriched_doc, entry.source_path if entry else "in-memory")
+                inferred_ops = enricher.last_operation.get("operations", [])
+                status_updates: dict[str, bool] = {}
+                if "summarize_items" in inferred_ops:
+                    status_updates["has_summaries"] = True
+                    status_updates["is_hierarchical"] = True
+                if "find_search_keywords" in inferred_ops:
+                    status_updates["has_keywords"] = True
+                if status_updates:
+                    library.update_status(doc_id, **status_updates)
+                self._update_library_meta(doc_id, enriched_doc, library)
+                enriched_pairs.append((enriched_doc, doc_id))
+        else:
+            ops: list[str] = list(task.operations)
+            enriched_pairs = self._ensure_enriched(source_pairs, library, operations=ops)
 
         # Return: single doc → return it directly; multiple → a composite summary doc
         if len(enriched_pairs) == 1:
