@@ -1,6 +1,8 @@
 import json
 import re
+from contextlib import contextmanager
 from pathlib import Path
+from time import perf_counter
 from typing import Any, ClassVar, Protocol, cast
 
 from docling_core.types.doc.document import (
@@ -116,6 +118,16 @@ Return no extra commentary. Include all operations that are materially requested
 
     last_operation: dict[str, Any] = Field(default_factory=dict)
 
+    @contextmanager
+    def _timed_stage(self, name: str):
+        logger.info(f"_enricher_stage: {name} start")
+        started = perf_counter()
+        try:
+            yield
+        finally:
+            elapsed = perf_counter() - started
+            logger.info(f"_enricher_stage: {name} done in {elapsed:.2f}s")
+
     def __init__(
         self,
         *,
@@ -141,9 +153,11 @@ Return no extra commentary. Include all operations that are materially requested
         # Explicit operations list bypasses LLM routing entirely
         operations: list[str] | None = kwargs.get("operations")
         if operations is not None:
+            logger.info(f"_enricher: explicit operations={operations}")
             return self._run_operations(task=task, document=document, operations=operations)
 
-        plan = self._choose_operations(task=task)
+        with self._timed_stage("routing"):
+            plan = self._choose_operations(task=task)
         self.last_operation = plan
         inferred_operations = plan.get("operations", [])
         logger.info(f"Chosen enrichment operations: {inferred_operations}")
@@ -161,7 +175,7 @@ Return no extra commentary. Include all operations that are materially requested
         operations: list[str],
     ) -> DoclingDocument:
         result = document
-        for op_name in operations:
+        for index, op_name in enumerate(operations, start=1):
             method_name = _OP_ALIASES.get(op_name)
             if method_name is None:
                 raise ValueError(f"Unknown operation: {op_name!r}")
@@ -169,7 +183,8 @@ Return no extra commentary. Include all operations that are materially requested
             method_kwargs: dict[str, Any] = {"document": result}
             if method_name == "_detect_key_entities":
                 method_kwargs["task"] = task
-            result = method(**method_kwargs) or result
+            with self._timed_stage(f"operation {index}/{len(operations)}: {op_name}"):
+                result = method(**method_kwargs) or result
         return result
 
     def _choose_operations(self, *, task: str, loop_budget: int = 5) -> dict[str, Any]:
@@ -230,27 +245,28 @@ Return no extra commentary. Include all operations that are materially requested
         loop_budget: int = 5,
     ) -> DoclingDocument:
         if fix_heading_levels:
-            logger.info("_summarize_items: fix heading levels")
-            self._fix_heading_levels(document=document)
+            with self._timed_stage("summarize: fix heading levels"):
+                self._fix_heading_levels(document=document)
 
-        logger.info("_summarize_items: make hierarchical document")
-        hier_doc = make_hierarchical_document(document)
+        with self._timed_stage("summarize: build hierarchy"):
+            hier_doc = make_hierarchical_document(document)
 
         m = self._create_extraction_session()
 
-        logger.info("_summarize_items: summarize the document")
-        self._walk_and_summarize(
-            node=hier_doc.body,
-            doc=hier_doc,
-            m=m,
-            loop_budget=loop_budget,
-            min_text_length=min_text_length,
-        )
-        self._summarize_leaf_items(
-            m=m,
-            document=hier_doc,
-            loop_budget=loop_budget,
-        )
+        with self._timed_stage("summarize: section summaries"):
+            self._walk_and_summarize(
+                node=hier_doc.body,
+                doc=hier_doc,
+                m=m,
+                loop_budget=loop_budget,
+                min_text_length=min_text_length,
+            )
+        with self._timed_stage("summarize: leaf summaries"):
+            self._summarize_leaf_items(
+                m=m,
+                document=hier_doc,
+                loop_budget=loop_budget,
+            )
 
         return hier_doc
 
@@ -503,24 +519,28 @@ Return no extra commentary. Include all operations that are materially requested
         logger.info("_find_search_keywords: starting")
 
         if fix_heading_levels:
-            self._fix_heading_levels(document=document)
+            with self._timed_stage("keywords: fix heading levels"):
+                self._fix_heading_levels(document=document)
 
-        hier_doc = make_hierarchical_document(document)
+        with self._timed_stage("keywords: build hierarchy"):
+            hier_doc = make_hierarchical_document(document)
 
         m = self._create_reasoning_session()
 
-        self._walk_and_extract_keywords(
-            node=hier_doc.body,
-            doc=hier_doc,
-            m=m,
-            loop_budget=loop_budget,
-            min_text_length=min_text_length,
-        )
-        self._extract_keywords_from_leaf_items(
-            m=m,
-            document=hier_doc,
-            loop_budget=loop_budget,
-        )
+        with self._timed_stage("keywords: section keywords"):
+            self._walk_and_extract_keywords(
+                node=hier_doc.body,
+                doc=hier_doc,
+                m=m,
+                loop_budget=loop_budget,
+                min_text_length=min_text_length,
+            )
+        with self._timed_stage("keywords: leaf keywords"):
+            self._extract_keywords_from_leaf_items(
+                m=m,
+                document=hier_doc,
+                loop_budget=loop_budget,
+            )
 
         return hier_doc
 
@@ -586,31 +606,29 @@ Return no extra commentary. Include all operations that are materially requested
         logger.info("_detect_key_entities: starting")
 
         if fix_heading_levels:
-            self._fix_heading_levels(document=document)
+            with self._timed_stage("entities: fix heading levels"):
+                self._fix_heading_levels(document=document)
 
-        hier_doc = make_hierarchical_document(document)
+        with self._timed_stage("entities: build hierarchy"):
+            hier_doc = make_hierarchical_document(document)
 
-        m = self._create_reasoning_session()
-        entity_targets = self._infer_entity_targets(
-            m=m,
-            task=task,
-            loop_budget=loop_budget,
-        )
+        m = self._create_extraction_session()
+        logger.info("_detect_key_entities: using extraction model %s", self.get_extraction_model_id())
+        with self._timed_stage("entities: infer target brief"):
+            entity_targets = self._infer_entity_targets(
+                m=m,
+                task=task,
+                loop_budget=loop_budget,
+            )
 
-        self._walk_and_extract_entities(
-            node=hier_doc.body,
-            doc=hier_doc,
-            m=m,
-            loop_budget=loop_budget,
-            min_text_length=min_text_length,
-            entity_targets=entity_targets,
-        )
-        self._extract_entities_from_leaf_items(
-            m=m,
-            document=hier_doc,
-            loop_budget=loop_budget,
-            entity_targets=entity_targets,
-        )
+        with self._timed_stage("entities: leaf entities"):
+            self._extract_entities_from_leaf_items(
+                m=m,
+                document=hier_doc,
+                loop_budget=loop_budget,
+                entity_targets=entity_targets,
+                task=task,
+            )
 
         return hier_doc
 
@@ -632,12 +650,15 @@ Return no extra commentary. Include all operations that are materially requested
             labels = spec.get("labels", [])
             focus_terms = spec.get("focus_terms", [])
             generic = spec.get("generic", False)
+            rewritten_task = spec.get("rewritten_task", "")
             return (
                 isinstance(generic, bool)
                 and isinstance(labels, list)
                 and all(isinstance(label, str) for label in labels)
                 and isinstance(focus_terms, list)
                 and all(isinstance(term, str) for term in focus_terms)
+                and isinstance(rewritten_task, str)
+                and bool(rewritten_task.strip())
             )
 
         answer = self._generate_content(
@@ -645,14 +666,17 @@ Return no extra commentary. Include all operations that are materially requested
             text=task,
             task_prompt=(
                 "You are interpreting a document enrichment request. "
-                "Identify which entities the user actually wants extracted. "
+                "Rewrite the task into a concrete entity-extraction brief that is broader and more explicit than the original query. "
+                "Include typical entity types and a few examples when helpful. "
                 "Return one JSON object in a ```json ...``` block with this schema: "
-                '{"generic": boolean, "labels": [string, ...], "focus_terms": [string, ...], "instructions": string}. '
-                "Set generic=true only if the request does not narrow the entity scope beyond generic named entities."
+                '{"generic": boolean, "labels": [string, ...], "focus_terms": [string, ...], "rewritten_task": string}. '
+                "If the user asks for PII, expand that to entities like person names, emails, phone numbers, organizations, IDs, addresses, and similar personal data. "
+                "If the user asks for AI-related entities, expand that to model names, datasets, benchmarks, metrics, papers, authors, organizations, and related technical entities. "
+                "Keep the rewritten_task specific enough to guide extraction, but not so narrow that it misses obvious matches."
             ),
             requirement_description=(
                 "Return one JSON object in a ```json ...``` block with keys "
-                "generic, labels, focus_terms, and instructions."
+                "generic, labels, focus_terms, and rewritten_task."
             ),
             validation_fn=_validate_entity_target_spec,
             loop_budget=loop_budget,
@@ -673,6 +697,7 @@ Return no extra commentary. Include all operations that are materially requested
         loop_budget: int,
         min_text_length: int,
         entity_targets: dict[str, Any] | None,
+        task: str | None = None,
     ) -> None:
         """Walk document tree and add entities to sections."""
 
@@ -680,12 +705,14 @@ Return no extra commentary. Include all operations that are materially requested
             meta.entities = result
 
         def generate_entities(*, m: BaseSession, text: str, loop_budget: int):
-            return self._generate_entities(
+            result = self._generate_entities(
                 m=m,
+                task=task,
                 text=text,
                 loop_budget=loop_budget,
                 entity_targets=entity_targets,
             )
+            return result
 
         self._walk_and_enrich(
             node=node,
@@ -705,8 +732,10 @@ Return no extra commentary. Include all operations that are materially requested
         document: DoclingDocument,
         loop_budget: int,
         entity_targets: dict[str, Any] | None,
+        task: str | None,
     ) -> None:
         """Add entities to leaf items (tables, pictures)."""
+        logger.info("_extract_entities_from_leaf_items: starting leaf scan")
 
         def set_entities(meta: BaseMeta, result: Any) -> None:
             meta.entities = result
@@ -714,24 +743,42 @@ Return no extra commentary. Include all operations that are materially requested
         def generate_entities(*, m: BaseSession, text: str, loop_budget: int):
             return self._generate_entities(
                 m=m,
+                task=task,
                 text=text,
                 loop_budget=loop_budget,
                 entity_targets=entity_targets,
             )
 
-        self._enrich_leaf_items(
-            m=m,
-            document=document,
-            loop_budget=loop_budget,
-            meta_attr="entities",
-            generate_fn=generate_entities,
-            set_meta_fn=set_entities,
-        )
+        for item, _ in document.iterate_items():
+            if item.meta and getattr(item.meta, "entities", None):
+                continue
+
+            if isinstance(item, TextItem):
+                if item.label == DocItemLabel.CAPTION:
+                    continue
+                text = item.text
+            elif isinstance(item, TableItem):
+                text = serialize_table_to_html(table=item, doc=document)
+            elif isinstance(item, PictureItem):
+                captions = [c.resolve(document).text for c in item.captions if hasattr(c.resolve(document), "text")]
+                text = " ".join(captions)
+            else:
+                continue
+
+            if not text.strip():
+                continue
+
+            result = generate_entities(m=m, text=text, loop_budget=loop_budget)
+            if result:
+                if item.meta is None:
+                    item.meta = BaseMeta()
+                set_entities(item.meta, result)
 
     def _generate_entities(
         self,
         *,
         m: BaseSession,
+        task: str | None,
         text: str,
         entity_targets: dict[str, Any] | None = None,
         loop_budget: int = 5,
@@ -749,19 +796,24 @@ Return no extra commentary. Include all operations that are materially requested
                 return False
 
         target_clause = ""
+        rewritten_task = task or ""
         if entity_targets:
             labels = entity_targets.get("labels", [])
             focus_terms = entity_targets.get("focus_terms", [])
-            instructions = entity_targets.get("instructions", "")
+            rewritten_task = entity_targets.get("rewritten_task", rewritten_task)
             generic = entity_targets.get("generic", False)
-            if not generic or labels or focus_terms or instructions:
+            if not generic or labels or focus_terms or rewritten_task:
                 target_clause = (
-                    "\nFocus only on entities relevant to this query-derived extraction brief:\n"
+                    "\nUse this rewritten extraction brief:\n"
+                    f"{rewritten_task}\n"
+                    "Focus on entities that match the brief, including obvious instances even if the wording differs.\n"
                     f"- labels: {labels}\n"
                     f"- focus_terms: {focus_terms}\n"
-                    f"- instructions: {instructions}\n"
                     "If an entity is not relevant to that brief, omit it."
                 )
+
+        logger.info("_generate_entities: task=%s", task)
+        logger.info("_generate_entities: text=%s", text)
 
         result = self._generate_content(
             m=m,
@@ -770,14 +822,17 @@ Return no extra commentary. Include all operations that are materially requested
                 "Extract named entities from the following content. "
                 "For each entity, identify the exact mention text and its label/category. "
                 "Return them as a JSON array of objects with keys 'text', 'label', and optional 'original' in a ```json ...``` block. "
+                "If there are no relevant entities, return an empty JSON array. "
                 "Only include significant entities, avoid generic terms. "
                 "Do not repeat the same entity even if it appears multiple times."
                 f"{target_clause}"
             ),
-            requirement_description="Return entities as a JSON array of objects with keys 'text', 'label', and optional 'original' in a ```json ...``` block.",
+            requirement_description="Return entities as a JSON array of objects with keys 'text', 'label', and optional 'original' in a ```json ...``` block. Return an empty JSON array if none are found.",
             validation_fn=_validate_entities,
             loop_budget=loop_budget,
         )
+
+        logger.info("_generate_entities: raw llm result=%s", result)
 
         if result:
             match = re.search(r"```json\s*(.*?)\s*```", result, re.DOTALL)
@@ -793,8 +848,10 @@ Return no extra commentary. Include all operations that are materially requested
                         for item in payload
                         if isinstance(item, dict) and str(item.get("text", "")).strip()
                     ]
+                    logger.info("_generate_entities: parsed entities=%s", mentions)
                     if mentions:
                         return EntitiesMetaField(mentions=mentions)
+                    return EntitiesMetaField.model_construct(mentions=[])
                 except Exception as exc:
                     logger.warning(f"Failed to parse entities JSON: {exc}")
         return None

@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
@@ -71,7 +71,7 @@ class BaseDoclingAgent(BaseModel):
 
     def get_extraction_model_id(self) -> str:
         """Return the backend-scoped extraction model id."""
-        return self.backend.models.extraction
+        return cast(str, self.backend.models.extraction)
 
     def _create_reasoning_session(self, *, system_prompt: str | None = None):
         return self.backend.create_session(
