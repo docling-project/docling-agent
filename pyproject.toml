@@ -36,7 +36,7 @@ classifiers = [
 requires-python = ">=3.10,<4.0"
 dependencies = [
     "docling>=2.61.0",
-    "docling-core @ git+https://github.com/docling-project/docling-core.git@03dd0675d8dfd84fd4b3381c0adaaa512638c4bf",
+    "docling-core @ git+https://github.com/docling-project/docling-core.git@0268348b6a8fde1b6413d519068ef6b9141ce0e6",
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
     "typer>=0.12.5",

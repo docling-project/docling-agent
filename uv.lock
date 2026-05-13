@@ -1020,7 +1020,7 @@ requires-dist = [
     { name = "boto3", specifier = "~=1.35" },
     { name = "docling", specifier = ">=2.61.0" },
     { name = "docling", extras = ["vlm"], marker = "extra == 'vlm'", specifier = "~=2.53" },
-    { name = "docling-core", git = "https://github.com/docling-project/docling-core.git?rev=03dd0675d8dfd84fd4b3381c0adaaa512638c4bf" },
+    { name = "docling-core", git = "https://github.com/docling-project/docling-core.git?rev=0268348b6a8fde1b6413d519068ef6b9141ce0e6" },
     { name = "fastparquet", specifier = "~=2024.11" },
     { name = "httpx", specifier = "~=0.28" },
     { name = "mellea", specifier = ">=0.3" },
@@ -1052,7 +1052,7 @@ dev = [
 [[package]]
 name = "docling-core"
 version = "2.75.0"
-source = { git = "https://github.com/docling-project/docling-core.git?rev=03dd0675d8dfd84fd4b3381c0adaaa512638c4bf#03dd0675d8dfd84fd4b3381c0adaaa512638c4bf" }
+source = { git = "https://github.com/docling-project/docling-core.git?rev=0268348b6a8fde1b6413d519068ef6b9141ce0e6#0268348b6a8fde1b6413d519068ef6b9141ce0e6" }
 dependencies = [
     { name = "defusedxml" },
     { name = "jsonref" },

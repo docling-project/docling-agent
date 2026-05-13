@@ -839,15 +839,20 @@ Return no extra commentary. Include all operations that are materially requested
             if match:
                 try:
                     payload = json.loads(match.group(1))
-                    mentions = [
-                        EntityMention(
-                            text=str(item["text"]).strip(),
-                            original=str(item["original"]).strip() if item.get("original") else None,
-                            label=str(item["label"]).strip() if item.get("label") else None,
+                    mentions: list[EntityMention] = []
+                    search_start = 0
+                    for item in payload:
+                        if not isinstance(item, dict) or not str(item.get("text", "")).strip():
+                            continue
+                        mention = self._make_entity_mention(
+                            item=item,
+                            source_text=text,
+                            search_start=search_start,
+                            created_by=self._metadata_origin(self.get_extraction_model_id()),
                         )
-                        for item in payload
-                        if isinstance(item, dict) and str(item.get("text", "")).strip()
-                    ]
+                        if mention.span is not None:
+                            search_start = mention.span[1]
+                        mentions.append(mention)
                     logger.info("_generate_entities: parsed entities=%s", mentions)
                     if mentions:
                         return EntitiesMetaField(mentions=mentions)
@@ -855,6 +860,40 @@ Return no extra commentary. Include all operations that are materially requested
                 except Exception as exc:
                     logger.warning(f"Failed to parse entities JSON: {exc}")
         return None
+
+    @staticmethod
+    def _find_entity_span(*, source_text: str, needle: str, search_start: int = 0) -> tuple[int, int] | None:
+        if not needle.strip():
+            return None
+
+        start = source_text.find(needle, search_start)
+        if start >= 0:
+            return start, start + len(needle)
+
+        lowered_source = source_text.lower()
+        lowered_needle = needle.lower()
+        start = lowered_source.find(lowered_needle, search_start)
+        if start >= 0:
+            return start, start + len(needle)
+
+        return None
+
+    def _make_entity_mention(
+        self,
+        *,
+        item: dict[str, Any],
+        source_text: str,
+        search_start: int = 0,
+        created_by: str | None = None,
+    ) -> EntityMention:
+        text = str(item["text"]).strip()
+        original = str(item["original"]).strip() if item.get("original") else None
+        label = str(item["label"]).strip() if item.get("label") else None
+        needle = original or text
+        span = self._find_entity_span(source_text=source_text, needle=needle, search_start=search_start)
+        mention = EntityMention(text=text, original=original, label=label, span=span, created_by=created_by)
+        logger.info("_generate_entities: mention=%s", mention)
+        return mention
 
     # ------------------------------------------------------------------
     # Picture Classification
@@ -901,8 +940,8 @@ Return no extra commentary. Include all operations that are materially requested
 
         return document
 
-    def _metadata_origin(self) -> str:
-        return f"docling-agent:{self.backend.backend_type}:{self.get_reasoning_model_id()}"
+    def _metadata_origin(self, model_id: str | None = None) -> str:
+        return model_id or self.get_reasoning_model_id()
 
     def _ensure_picture_meta(self, item: PictureItem) -> PictureMeta:
         if isinstance(item.meta, PictureMeta):
