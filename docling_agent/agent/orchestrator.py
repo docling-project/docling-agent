@@ -330,8 +330,10 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             backend=self.backend,
             tools=[],
         )
-        sources: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
-        return editor.run(task=task.query, sources=sources)
+        if not source_pairs:
+            raise ValueError("Edit tasks require at least one source document")
+        document = source_pairs[0][0]
+        return editor.run(task=task.query, document=document)
 
     def _run_enrich(
         self,

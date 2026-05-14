@@ -166,6 +166,7 @@ Now, provide me with the operation to execute the task using the exact field nam
 """
 
         prompt = f"{context}{identification}"
+        logger.info(f"prompt: {prompt}")
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_document)
 
@@ -250,7 +251,7 @@ Now, provide me with the operation to execute the task using the exact field nam
 
 Execute the following task: {task}
 """
-        # logger.info(f"prompt: {prompt}")
+        logger.info(f"prompt: {prompt}")
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_table)
 
@@ -298,7 +299,7 @@ Execute the following task: {task}
 
 Execute the following task: {task}
 """
-        # logger.info(f"prompt: {prompt}")
+        logger.info(f"prompt: {prompt}")
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_table)
 
@@ -306,7 +307,7 @@ Execute the following task: {task}
             prompt,
             retry_budget=loop_budget,
         )
-        # logger.info(f"response: {answer}")
+        logger.info(f"response: {answer}")
 
         updated_doc = convert_markdown_to_docling_document(text=answer)
         if updated_doc is None:
