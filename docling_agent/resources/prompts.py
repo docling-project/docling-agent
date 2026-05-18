@@ -78,7 +78,7 @@ The editor can chose from 3 operations on a document in order to edit it, namely
 
 1. update_content(ref: reference): update the content of a single document item with reference `ref`. Here, we can update the text of a paragraph, the content or structure of a table, etc.
 2. rewrite_content(refs: list[reference]): rewrite the content of a list of consecutive document-items (with references denoted by `refs`) in the outline. Examples could be to shorten or expand certain sections.
-3. update_section_heading_level(changes: list[dict[ref, to_level]]): change the level of items with section_header label, according to the mapping between `ref` and `to_level`, where the `ref` is a reference and `to_level` is its new level number. Here level=1 is equivalent to `h2` in HTML, level=2 is equivalent to `h3` in HTML, etc.
+3. update_section_heading_level(changes: list[dict[ref, to_level]], insertions: list[dict[previous_ref, next_ref, regex, level]]): change the level of items with section_header label, according to the mapping between `ref` and `to_level`, where the `ref` is a reference and `to_level` is its new level number. Here level=1 is equivalent to `h2` in HTML, level=2 is equivalent to `h3` in HTML, etc. Special values are: `to_level=-1` to convert a misclassified section_header into a TextItem, and `to_level=0` to convert it into the unique TitleItem of the document. Use `insertions` when a missing section heading can be inferred between two existing section headers; provide the boundary refs, the regex to match the missing heading candidate, and the heading level.
 
 IMPORTANT RULES FOR HEADING LEVELS:
 - Level numbers represent the hierarchical depth: level=1 for main sections, level=2 for subsections, level=3 for sub-subsections, etc.
@@ -86,6 +86,10 @@ IMPORTANT RULES FOR HEADING LEVELS:
 - A child section's level must be exactly one more than its parent section's level (no skipping levels)
 - The document structure should form a logical hierarchy where broader topics are at higher levels (lower level numbers)
 - When fixing heading levels, analyze the semantic relationships and content scope to determine the proper hierarchy
+- Use `to_level=-1` when the current section_header is actually plain body text and should become a TextItem
+- Use `to_level=0` when the current section_header is actually the document title and should become a TitleItem
+- There can be at most one TitleItem in a document
+- If a heading is missing but can be inferred from nearby section headers, provide an `insertions` entry with `previous_ref`, `next_ref`, `regex`, and `level`
 
 IMPORTANT: For each task, you must return EXACTLY ONE operation in a ```json ... ``` code block. The JSON object must contain:
 - An "operation" field (not "action" or any other name) with one of the 3 operation names above
@@ -116,7 +120,27 @@ example 3: Update section heading levels. Section heading with reference `#/text
 ```json
 {{
     "operation": "update_section_heading_level",
-    "changes": [{{"ref": "#/text/4", "to_level": 2}}, {{"ref": "#/text/5", "to_level": 3}}]
+    "changes": [{{"ref": "#/text/4", "to_level": 2}}, {{"ref": "#/text/5", "to_level": 3}}],
+    "insertions": []
+}}
+```
+
+example 4: Convert one misclassified section_header into body text, promote another to the document title, and insert a missing section heading between two known headings.
+```json
+{{
+    "operation": "update_section_heading_level",
+    "changes": [
+        {{"ref": "#/text/7", "to_level": -1}},
+        {{"ref": "#/text/0", "to_level": 0}}
+    ],
+    "insertions": [
+        {{
+            "previous_ref": "#/text/11",
+            "next_ref": "#/text/13",
+            "regex": "^9\\.3\\s+.+$",
+            "level": 2
+        }}
+    ]
 }}
 ```
 

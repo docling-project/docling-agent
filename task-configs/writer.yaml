@@ -1,0 +1,49 @@
+# docling-agent task file
+# Run with: uv run docling-agent --task <this-file>
+
+# Required: the natural-language query or instruction.
+query: "Write me a report on the use of polymers for food packaging. Make sure that: 
+
+1. you have a clean introduction, a hig level overview of the different types of polymers and then a drill down into the specifics of each polymer with the desired properties
+2. I love to see clean and complex tables with nice captions"
+
+# Required for rag / extract / enrich: paths to documents or directories.
+sources:
+  - path/to/document.pdf
+  # - path/to/directory/
+
+# Task mode: rag | extract | write | edit | enrich  (omit to auto-plan)
+mode: write
+
+# --- RAG options (mode: rag) -------------------------------------------------
+# max_iterations: 5       # maximum section-selection iterations
+# enrich_before_rag: true # run summarization enrichment before querying
+
+# --- Extract options (mode: extract) -----------------------------------------
+# schema_path: schema.json  # optional JSON schema; inferred from query if omitted
+# glob: "*.pdf"             # glob pattern applied when sources contain directories
+
+# --- Enrich options (mode: enrich) -------------------------------------------
+# operations:
+#   - summarize   # attach 2-3 sentence summaries to each document node
+#   - keywords    # extract keywords per item
+#   - entities    # detect key entities per item
+
+# Output configuration --------------------------------------------------------
+# output:
+#   path: result.md   # omit to print to stdout
+#   format: markdown  # markdown | html | json
+
+# Backend configuration -------------------------------------------------------
+backend:
+  type: lmstudio     # mellea | ollama | lmstudio | litellm
+  # base_url: http://localhost:1234
+  timeout: 120
+  models:
+    reasoning: qwen/qwen3.6-35b-a3b
+    writing: granite-4.1-3b
+
+# Logging configuration -------------------------------------------------------
+logging:
+  level: INFO        # DEBUG | INFO | WARNING | ERROR
+#   log_llm_io: true   # log every LLM request and response at DEBUG level
