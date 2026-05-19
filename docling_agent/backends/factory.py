@@ -8,4 +8,7 @@ from docling_agent.task_model import BackendConfig
 def create_backend(config: BackendConfig) -> BaseBackend:
     """Instantiate the configured backend."""
     backend_cls = get_backend_class(config.type)
-    return backend_cls.from_config(config)
+    try:
+        return backend_cls.from_config(config)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to initialize {config.type!r} backend: {exc}") from exc

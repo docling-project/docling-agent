@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from mellea.stdlib.requirements import Requirement
+from typing_extensions import Self
 
 from docling_agent.task_model import BackendConfig, ModelConfig
 
@@ -34,7 +35,7 @@ class BaseBackend(ABC):
 
     @classmethod
     @abstractmethod
-    def from_config(cls, config: BackendConfig) -> BaseBackend:
+    def from_config(cls, config: BackendConfig) -> Self:
         """Build a backend instance from task configuration."""
         raise NotImplementedError
 

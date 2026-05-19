@@ -27,7 +27,12 @@ class OutputConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    """Model identifiers for the different reasoning roles."""
+    """Model identifiers for different agent roles.
+
+    - reasoning: Used for planning, analysis, and decision-making
+    - writing: Used for content generation and document creation
+    - extraction: Used for structured data extraction (defaults to writing)
+    """
 
     reasoning: str = "OPENAI_GPT_OSS_20B"
     writing: str = "OPENAI_GPT_OSS_20B"
@@ -36,7 +41,7 @@ class ModelConfig(BaseModel):
     @model_validator(mode="after")
     def default_extraction_model(self) -> ModelConfig:
         if self.extraction is None:
-            self.extraction = self.reasoning
+            self.extraction = self.writing
         return self
 
 
@@ -46,9 +51,9 @@ class BackendConfig(BaseModel):
     type: Literal["ollama", "lmstudio", "litellm", "mellea"] = "mellea"
     base_url: str | None = None
     timeout: int | None = None
-    api_key_env: str | None = None
-    options: dict[str, Any] = Field(default_factory=dict)
-    models: ModelConfig = Field(default_factory=ModelConfig)
+    api_key_env: Annotated[str | None, Field(repr=False)] = None
+    options: dict[str, Any] = {}
+    models: ModelConfig = ModelConfig()
 
 
 class LoggingConfig(BaseModel):
