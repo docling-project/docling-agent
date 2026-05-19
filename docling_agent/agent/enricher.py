@@ -850,8 +850,8 @@ Return no extra commentary. Include all operations that are materially requested
                             search_start=search_start,
                             created_by=self._metadata_origin(self.get_extraction_model_id()),
                         )
-                        if mention.span is not None:
-                            search_start = mention.span[1]
+                        if mention.charspan is not None:
+                            search_start = mention.charspan[1]
                         mentions.append(mention)
                     logger.info("_generate_entities: parsed entities=%s", mentions)
                     if mentions:
