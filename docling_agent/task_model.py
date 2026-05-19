@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
+from typing_extensions import Self
 
 
 def _default_output_formats() -> list[Literal["markdown", "html", "json"]]:
@@ -19,7 +20,7 @@ class OutputConfig(BaseModel):
     formats: list[Literal["markdown", "html", "json"]] = Field(default_factory=_default_output_formats)
 
     @model_validator(mode="after")
-    def normalize_formats(self) -> OutputConfig:
+    def normalize_formats(self) -> Self:
         self.formats = list(dict.fromkeys(self.formats))
         if not self.formats:
             raise ValueError("'output.formats' must contain at least one format")
@@ -39,7 +40,7 @@ class ModelConfig(BaseModel):
     extraction: str | None = None
 
     @model_validator(mode="after")
-    def default_extraction_model(self) -> ModelConfig:
+    def default_extraction_model(self) -> Self:
         if self.extraction is None:
             self.extraction = self.writing
         return self
@@ -115,7 +116,7 @@ class RAGTask(AgentTask):
     enrich_before_rag: bool = Field(True, description="Run summarization enrichment before the RAG loop.")
 
     @model_validator(mode="after")
-    def sources_required(self) -> RAGTask:
+    def sources_required(self) -> Self:
         if not self.sources:
             raise ValueError("'sources' must not be empty for RAG tasks")
         return self
@@ -132,7 +133,7 @@ class ExtractTask(AgentTask):
     glob: str | None = Field(None, description="Glob pattern applied when sources contain directories.")
 
     @model_validator(mode="after")
-    def sources_required(self) -> ExtractTask:
+    def sources_required(self) -> Self:
         if not self.sources:
             raise ValueError("'sources' must not be empty for extraction tasks")
         return self

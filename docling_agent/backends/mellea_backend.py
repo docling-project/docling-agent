@@ -9,6 +9,7 @@ from mellea.stdlib.components import Message
 from mellea.stdlib.context import ChatContext
 from mellea.stdlib.requirements import Requirement
 from mellea.stdlib.sampling import RejectionSamplingStrategy
+from typing_extensions import Self
 
 from docling_agent.agent_models import should_log_llm_io
 from docling_agent.backends.base import BaseBackend, BaseSession
@@ -72,7 +73,7 @@ class MelleaBackend(BaseBackend):
         self.options = config.options or {}
 
     @classmethod
-    def from_config(cls, config: BackendConfig) -> MelleaBackend:
+    def from_config(cls, config: BackendConfig) -> Self:
         return cls(config=config)
 
     def create_session(

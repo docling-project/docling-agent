@@ -4,6 +4,7 @@ from typing import Any
 
 import httpx
 from mellea.stdlib.requirements import Requirement
+from typing_extensions import Self
 
 from docling_agent.agent_models import should_log_llm_io
 from docling_agent.backends.base import BaseBackend, BaseSession
@@ -107,7 +108,7 @@ class OllamaBackend(BaseBackend):
         self.options = config.options or {}
 
     @classmethod
-    def from_config(cls, config: BackendConfig) -> OllamaBackend:
+    def from_config(cls, config: BackendConfig) -> Self:
         return cls(config=config)
 
     def create_session(
