@@ -14,7 +14,11 @@ from docling_agent.task_model import BackendConfig
 
 
 class OpenAICompatibleSession(BaseSession):
-    """Stateful direct session for OpenAI-compatible backends."""
+    """HTTP session for OpenAI-compatible API endpoints.
+
+    Supports any backend that implements the OpenAI chat completions API,
+    including LiteLLM, LM Studio, and OpenAI itself.
+    """
 
     def __init__(
         self,
@@ -27,6 +31,17 @@ class OpenAICompatibleSession(BaseSession):
         api_key_env: str | None = None,
         options: dict[str, Any] | None = None,
     ) -> None:
+        """Initialize an OpenAI-compatible session.
+
+        Args:
+            backend_type: Backend identifier for error messages.
+            model: Model identifier to use.
+            system_prompt: Optional system-level instructions.
+            base_url: API base URL.
+            timeout: Request timeout in seconds.
+            api_key_env: Environment variable name containing the API key.
+            options: Additional API options (temperature, max_tokens, etc.).
+        """
         self.backend_type = backend_type
         self.model = model
         self.options = options or {}
@@ -47,6 +62,20 @@ class OpenAICompatibleSession(BaseSession):
         requirements: list[Requirement] | None = None,
         retry_budget: int = 1,
     ) -> str:
+        """Send an instruction to the OpenAI-compatible API.
+
+        Args:
+            prompt: The instruction or query to send.
+            requirements: Not used (no structured output validation).
+            retry_budget: Maximum number of retry attempts on failure.
+
+        Returns:
+            The generated text response.
+
+        Raises:
+            ValueError: If the API returns an empty or invalid response.
+            httpx.HTTPStatusError: If the HTTP request fails.
+        """
         _ = requirements
         attempts = max(1, retry_budget)
         user_message = {"role": "user", "content": prompt}
@@ -85,6 +114,11 @@ class OpenAICompatibleSession(BaseSession):
             raise
 
     def debug_context_rows(self) -> list[tuple[int, str, str]] | None:
+        """Extract conversation history for debugging.
+
+        Returns:
+            List of tuples (index, role, content_preview) with truncated content.
+        """
         rows: list[tuple[int, str, str]] = []
         for idx, message in enumerate(self._messages):
             content = message["content"]
@@ -95,6 +129,19 @@ class OpenAICompatibleSession(BaseSession):
 
     @staticmethod
     def _extract_text(payload: dict[str, Any]) -> str:
+        """Extract text content from OpenAI-compatible API response.
+
+        Handles both string content and structured content arrays.
+
+        Args:
+            payload: JSON response from the API.
+
+        Returns:
+            The message content string.
+
+        Raises:
+            ValueError: If response structure is invalid or missing content.
+        """
         choices = payload.get("choices")
         if not isinstance(choices, list) or not choices:
             raise ValueError("OpenAI-compatible response is missing choices.")
@@ -117,7 +164,14 @@ class OpenAICompatibleSession(BaseSession):
 
 
 class OpenAICompatibleBackend(BaseBackend):
-    """Shared config holder for OpenAI-compatible direct backends."""
+    """Base backend for OpenAI-compatible API endpoints.
+
+    Provides a common implementation for any service that implements
+    the OpenAI chat completions API specification. Subclasses can
+    override defaults for specific providers (LiteLLM, LM Studio, etc.).
+
+    Default connection: http://localhost:4000/v1
+    """
 
     backend_type = "openai-compatible"
 
@@ -126,6 +180,11 @@ class OpenAICompatibleBackend(BaseBackend):
         *,
         config: BackendConfig,
     ) -> None:
+        """Initialize the OpenAI-compatible backend with configuration.
+
+        Args:
+            config: Backend configuration including base URL, API key, and options.
+        """
         self.config = config
         self.base_url = config.base_url or "http://localhost:4000/v1"
         self.timeout = config.timeout or 120
@@ -134,6 +193,14 @@ class OpenAICompatibleBackend(BaseBackend):
 
     @classmethod
     def from_config(cls, config: BackendConfig) -> Self:
+        """Construct an OpenAI-compatible backend from configuration.
+
+        Args:
+            config: Backend configuration.
+
+        Returns:
+            Initialized backend instance.
+        """
         return cls(config=config)
 
     def create_session(
@@ -142,6 +209,15 @@ class OpenAICompatibleBackend(BaseBackend):
         model: str,
         system_prompt: str | None = None,
     ) -> BaseSession:
+        """Create a new OpenAI-compatible session.
+
+        Args:
+            model: Model identifier to use.
+            system_prompt: Optional system-level instructions.
+
+        Returns:
+            A new OpenAICompatibleSession instance.
+        """
         return OpenAICompatibleSession(
             backend_type=self.backend_type,
             model=model,

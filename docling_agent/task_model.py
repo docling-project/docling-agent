@@ -8,19 +8,33 @@ from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_valid
 from typing_extensions import Self
 
 
-def _default_output_formats() -> list[Literal["markdown", "html", "json"]]:
-    return ["markdown", "html", "json"]
-
-
 class OutputConfig(BaseModel):
-    """Where and how to write the result."""
+    """Configuration for output file generation.
 
-    path: Path | None = None
-    dir: Path = Path("./outputs")
-    formats: list[Literal["markdown", "html", "json"]] = Field(default_factory=_default_output_formats)
+    Specifies where to write results and in which formats. Supports multiple
+    output formats simultaneously (markdown, HTML, JSON).
+    """
+
+    path: Annotated[
+        Path | None,
+        Field(description="Specific output file path. If None, auto-generates based on dir and timestamp."),
+    ] = None
+    dir: Annotated[
+        Path,
+        Field(description="Directory for output files when path is not specified."),
+    ] = Path("./outputs")
+    formats: Annotated[
+        list[Literal["markdown", "html", "json"]],
+        Field(description="Output formats to generate. Duplicates are automatically removed."),
+    ] = ["markdown", "html", "json"]
 
     @model_validator(mode="after")
     def normalize_formats(self) -> Self:
+        """Remove duplicate formats and validate at least one format is specified.
+
+        Raises:
+            ValueError: If formats list is empty after deduplication.
+        """
         self.formats = list(dict.fromkeys(self.formats))
         if not self.formats:
             raise ValueError("'output.formats' must contain at least one format")
@@ -35,40 +49,81 @@ class ModelConfig(BaseModel):
     - extraction: Used for structured data extraction (defaults to writing)
     """
 
-    reasoning: str = "OPENAI_GPT_OSS_20B"
-    writing: str = "OPENAI_GPT_OSS_20B"
-    extraction: str | None = None
+    reasoning: Annotated[
+        str,
+        Field(description="Model identifier for reasoning tasks (planning, analysis, decision-making)."),
+    ] = "OPENAI_GPT_OSS_20B"
+    writing: Annotated[
+        str,
+        Field(description="Model identifier for writing tasks (content generation, document creation)."),
+    ] = "OPENAI_GPT_OSS_20B"
+    extraction: Annotated[
+        str | None,
+        Field(description="Model identifier for extraction tasks. Defaults to writing model if not specified."),
+    ] = None
 
     @model_validator(mode="after")
     def default_extraction_model(self) -> Self:
+        """Set extraction model to writing model if not explicitly specified."""
         if self.extraction is None:
             self.extraction = self.writing
         return self
 
 
 class BackendConfig(BaseModel):
-    """Backend selection and connection settings."""
+    """Configuration for LLM backend selection and connection.
 
-    type: Literal["ollama", "lmstudio", "litellm", "mellea"] = "mellea"
-    base_url: str | None = None
-    timeout: int | None = None
-    api_key_env: Annotated[str | None, Field(repr=False)] = None
-    options: dict[str, Any] = {}
-    models: ModelConfig = ModelConfig()
+    Supports multiple backend types (Mellea, Ollama, LM Studio, LiteLLM) with
+    customizable connection settings and model assignments.
+    """
+
+    type: Annotated[
+        Literal["ollama", "lmstudio", "litellm", "mellea"],
+        Field(description="Backend type to use for LLM inference."),
+    ] = "mellea"
+    base_url: Annotated[
+        str | None,
+        Field(description="Custom base URL for the backend API. If None, uses backend default."),
+    ] = None
+    timeout: Annotated[
+        int | None,
+        Field(description="Request timeout in seconds. If None, uses backend default."),
+    ] = None
+    api_key_env: Annotated[
+        str | None,
+        Field(
+            repr=False,
+            description="Environment variable name containing the API key. Hidden from repr for security.",
+        ),
+    ] = None
+    options: Annotated[
+        dict[str, Any],
+        Field(description="Backend-specific options passed through to the provider."),
+    ] = {}
+    models: Annotated[
+        ModelConfig,
+        Field(description="Model identifiers for different agent roles."),
+    ] = ModelConfig()
 
 
 class LoggingConfig(BaseModel):
-    """Logging configuration."""
+    """Configuration for logging behavior.
 
-    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    log_llm_io: bool = Field(
-        True,
-        description="Log every LLM request and response at DEBUG level.",
-    )
-    linear_chat_log_path: Path | None = Field(
-        None,
-        description="Optional file path to append linearized chat contexts during a run.",
-    )
+    Controls log levels and optional detailed LLM interaction logging for debugging.
+    """
+
+    level: Annotated[
+        Literal["DEBUG", "INFO", "WARNING", "ERROR"],
+        Field(description="Minimum log level to output."),
+    ] = "INFO"
+    log_llm_io: Annotated[
+        bool,
+        Field(description="Log every LLM request and response at DEBUG level."),
+    ] = True
+    linear_chat_log_path: Annotated[
+        Path | None,
+        Field(description="Optional file path to append linearized chat contexts during a run."),
+    ] = None
 
 
 class AgentTask(BaseModel):
@@ -102,68 +157,114 @@ class AgentTask(BaseModel):
     @field_validator("sources", mode="before")
     @classmethod
     def coerce_sources(cls, v: Any) -> list[str]:
-        """Accept a bare string as a single-item list."""
+        """Convert single string source to list for convenience.
+
+        Args:
+            v: Either a string or list of strings.
+        """
         if isinstance(v, str):
             return [v]
         return v
 
 
 class RAGTask(AgentTask):
-    """Query one or more documents using the chunkless RAG loop."""
+    """Retrieval-Augmented Generation task configuration.
+
+    Queries documents using an iterative section-selection approach without
+    traditional chunking. Optionally enriches documents with summaries before querying.
+    """
 
     mode: Literal["rag"] = "rag"
-    max_iterations: int = Field(5, ge=1, description="Maximum section-selection iterations.")
-    enrich_before_rag: bool = Field(True, description="Run summarization enrichment before the RAG loop.")
+    max_iterations: Annotated[
+        int,
+        Field(ge=1, description="Maximum section-selection iterations."),
+    ] = 5
+    enrich_before_rag: Annotated[
+        bool,
+        Field(description="Run summarization enrichment before the RAG loop."),
+    ] = True
 
     @model_validator(mode="after")
     def sources_required(self) -> Self:
+        """Validate that at least one source document is provided.
+
+        Raises:
+            ValueError: If sources list is empty.
+        """
         if not self.sources:
             raise ValueError("'sources' must not be empty for RAG tasks")
         return self
 
 
 class ExtractTask(AgentTask):
-    """Extract structured data from documents according to a schema."""
+    """Structured data extraction task configuration.
+
+    Extracts data from documents according to a JSON schema. Schema can be
+    provided explicitly or inferred from the query.
+    """
 
     mode: Literal["extract"] = "extract"
-    schema_path: Path | None = Field(
-        None,
-        description="Optional path to a JSON schema file. If omitted the schema is inferred from the query.",
-    )
-    glob: str | None = Field(None, description="Glob pattern applied when sources contain directories.")
+    schema_path: Annotated[
+        Path | None,
+        Field(description="Optional path to a JSON schema file. If omitted the schema is inferred from the query."),
+    ] = None
+    glob: Annotated[
+        str | None,
+        Field(description="Glob pattern applied when sources contain directories."),
+    ] = None
 
     @model_validator(mode="after")
     def sources_required(self) -> Self:
+        """Validate that at least one source document is provided.
+
+        Raises:
+            ValueError: If sources list is empty.
+        """
         if not self.sources:
             raise ValueError("'sources' must not be empty for extraction tasks")
         return self
 
 
 class WriteTask(AgentTask):
-    """Write a new document, optionally grounded in source documents."""
+    """Document writing task configuration.
+
+    Creates new documents from scratch or grounded in source materials.
+    Sources are optional - can write purely from the query.
+    """
 
     mode: Literal["write"] = "write"
-    # sources are optional for writing tasks
 
 
 class EditingTask(AgentTask):
-    """Edit an existing document."""
+    """Document editing task configuration.
+
+    Modifies existing documents based on instructions. Sources are optional
+    but typically include the document to be edited.
+    """
 
     mode: Literal["edit"] = "edit"
-    # sources are optional for editing tasks
 
 
 class EnrichTask(AgentTask):
-    """Enrich documents with summaries, keywords, or entity annotations."""
+    """Document enrichment task configuration.
+
+    Adds metadata to documents through various operations: summarization,
+    keyword extraction, entity recognition, and classification.
+    """
 
     mode: Literal["enrich"] = "enrich"
     operations: Annotated[
         list[Literal["summarize", "keywords", "entities", "classify", "classify_items"]] | None,
-        Field(description="Enrichment operations to apply."),
+        Field(description="Enrichment operations to apply. If None, applies all available operations."),
     ] = None
 
     @model_validator(mode="after")
     def sources_required(self) -> EnrichTask:
+        """Validate that at least one source document is provided.
+
+        Raises:
+            ValueError: If sources list is empty.
+        """
         if not self.sources:
             raise ValueError("'sources' must not be empty for enrichment tasks")
         return self

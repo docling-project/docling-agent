@@ -13,7 +13,11 @@ from docling_agent.task_model import BackendConfig
 
 
 class OllamaSession(BaseSession):
-    """Stateful direct Ollama session."""
+    """Direct HTTP session for Ollama API communication.
+
+    Maintains conversation history and handles retries for Ollama's
+    chat completion endpoint.
+    """
 
     def __init__(
         self,
@@ -24,6 +28,15 @@ class OllamaSession(BaseSession):
         timeout: float,
         options: dict[str, Any] | None = None,
     ) -> None:
+        """Initialize an Ollama session.
+
+        Args:
+            model: Ollama model identifier (e.g., "granite4.1:3b", "qwen3.5:latest").
+            system_prompt: Optional system-level instructions.
+            base_url: Ollama API base URL.
+            timeout: Request timeout in seconds.
+            options: Additional Ollama-specific options (temperature, top_p, etc.).
+        """
         self.model = model
         self.options = options or {}
         self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout)
@@ -38,6 +51,20 @@ class OllamaSession(BaseSession):
         requirements: list[Requirement] | None = None,
         retry_budget: int = 1,
     ) -> str:
+        """Send an instruction to Ollama and return the response.
+
+        Args:
+            prompt: The instruction or query to send.
+            requirements: Not used by Ollama backend (no structured output validation).
+            retry_budget: Maximum number of retry attempts on failure.
+
+        Returns:
+            The generated text response from Ollama.
+
+        Raises:
+            ValueError: If Ollama returns an empty response or request fails.
+            httpx.HTTPStatusError: If the HTTP request fails.
+        """
         _ = requirements
         attempts = max(1, retry_budget)
         user_message = {"role": "user", "content": prompt}
@@ -77,6 +104,11 @@ class OllamaSession(BaseSession):
             raise
 
     def debug_context_rows(self) -> list[tuple[int, str, str]] | None:
+        """Extract conversation history for debugging.
+
+        Returns:
+            List of tuples (index, role, content_preview) with truncated content.
+        """
         rows: list[tuple[int, str, str]] = []
         for idx, message in enumerate(self._messages):
             content = message["content"]
@@ -87,6 +119,17 @@ class OllamaSession(BaseSession):
 
     @staticmethod
     def _extract_text(payload: dict[str, Any]) -> str:
+        """Extract text content from Ollama API response.
+
+        Args:
+            payload: JSON response from Ollama API.
+
+        Returns:
+            The message content string.
+
+        Raises:
+            ValueError: If response structure is invalid or missing content.
+        """
         message = payload.get("message")
         if not isinstance(message, dict):
             raise ValueError("Ollama response is missing the 'message' object.")
@@ -97,11 +140,22 @@ class OllamaSession(BaseSession):
 
 
 class OllamaBackend(BaseBackend):
-    """Direct Ollama backend."""
+    """Backend for direct communication with Ollama API.
+
+    Connects to a local or remote Ollama instance without additional
+    abstraction layers. Suitable for running open-source models locally.
+
+    Default connection: http://localhost:11434
+    """
 
     backend_type = "ollama"
 
     def __init__(self, *, config: BackendConfig) -> None:
+        """Initialize the Ollama backend with configuration.
+
+        Args:
+            config: Backend configuration including base URL and options.
+        """
         self.config = config
         self.base_url = config.base_url or "http://localhost:11434"
         self.timeout = config.timeout or 120
@@ -109,6 +163,14 @@ class OllamaBackend(BaseBackend):
 
     @classmethod
     def from_config(cls, config: BackendConfig) -> Self:
+        """Construct an Ollama backend from configuration.
+
+        Args:
+            config: Backend configuration.
+
+        Returns:
+            Initialized Ollama backend instance.
+        """
         return cls(config=config)
 
     def create_session(
@@ -117,6 +179,15 @@ class OllamaBackend(BaseBackend):
         model: str,
         system_prompt: str | None = None,
     ) -> BaseSession:
+        """Create a new Ollama session.
+
+        Args:
+            model: Ollama model identifier (e.g., "granite4.1:3b", "qwen3.5:latest").
+            system_prompt: Optional system-level instructions.
+
+        Returns:
+            A new OllamaSession instance.
+        """
         return OllamaSession(
             model=model,
             system_prompt=system_prompt,

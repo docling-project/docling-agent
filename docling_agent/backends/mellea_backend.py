@@ -18,9 +18,18 @@ from docling_agent.task_model import BackendConfig
 
 
 class MelleaSessionAdapter(BaseSession):
-    """Stateful Mellea session wrapper used by ``MelleaBackend``."""
+    """Adapter wrapping a Mellea session to conform to BaseSession interface.
+
+    Provides compatibility between Mellea's native session API and the
+    standardized backend session interface.
+    """
 
     def __init__(self, session: MelleaSession) -> None:
+        """Initialize the adapter with a Mellea session.
+
+        Args:
+            session: The underlying Mellea session to wrap.
+        """
         self._session = session
 
     def instruct(
@@ -30,6 +39,19 @@ class MelleaSessionAdapter(BaseSession):
         requirements: list[Requirement] | None = None,
         retry_budget: int = 1,
     ) -> str:
+        """Execute an instruction using Mellea's rejection sampling strategy.
+
+        Args:
+            prompt: The instruction or query to send to the LLM.
+            requirements: Optional structured output requirements for validation.
+            retry_budget: Maximum number of retry attempts on validation failure.
+
+        Returns:
+            The generated text response from the LLM.
+
+        Raises:
+            ValueError: If Mellea returns no response text.
+        """
         if should_log_llm_io():
             logger.debug(f"[LLM REQUEST]\n{prompt}")
         result = self._session.instruct(
@@ -45,6 +67,12 @@ class MelleaSessionAdapter(BaseSession):
         return value
 
     def debug_context_rows(self) -> list[tuple[int, str, str]] | None:
+        """Extract conversation context from Mellea session for debugging.
+
+        Returns:
+            List of tuples (index, role, content_preview) representing the
+            conversation history, with content truncated for readability.
+        """
         rows: list[tuple[int, str, str]] = []
         context_components = self._session.ctx.view_for_generation()
         if not context_components:
@@ -62,11 +90,21 @@ class MelleaSessionAdapter(BaseSession):
 
 
 class MelleaBackend(BaseBackend):
-    """Compatibility backend that preserves current Mellea-based execution."""
+    """Backend implementation using the Mellea framework.
+
+    Mellea provides structured output validation, rejection sampling,
+    and advanced prompting capabilities. This backend uses Ollama as
+    the underlying model provider.
+    """
 
     backend_type = "mellea"
 
     def __init__(self, *, config: BackendConfig) -> None:
+        """Initialize the Mellea backend with configuration.
+
+        Args:
+            config: Backend configuration including connection settings.
+        """
         self.config = config
         self.base_url = config.base_url
         self.timeout = config.timeout
@@ -74,6 +112,14 @@ class MelleaBackend(BaseBackend):
 
     @classmethod
     def from_config(cls, config: BackendConfig) -> Self:
+        """Construct a Mellea backend from configuration.
+
+        Args:
+            config: Backend configuration.
+
+        Returns:
+            Initialized Mellea backend instance.
+        """
         return cls(config=config)
 
     def create_session(
@@ -82,6 +128,15 @@ class MelleaBackend(BaseBackend):
         model: str,
         system_prompt: str | None = None,
     ) -> BaseSession:
+        """Create a new Mellea session with Ollama backend.
+
+        Args:
+            model: Model identifier (resolved from model_ids or used directly).
+            system_prompt: Optional system-level instructions.
+
+        Returns:
+            A new session wrapped in MelleaSessionAdapter.
+        """
         model_id = getattr(model_ids, model, model)
 
         ctx = ChatContext()
