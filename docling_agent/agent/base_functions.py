@@ -497,94 +497,14 @@ def _flatten_into(
 
 
 def make_flat_document(doc: DoclingDocument) -> DoclingDocument:
-    """Return a new document where every item is a direct child of body.
-
-    Iterates ``doc`` in document order and appends each item to the new body,
-    preserving:
-    - SectionHeaderItem.level  (needed for make_hierarchical_document to invert)
-    - List internal structure  (ListGroup → ListItem nesting is kept)
-    - Table / picture caption children
-    All other parent-child links (section → text) are dissolved.
-    """
+    """Normalize the document in place with Docling's native heading flattening."""
     logger.info(f"make_flat_document: doc={doc.name!r}")
-    new_doc = DoclingDocument(name=doc.name)
-    _flatten_into(doc.body, doc, new_doc, new_doc.body)
-    return new_doc
+    doc._flatten()
+    return doc
 
 
 def make_hierarchical_document(doc: DoclingDocument) -> DoclingDocument:
-    """Return a new document with maximal section nesting.
-
-    Iterates ``doc`` in document order (after flattening first).  Maintains a
-    stack of open section headers keyed by their level.  Each non-header item
-    (text, table, picture, list) is appended as a child of the most recently
-    opened section header (or of body if no header has been seen yet).
-    A section header at level N is appended as a child of the nearest ancestor
-    whose level is strictly less than N.
-
-    Lists, table-caption pairs and picture-caption pairs are treated as atomic
-    units and are not split across parent boundaries.
-    """
+    """Normalize the document in place with Docling's native hierarchy normalization applied."""
     logger.info(f"make_hierarchical_document: doc={doc.name!r}")
-    flat = make_flat_document(doc)
-    new_doc = DoclingDocument(name=doc.name)
-
-    # open_sections maps level -> SectionHeaderItem (only section headers, not title).
-    open_sections: dict[int, NodeItem] = {}
-    # title_node is the most recently seen TitleItem; text before any section header
-    # becomes a child of the title rather than of body.
-    title_node: NodeItem | None = None
-
-    def _current_parent() -> NodeItem:
-        if open_sections:
-            return open_sections[max(open_sections)]
-        if title_node is not None:
-            return title_node
-        return new_doc.body
-
-    def _parent_for_level(level: int) -> NodeItem:
-        # Section headers nest only under other section headers, never under the title.
-        candidates = [lv for lv in open_sections if lv < level]
-        if not candidates:
-            return new_doc.body
-        return open_sections[max(candidates)]
-
-    for child_ref in flat.body.children or []:
-        try:
-            child = child_ref.resolve(flat)
-        except Exception as exc:
-            logger.warning(f"Could not resolve body child {child_ref}: {exc}")
-            continue
-
-        if isinstance(child, TitleItem):
-            new_item = new_doc.add_title(text=child.text, parent=new_doc.body)
-            new_item.meta = child.meta
-            title_node = new_item
-            open_sections = {}
-
-        elif isinstance(child, SectionHeaderItem):
-            level = child.level
-            parent = _parent_for_level(level)
-            new_item = new_doc.add_heading(text=child.text, level=level, parent=parent)
-            new_item.meta = child.meta
-            # Close all open sections at >= this level
-            open_sections = {lv: n for lv, n in open_sections.items() if lv < level}
-            open_sections[level] = new_item
-
-        elif isinstance(child, ListGroup):
-            _copy_list_group(child, flat, new_doc, _current_parent())
-
-        elif isinstance(child, TableItem):
-            _copy_table(child, flat, new_doc, _current_parent())
-
-        elif isinstance(child, PictureItem):
-            _copy_picture(child, flat, new_doc, _current_parent())
-
-        elif hasattr(child, "text"):
-            new_item = new_doc.add_text(label=child.label, text=child.text, parent=_current_parent())
-            new_item.meta = child.meta
-
-        else:
-            logger.warning(f"Unhandled item type {type(child).__name__} in make_hierarchical_document")
-
-    return new_doc
+    doc._hierarchize()
+    return doc

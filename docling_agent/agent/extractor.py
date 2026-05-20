@@ -12,13 +12,10 @@ from docling_core.types.doc import (
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
-from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 from pydantic import Field
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
-from docling_agent.agent_models import setup_local_session
 from docling_agent.logging import logger
 
 
@@ -32,10 +29,15 @@ class DoclingExtractingAgent(BaseDoclingAgent):
     # Stores the last extraction results as {path_str: [items, ...]}
     last_results: dict[str, list[Any]] = Field(default_factory=dict)
 
-    def __init__(self, *, model_id: ModelIdentifier, tools: list):
+    def __init__(
+        self,
+        *,
+        tools: list,
+        backend=None,
+    ):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_EXTRACTOR,
-            model_id=model_id,
+            backend=backend or self.default_backend(),
             tools=tools,
         )
         self.extractor = DocumentExtractor(allowed_formats=[InputFormat.IMAGE, InputFormat.PDF])
@@ -126,10 +128,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             except Exception:
                 return False
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_schema_extraction,
-        )
+        m = self._create_extraction_session(system_prompt=self.system_prompt_schema_extraction)
 
         prompt = f"{task}"
         logger.info(f"prompt: {prompt}")
@@ -142,7 +141,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(validate_json_str),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        return json.loads(answer.value)
+        return json.loads(answer)

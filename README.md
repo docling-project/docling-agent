@@ -18,17 +18,23 @@ Docling-agent simplifies agentic operation on documents, such as writing, editin
 - [Targeted editing](examples/example_02_edit_report.py): Load an existing Docling JSON and apply focused edits with natural-language tasks.
 - [Schema-guided extraction](examples/example_03_extract_schema.py): Extract typed fields from PDFs/images using a simple schema and produce HTML reports. See examples on curriculum_vitae, papers, invoices, etc.
 - [Document enrichment](examples/example_04_enrich_document.py): Enrich existing documents with summaries, search keywords, key entities, and item classifications (language/function).
-- Model-agnostic: Plug in different backends via [Mellea](https://github.com/generative-computing/mellea) `model_ids` (e.g., OpenAI GPT OSS, IBM Granite).
+- Model-agnostic: Choose `mellea`, `ollama`, `lmstudio`, or `litellm` through backend configuration.
 - Simple API surface: Use `agent.run(...)` with `DoclingDocument` in/out; save via `save_as_*` helpers.
 - Optional tools: Integrate external tools (e.g., MCP) when available.
 
 Quick start (writing):
 
 ```python
-from mellea.backends import model_ids
-from docling_agent.agents import DoclingWritingAgent
+from docling_agent.agents import BackendConfig, DoclingWritingAgent, ModelConfig, create_backend
 
-agent = DoclingWritingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+backend = create_backend(
+    BackendConfig(
+        type="ollama",
+        base_url="http://localhost:11434",
+        models=ModelConfig(reasoning="qwen3:8b", writing="qwen3:8b"),
+    )
+)
+agent = DoclingWritingAgent(backend=backend, tools=[])
 doc = agent.run("Write a one-page summary about polymers in food packaging.")
 doc.save_as_html("report.html")
 ```
@@ -44,10 +50,16 @@ Below are three minimal, end-to-end examples mirroring the scripts in the exampl
 ### Write a new document (see [example](examples/example_01_write_report.py)):
 
 ```python
-from mellea.backends import model_ids
-from docling_agent.agents import DoclingWritingAgent
+from docling_agent.agents import BackendConfig, DoclingWritingAgent, ModelConfig, create_backend
 
-agent = DoclingWritingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+backend = create_backend(
+    BackendConfig(
+        type="ollama",
+        base_url="http://localhost:11434",
+        models=ModelConfig(reasoning="qwen3:8b", writing="qwen3:8b"),
+    )
+)
+agent = DoclingWritingAgent(backend=backend, tools=[])
 doc = agent.run("Write a brief report on polymers in food packaging with a small comparison table.")
 doc.save_as_html("./scratch/report.html")
 ```
@@ -58,14 +70,19 @@ Use natural-language tasks to update a Docling JSON. You can run multiple tasks 
 
 ```python
 from pathlib import Path
-from mellea.backends import model_ids
 from docling_core.types.doc.document import DoclingDocument
-from docling_agent.agents import DoclingEditingAgent
+from docling_agent.agents import BackendConfig, DoclingEditingAgent, ModelConfig, create_backend
 
 ipath = Path("./examples/example_02_edit_resources/20250815_125216.json")
 doc = DoclingDocument.load_from_json(ipath)
 
-agent = DoclingEditingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+backend = create_backend(
+    BackendConfig(
+        type="mellea",
+        models=ModelConfig(reasoning="OPENAI_GPT_OSS_20B", writing="OPENAI_GPT_OSS_20B"),
+    )
+)
+agent = DoclingEditingAgent(backend=backend, tools=[])
 updated = agent.run(task="Put polymer abbreviations in a separate column in the first table.", document=doc)
 updated.save_as_html("./scratch/updated_table.html")
 ```
@@ -76,13 +93,18 @@ Define a simple schema and provide a list of files (PDFs/images). The agent prod
 
 ```python
 from pathlib import Path
-from mellea.backends import model_ids
-from docling_agent.agents import DoclingExtractingAgent
+from docling_agent.agents import BackendConfig, DoclingExtractingAgent, ModelConfig, create_backend
 
 schema = {"invoice-number": "string", "total": "float", "currency": "string"}
 sources = sorted([p for p in Path("./examples/example_03_extract/invoices").rglob("*.*") if p.suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg"}])
 
-agent = DoclingExtractingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+backend = create_backend(
+    BackendConfig(
+        type="mellea",
+        models=ModelConfig(reasoning="OPENAI_GPT_OSS_20B", writing="OPENAI_GPT_OSS_20B"),
+    )
+)
+agent = DoclingExtractingAgent(backend=backend, tools=[])
 report = agent.run(task=str(schema), sources=sources)
 report.save_as_html("./scratch/invoices_extraction_report.html")
 ```
@@ -93,17 +115,43 @@ Run enrichment passes like summaries, keywords, entities, and classifications on
 
 ```python
 from pathlib import Path
-from mellea.backends import model_ids
 from docling_core.types.doc.document import DoclingDocument
-from docling_agent.agents import DoclingEnrichingAgent
+from docling_agent.agents import BackendConfig, DoclingEnrichingAgent, ModelConfig, create_backend
 
 ipath = Path("./examples/example_02_edit_resources/20250815_125216.json")
 doc = DoclingDocument.load_from_json(ipath)
 
-agent = DoclingEnrichingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B)
+backend = create_backend(
+    BackendConfig(
+        type="mellea",
+        models=ModelConfig(reasoning="OPENAI_GPT_OSS_20B", writing="OPENAI_GPT_OSS_20B"),
+    )
+)
+agent = DoclingEnrichingAgent(backend=backend, tools=[])
 enriched = agent.run(task="Summarize each paragraph, table, and section header.", document=doc)
 enriched.save_as_html("./scratch/enriched_summaries.html")
 ```
+
+## Backend Configuration
+
+Task files now select the backend explicitly:
+
+```yaml
+backend:
+  type: ollama  # mellea | ollama | lmstudio | litellm
+  base_url: http://localhost:11434
+  timeout: 120
+  models:
+    reasoning: qwen3:8b
+    writing: qwen3:8b
+```
+
+Typical defaults:
+
+- `mellea`: model names like `OPENAI_GPT_OSS_20B`
+- `ollama`: model names like `qwen3:8b`
+- `lmstudio`: model names like `granite-3.3-8b-instruct`
+- `litellm`: routed model names like `openai/gpt-4.1-mini`
 
 ## Documentation
 

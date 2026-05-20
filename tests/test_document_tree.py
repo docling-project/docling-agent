@@ -205,7 +205,7 @@ class TestMakeHierarchicalDocument:
         assert sub.text == "Sub"
         assert child_texts(sub, hier) == ["Detail"]
 
-    def test_title_is_sibling_of_section_headers(self):
+    def test_title_is_parent_of_first_section_header(self):
         doc = DoclingDocument(name="test")
         doc.add_title(text="My Paper", parent=doc.body)
         doc.add_heading(text="Introduction", level=1, parent=doc.body)
@@ -215,13 +215,12 @@ class TestMakeHierarchicalDocument:
 
         body_children = [ref.resolve(hier) for ref in hier.body.children]
         assert body_children[0].text == "My Paper"
-        assert body_children[1].text == "Introduction"
-        # section header is NOT nested inside the title
-        assert not any(
-            getattr(ref.resolve(hier), "text", "") == "Introduction" for ref in body_children[0].children or []
-        )
+        assert child_texts(body_children[0], hier) == ["Introduction"]
+        intro = body_children[0].children[0].resolve(hier)
+        assert intro.text == "Introduction"
+        assert child_texts(intro, hier) == ["Body"]
 
-    def test_text_before_first_section_becomes_title_child(self):
+    def test_text_before_first_section_stays_under_title(self):
         doc = DoclingDocument(name="test")
         doc.add_title(text="Paper", parent=doc.body)
         doc.add_text(label=DocItemLabel.TEXT, text="Abstract", parent=doc.body)
@@ -231,7 +230,7 @@ class TestMakeHierarchicalDocument:
 
         title = hier.body.children[0].resolve(hier)
         assert title.text == "Paper"
-        assert child_texts(title, hier) == ["Abstract"]
+        assert child_texts(title, hier) == ["Abstract", "Intro"]
 
     def test_same_level_sections_are_siblings(self):
         doc = DoclingDocument(name="test")

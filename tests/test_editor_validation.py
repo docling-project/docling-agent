@@ -1,10 +1,15 @@
 """Tests for the DoclingEditingAgent."""
 
 import pytest
+from docling_core.types.doc.document import DocItemLabel, DoclingDocument, SectionHeaderItem, TextItem, TitleItem
 from pydantic import ValidationError
 
+from docling_agent.agent.base import DoclingAgentType
 from docling_agent.agent.editor import (
+    DoclingEditingAgent,
+    MissingSectionHeadingInsertion,
     RewriteContentOperation,
+    SectionHeadingLevelChange,
     UpdateContentOperation,
     UpdateSectionHeadingLevelOperation,
 )
@@ -82,13 +87,20 @@ class TestUpdateSectionHeadingLevelOperation:
         # Pydantic's built-in pattern validation error message
         assert "String should match pattern" in str(exc_info.value)
 
-    def test_negative_level_value(self):
-        """Test that negative level value raises ValidationError."""
+    def test_valid_minus_one_level(self):
+        """Test that -1 level is valid for converting to TextItem."""
+        op = UpdateSectionHeadingLevelOperation(
+            operation="update_section_heading_level", changes=[{"ref": "#/section-header/1", "to_level": -1}]
+        )
+        assert op.changes[0].to_level == -1
+
+    def test_level_below_minus_one_is_invalid(self):
+        """Test that values below -1 still raise ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
             UpdateSectionHeadingLevelOperation(
-                operation="update_section_heading_level", changes=[{"ref": "#/section-header/1", "to_level": -1}]
+                operation="update_section_heading_level", changes=[{"ref": "#/section-header/1", "to_level": -2}]
             )
-        assert "greater than or equal to 0" in str(exc_info.value).lower()
+        assert "greater than or equal to -1" in str(exc_info.value).lower()
 
     def test_valid_zero_level(self):
         """Test that zero level is valid."""
@@ -96,6 +108,26 @@ class TestUpdateSectionHeadingLevelOperation:
             operation="update_section_heading_level", changes=[{"ref": "#/section-header/1", "to_level": 0}]
         )
         assert op.changes[0].to_level == 0
+
+    def test_valid_insertions_payload(self):
+        """Test that insertions payload is accepted."""
+        op = UpdateSectionHeadingLevelOperation(
+            operation="update_section_heading_level",
+            changes=[{"ref": "#/section-header/1", "to_level": 2}],
+            insertions=[
+                {
+                    "previous_ref": "#/section-header/9",
+                    "next_ref": "#/section-header/11",
+                    "regex": r"^9\.3\s+.+$",
+                    "level": 2,
+                }
+            ],
+        )
+        assert len(op.insertions) == 1
+        assert op.insertions[0].previous_ref == "#/section-header/9"
+        assert op.insertions[0].next_ref == "#/section-header/11"
+        assert op.insertions[0].regex == r"^9\.3\s+.+$"
+        assert op.insertions[0].level == 2
 
 
 class TestJsonPointerPatternValidation:
@@ -141,3 +173,83 @@ class TestJsonPointerPatternValidation:
         else:
             with pytest.raises(ValidationError):
                 UpdateContentOperation(operation="update_content", ref=invalid_ref)
+
+
+class TestSectionHeadingFixHelpers:
+    @staticmethod
+    def _agent() -> DoclingEditingAgent:
+        return DoclingEditingAgent.model_construct(
+            agent_type=DoclingAgentType.DOCLING_DOCUMENT_EDITOR,
+            backend=None,
+            tools=[],
+        )
+
+    def test_converts_section_header_to_text_item(self):
+        doc = DoclingDocument(name="test")
+        header = doc.add_heading(text="Appendix note", level=1, parent=doc.body)
+
+        self._agent()._update_section_heading_level(
+            task="",
+            document=doc,
+            changes=[SectionHeadingLevelChange(ref=header.self_ref, to_level=-1)],
+            insertions=[],
+        )
+
+        updated = doc.texts[int(header.self_ref.split("/")[-1])]
+        assert isinstance(updated, TextItem)
+        assert not isinstance(updated, SectionHeaderItem)
+        assert updated.label == DocItemLabel.TEXT
+        assert updated.text == "Appendix note"
+
+    def test_converts_section_header_to_title_item(self):
+        doc = DoclingDocument(name="test")
+        header = doc.add_heading(text="My document", level=1, parent=doc.body)
+
+        self._agent()._update_section_heading_level(
+            task="",
+            document=doc,
+            changes=[SectionHeadingLevelChange(ref=header.self_ref, to_level=0)],
+            insertions=[],
+        )
+
+        updated = doc.texts[int(header.self_ref.split("/")[-1])]
+        assert isinstance(updated, TitleItem)
+        assert updated.text == "My document"
+
+    def test_rejects_second_title_item(self):
+        doc = DoclingDocument(name="test")
+        doc.add_title(text="Existing title", parent=doc.body)
+        header = doc.add_heading(text="Another title", level=1, parent=doc.body)
+
+        with pytest.raises(ValueError, match="already contains"):
+            self._agent()._update_section_heading_level(
+                task="",
+                document=doc,
+                changes=[SectionHeadingLevelChange(ref=header.self_ref, to_level=0)],
+                insertions=[],
+            )
+
+    def test_inserts_missing_section_header_by_regex(self):
+        doc = DoclingDocument(name="test")
+        previous = doc.add_heading(text="9.1 Alpha", level=2, parent=doc.body)
+        candidate = doc.add_text(label=DocItemLabel.TEXT, text="9.3 Gamma", parent=doc.body)
+        next_header = doc.add_heading(text="9.4 Delta", level=2, parent=doc.body)
+
+        self._agent()._update_section_heading_level(
+            task="",
+            document=doc,
+            changes=[],
+            insertions=[
+                MissingSectionHeadingInsertion(
+                    previous_ref=previous.self_ref,
+                    next_ref=next_header.self_ref,
+                    regex=r"^9\.3\s+.+$",
+                    level=2,
+                )
+            ],
+        )
+
+        updated = doc.texts[int(candidate.self_ref.split("/")[-1])]
+        assert isinstance(updated, SectionHeaderItem)
+        assert updated.level == 2
+        assert updated.text == "9.3 Gamma"

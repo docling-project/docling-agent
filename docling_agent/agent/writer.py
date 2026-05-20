@@ -1,43 +1,49 @@
+import json
 import re
 from pathlib import Path
 from re import Pattern
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import (
     BaseMeta,
+    CodeLanguageLabel,
+    CodeMetaField,
     DocItemLabel,
     DoclingDocument,
     GroupItem,
     GroupLabel,
     ListItem,
     NodeItem,
+    PictureClassificationMetaField,
+    PictureClassificationPrediction,
     PictureItem,
+    PictureMeta,
     SectionHeaderItem,
     SummaryMetaField,
     TableData,
     TableItem,
+    TabularChartMetaField,
     TextItem,
     TitleItem,
 )
-from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
+    collect_subtree_text,
     convert_html_to_docling_document,
     convert_markdown_to_docling_document,
     find_markdown_code_block,
     has_html_code_block,
     has_markdown_code_block,
+    make_hierarchical_document,
     serialize_table_to_html,
     validate_html_to_docling_document,
     validate_markdown_to_docling_document,
 )
-from docling_agent.agent_models import setup_local_session
 from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
@@ -70,11 +76,33 @@ class DoclingWritingAgent(BaseDoclingAgent):
     )
     _OUTLINE_LINE_PATTERN: ClassVar[Pattern[str]] = re.compile(rf"^({'|'.join(_OUTLINE_KINDS)}):\s(.*)\.$")
     _outline_descriptions: ClassVar[list[str]] = [f"{k}:" for k in _OUTLINE_KINDS]
+    _PICTURE_CLASS_NAMES: ClassVar[tuple[str, ...]] = (
+        "bar-chart",
+        "line-chart",
+        "pie-chart",
+        "scatter-chart",
+        "spider-chart",
+        "flowchart",
+        "diagram",
+        "schematic",
+        "illustration",
+        "photo",
+        "table-image",
+        "other",
+    )
+    _SUPPORTED_CHART_TYPES: ClassVar[frozenset[str]] = frozenset(
+        {"bar-chart", "line-chart", "pie-chart", "scatter-chart", "spider-chart"}
+    )
 
-    def __init__(self, *, model_id: ModelIdentifier, tools: list):
+    def __init__(
+        self,
+        *,
+        tools: list,
+        backend=None,
+    ):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_WRITER,
-            model_id=model_id,
+            backend=backend or self.default_backend(),
             tools=tools,
         )
 
@@ -105,10 +133,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         return
 
     def _make_outline_for_writing(self, *, task: str, loop_budget: int = 5) -> DoclingDocument:
-        m = setup_local_session(
-            model_id=self.get_reasoning_model_id(),
-            system_prompt=self.system_prompt_for_outline,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_outline)
 
         answer = m.instruct(
             f"{task}",
@@ -123,16 +148,73 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(DoclingWritingAgent._validate_outline_format),
                 ),
             ],
-            # user_variables={"name": name, "notes": notes},
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        outline = self._find_outline(text=answer.value, task=task)
+        outline = self._find_outline(text=answer, task=task)
 
         if outline is None:
             raise ValueError("Failed to generate a valid outline document.")
 
+        outline = make_hierarchical_document(outline)
+        self._summarize_outline_sections(outline=outline, loop_budget=loop_budget)
+
         return outline
+
+    def _summarize_outline_sections(self, *, outline: DoclingDocument, loop_budget: int = 5) -> None:
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_expert_writer)
+
+        for item, _ in outline.iterate_items(with_groups=True):
+            if not isinstance(item, TitleItem | SectionHeaderItem):
+                continue
+
+            section_text = collect_subtree_text(item, outline).strip()
+            if len(section_text) < 40:
+                continue
+
+            summary = self._generate_section_summary(
+                m=m,
+                title=item.text,
+                text=section_text,
+                loop_budget=loop_budget,
+            )
+            if not summary:
+                continue
+
+            if item.meta is None:
+                item.meta = BaseMeta()
+            item.meta.summary = self._summary_meta(summary)
+
+    def _generate_section_summary(
+        self,
+        *,
+        m,
+        title: str,
+        text: str,
+        loop_budget: int = 5,
+    ) -> str | None:
+        def _validate_summary(content: str) -> bool:
+            sentences = [s.strip() for s in content.split(".") if s.strip()]
+            return 2 <= len(sentences) <= 6
+
+        answer = m.instruct(
+            (
+                f"Section title: {title}\n\n"
+                "Below is the content and outline context for this section. "
+                "Write a clear section summary in 3 to 6 sentences. "
+                "Return only plain text with no markdown formatting.\n\n"
+                f"{text}"
+            ),
+            requirements=[
+                Requirement(
+                    description="Return a plain-text section summary in 3 to 6 sentences.",
+                    validation_fn=simple_validate(_validate_summary),
+                ),
+            ],
+            retry_budget=loop_budget,
+        )
+
+        return answer.strip() or None
 
     @staticmethod
     def _validate_outline_format(content: str) -> bool:
@@ -280,6 +362,12 @@ class DoclingWritingAgent(BaseDoclingAgent):
     def _ordered_hierarchy(self, headers: dict[int, str]) -> dict[int, str]:
         return {lvl: headers[lvl] for lvl in sorted(headers.keys())}
 
+    def _summary_meta(self, summary: str) -> SummaryMetaField:
+        return SummaryMetaField(
+            text=summary,
+            created_by=self._metadata_origin(),
+        )
+
     def _summary_for(self, *, node: NodeItem) -> str | None:
         if node.meta and node.meta.summary and node.meta.summary.text:
             return node.meta.summary.text
@@ -306,7 +394,12 @@ class DoclingWritingAgent(BaseDoclingAgent):
             logger.warning(f"Unsupported content kind: {kind}")
             return
 
-        self._update_document_with_content(document=document, content=content)
+        self._update_document_with_content(
+            document=document,
+            content=content,
+            summary=summary,
+            summary_scope=kind,
+        )
 
     def _update_headers(self, *, item: SectionHeaderItem, headers: dict[int, str]) -> dict[int, str]:
         for k in [k for k in list(headers.keys()) if k > item.level]:
@@ -324,12 +417,16 @@ class DoclingWritingAgent(BaseDoclingAgent):
     ) -> dict[int, str]:
         if isinstance(item, TitleItem):
             headers[0] = item.text
-            document.add_title(text=item.text)
+            title = document.add_title(text=item.text)
+            if item.meta and item.meta.summary and item.meta.summary.text:
+                title.meta = BaseMeta(summary=self._summary_meta(item.meta.summary.text))
 
         elif isinstance(item, SectionHeaderItem):
             logger.info(f"starting in {item.text}")
             headers = self._update_headers(item=item, headers=headers)
-            document.add_heading(text=item.text, level=item.level)
+            heading = document.add_heading(text=item.text, level=item.level)
+            if item.meta and item.meta.summary and item.meta.summary.text:
+                heading.meta = BaseMeta(summary=self._summary_meta(item.meta.summary.text))
 
         elif isinstance(item, TextItem):
             if item.label == DocItemLabel.CAPTION:
@@ -366,7 +463,12 @@ class DoclingWritingAgent(BaseDoclingAgent):
             if summary:
                 logger.info("writing a picture")
                 caption = document.add_text(label=DocItemLabel.CAPTION, text=summary)
-                document.add_picture(caption=caption)
+                picture = document.add_picture(caption=caption)
+                picture.meta = self._generate_picture_meta(
+                    summary=summary,
+                    hierarchy=headers,
+                    loop_budget=loop_budget,
+                )
             else:
                 logger.warning("Skipping picture without summary")
 
@@ -392,8 +494,16 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
         return headers
 
-    def _update_document_with_content(self, *, document: DoclingDocument, content: DoclingDocument) -> DoclingDocument:
+    def _update_document_with_content(
+        self,
+        *,
+        document: DoclingDocument,
+        content: DoclingDocument,
+        summary: str | None = None,
+        summary_scope: str | None = None,
+    ) -> DoclingDocument:
         to_item: dict[str, NodeItem] = {}
+        list_summary_assigned = False
 
         for item, level in content.iterate_items(with_groups=True):
             if isinstance(item, GroupItem) and item.self_ref == "#/body":
@@ -405,9 +515,25 @@ class DoclingWritingAgent(BaseDoclingAgent):
                         label=item.label,
                         parent=to_item[item.parent.cref],
                     )
+                    if (
+                        summary
+                        and summary_scope == "list"
+                        and item.label == GroupLabel.LIST
+                        and not list_summary_assigned
+                    ):
+                        g.meta = BaseMeta(summary=self._summary_meta(summary))
+                        list_summary_assigned = True
                     to_item[item.self_ref] = g
                 else:
                     g = document.add_group(name=item.name, label=item.label, parent=None)
+                    if (
+                        summary
+                        and summary_scope == "list"
+                        and item.label == GroupLabel.LIST
+                        and not list_summary_assigned
+                    ):
+                        g.meta = BaseMeta(summary=self._summary_meta(summary))
+                        list_summary_assigned = True
                     to_item[item.self_ref] = g
 
             elif isinstance(item, ListItem):
@@ -429,6 +555,8 @@ class DoclingWritingAgent(BaseDoclingAgent):
                         formatting=item.formatting,
                         parent=to_item[item.parent.cref],
                     )
+                    if summary and summary_scope == "paragraph" and item.label != DocItemLabel.CAPTION:
+                        te.meta = BaseMeta(summary=self._summary_meta(summary))
                     to_item[item.self_ref] = te
                 else:
                     logger.debug(f"Skipping TextItem without known parent: {item}")
@@ -454,6 +582,8 @@ class DoclingWritingAgent(BaseDoclingAgent):
                         caption=caption,
                         parent=to_item[item.parent.cref],
                     )
+                    if summary and summary_scope == "table":
+                        te.meta = BaseMeta(summary=self._summary_meta(summary))
                     to_item[item.self_ref] = te
                 else:
                     continue
@@ -471,10 +601,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         to the table.
         """
         try:
-            m = setup_local_session(
-                model_id=self.get_writing_model_id(),
-                system_prompt=self.system_prompt_expert_table_writer,
-            )
+            m = self._create_writing_session(system_prompt=self.system_prompt_expert_table_writer)
 
             context = ""
             if table_html:
@@ -490,16 +617,287 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
             answer = m.instruct(
                 f"{context}{prompt}",
-                strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+                retry_budget=loop_budget,
             )
 
-            caption = answer.value.strip()
+            caption = answer.strip()
             # Strip accidental code fences/backticks and condense whitespace
             caption = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", caption, flags=re.DOTALL).strip()
             caption = re.sub(r"\s+", " ", caption)
             return caption if caption else ""
         except Exception:
             return ""
+
+    def _metadata_origin(self) -> str:
+        return f"docling-agent:{self.backend.backend_type}:{self.get_writing_model_id()}"
+
+    def _generate_picture_meta(
+        self,
+        *,
+        summary: str,
+        hierarchy: dict[int, str],
+        loop_budget: int,
+    ) -> PictureMeta:
+        meta = PictureMeta(
+            summary=SummaryMetaField(
+                text=summary,
+                created_by=self._metadata_origin(),
+            )
+        )
+        context = self._picture_context(summary=summary, hierarchy=hierarchy)
+
+        classification = self._classify_picture_context(text=context, loop_budget=loop_budget)
+        if classification is not None:
+            meta.classification = classification
+
+        chart_type = self._primary_chart_type(classification)
+        chart_meta: TabularChartMetaField | None = None
+        if chart_type is not None:
+            chart_meta = self._extract_tabular_chart(text=context, chart_type=chart_type, loop_budget=loop_budget)
+            if chart_meta is not None:
+                meta.tabular_chart = chart_meta
+
+        code_meta = self._generate_picture_code(
+            text=context,
+            classification=classification,
+            chart_meta=chart_meta,
+            loop_budget=loop_budget,
+        )
+        if code_meta is not None:
+            meta.code = code_meta
+
+        return meta
+
+    def _picture_context(self, *, summary: str, hierarchy: dict[int, str]) -> str:
+        headers = []
+        for level, header in sorted(hierarchy.items()):
+            headers.append("#" * (level + 1) + " " + header)
+
+        parts = []
+        if headers:
+            parts.append("Document context:\n" + "\n".join(headers))
+        parts.append(f"Picture summary: {summary}")
+        return "\n\n".join(parts)
+
+    def _classify_picture_context(
+        self,
+        *,
+        text: str,
+        loop_budget: int,
+    ) -> PictureClassificationMetaField | None:
+        def _validate(content: str) -> bool:
+            payload = self._extract_single_json_dict(content)
+            if payload is None:
+                return False
+            predictions = payload.get("predictions")
+            return isinstance(predictions, list) and all(
+                isinstance(label, str) and label in self._PICTURE_CLASS_NAMES for label in predictions
+            )
+
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
+        answer = m.instruct(
+            (
+                "Classify the picture described below.\n\n"
+                f"{text}\n\n"
+                "Return a JSON object in a ```json``` block with the form:\n"
+                '{"predictions": ["<class-name>", "..."]}\n'
+                "Choose one to three labels from this closed set only:\n" + ", ".join(self._PICTURE_CLASS_NAMES)
+            ),
+            requirements=[
+                Requirement(
+                    description="Return a valid picture-classification JSON object in a ```json``` block.",
+                    validation_fn=simple_validate(_validate),
+                ),
+            ],
+            retry_budget=loop_budget,
+        )
+
+        payload = self._extract_single_json_dict(answer)
+        if payload is None:
+            return None
+
+        labels = payload.get("predictions")
+        if not isinstance(labels, list):
+            return None
+
+        deduped = [label for label in dict.fromkeys(labels) if isinstance(label, str)]
+        if not deduped:
+            return None
+
+        return PictureClassificationMetaField(
+            predictions=[
+                PictureClassificationPrediction(class_name=label, created_by=self._metadata_origin())
+                for label in deduped
+            ]
+        )
+
+    def _primary_chart_type(self, classification: PictureClassificationMetaField | None) -> str | None:
+        if classification is None:
+            return None
+
+        for prediction in classification.predictions:
+            if prediction.class_name in self._SUPPORTED_CHART_TYPES:
+                return prediction.class_name
+        return None
+
+    def _extract_tabular_chart(
+        self,
+        *,
+        text: str,
+        chart_type: str,
+        loop_budget: int,
+    ) -> TabularChartMetaField | None:
+        def _validate(content: str) -> bool:
+            payload = self._extract_single_json_dict(content)
+            return self._is_valid_chart_payload(payload)
+
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
+        answer = m.instruct(
+            (
+                f"The described picture is classified as a {chart_type}.\n\n"
+                f"{text}\n\n"
+                "Extract its chart data and return a JSON object in a ```json``` block with the form:\n"
+                "{"
+                '"title": "<chart title or null>", '
+                '"columns": ["<column-1>", "<column-2>", "..."], '
+                '"rows": [["<value>", "<value>", "..."], ["<value>", "<value>", "..."]]'
+                "}"
+            ),
+            requirements=[
+                Requirement(
+                    description="Return valid chart-data JSON with title, columns, and rows.",
+                    validation_fn=simple_validate(_validate),
+                ),
+            ],
+            retry_budget=loop_budget,
+        )
+
+        payload = self._extract_single_json_dict(answer)
+        if not self._is_valid_chart_payload(payload):
+            return None
+
+        payload_dict = cast(dict[str, object], payload)
+        columns = cast(list[str], payload_dict["columns"])
+        rows = cast(list[list[str | int | float]], payload_dict["rows"])
+        title = payload_dict.get("title")
+
+        return TabularChartMetaField(
+            title=title if isinstance(title, str) else None,
+            chart_data=self._table_data_from_rows(columns=columns, rows=rows),
+            created_by=self._metadata_origin(),
+        )
+
+    def _generate_picture_code(
+        self,
+        *,
+        text: str,
+        classification: PictureClassificationMetaField | None,
+        chart_meta: TabularChartMetaField | None,
+        loop_budget: int,
+    ) -> CodeMetaField | None:
+        def _validate(content: str) -> bool:
+            return self._extract_python_code_block(content) is not None
+
+        labels = ", ".join(pred.class_name for pred in classification.predictions) if classification else "unknown"
+        chart_payload = ""
+        if chart_meta is not None:
+            chart_payload = f"\n\nChart data:\n```json\n{chart_meta.chart_data.model_dump_json(indent=2)}\n```"
+
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
+        answer = m.instruct(
+            (
+                "Write Python code that recreates the described picture as closely as possible. "
+                "Prefer matplotlib. Return only a ```python``` code block.\n\n"
+                f"Picture classes: {labels}\n\n"
+                f"Picture description:\n{text}"
+                f"{chart_payload}"
+            ),
+            requirements=[
+                Requirement(
+                    description="Return only a Python code block fenced with ```python```.",
+                    validation_fn=simple_validate(_validate),
+                ),
+            ],
+            retry_budget=loop_budget,
+        )
+
+        code = self._extract_python_code_block(answer)
+        if code is None:
+            return None
+
+        return CodeMetaField(
+            text=code,
+            language=CodeLanguageLabel("Python"),
+            created_by=self._metadata_origin(),
+        )
+
+    def _extract_single_json_dict(self, text: str) -> dict[str, object] | None:
+        match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+        if not match:
+            return None
+        try:
+            payload = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _extract_python_code_block(self, text: str) -> str | None:
+        match = re.search(r"```python\s*(.*?)\s*```", text, re.DOTALL)
+        if not match:
+            return None
+        code = match.group(1).strip()
+        return code or None
+
+    def _is_valid_chart_payload(self, payload: dict[str, object] | None) -> bool:
+        if payload is None:
+            return False
+        columns = payload.get("columns")
+        rows = payload.get("rows")
+        if not isinstance(columns, list) or len(columns) < 2 or not all(isinstance(col, str) for col in columns):
+            return False
+        if not isinstance(rows, list) or not rows:
+            return False
+        return all(
+            isinstance(row, list)
+            and len(row) == len(columns)
+            and all(isinstance(value, (str, int, float)) for value in row)
+            for row in rows
+        )
+
+    def _table_data_from_rows(self, *, columns: list[str], rows: list[list[str | int | float]]) -> TableData:
+        table_cells: list[dict[str, object]] = []
+
+        for col_idx, value in enumerate(columns):
+            table_cells.append(
+                {
+                    "start_row_offset_idx": 0,
+                    "end_row_offset_idx": 1,
+                    "start_col_offset_idx": col_idx,
+                    "end_col_offset_idx": col_idx + 1,
+                    "text": value,
+                    "column_header": True,
+                }
+            )
+
+        for row_idx, row in enumerate(rows, start=1):
+            for col_idx, cell_value in enumerate(row):
+                table_cells.append(
+                    {
+                        "start_row_offset_idx": row_idx,
+                        "end_row_offset_idx": row_idx + 1,
+                        "start_col_offset_idx": col_idx,
+                        "end_col_offset_idx": col_idx + 1,
+                        "text": str(cell_value),
+                    }
+                )
+
+        return TableData.model_validate(
+            {
+                "table_cells": table_cells,
+                "num_rows": len(rows) + 1,
+                "num_cols": len(columns),
+            }
+        )
 
     def _write_paragraph(
         self,
@@ -516,10 +914,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         if len(context) > 0:
             context = rf"Given the current context in the document:\n\n```markdown\n{context}```\n\n"
 
-        m = setup_local_session(
-            model_id=self.get_writing_model_id(),
-            system_prompt=self.system_prompt_expert_writer,
-        )
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
 
         prompt = f"{context}Write me a single paragraph that expands the following summary: {summary}"
         # logger.info(f"prompt: {prompt}")
@@ -532,10 +927,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(validate_markdown_to_docling_document),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        result = convert_markdown_to_docling_document(text=answer.value)
+        result = convert_markdown_to_docling_document(text=answer)
         return result if result is not None else DoclingDocument(name="content")
 
     def _write_table(
@@ -550,11 +945,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         for level, header in hierarchy.items():
             context += "#" * (level + 1) + header + "\n"
 
-        m = setup_local_session(
-            # model_id=self.model_id,
-            model_id=self.get_writing_model_id(),
-            system_prompt=self.system_prompt_expert_writer,
-        )
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
 
         prompt = f"Given the current context in the document:\n\n```{context}```\n\nwrite me a single HTML table that expands the following summary: {summary}"
         # logger.info(f"prompt: {prompt}")
@@ -571,10 +962,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(validate_html_to_docling_document),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        result = convert_html_to_docling_document(text=answer.value)
+        result = convert_html_to_docling_document(text=answer)
 
         return result if result is not None else DoclingDocument(name="content")
 
@@ -590,11 +981,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         for level, header in hierarchy.items():
             context += "#" * (level + 1) + header + "\n"
 
-        m = setup_local_session(
-            # model_id=self.model_id,
-            model_id=self.get_writing_model_id(),
-            system_prompt=self.system_prompt_expert_writer,
-        )
+        m = self._create_writing_session(system_prompt=self.system_prompt_expert_writer)
 
         prompt = f"Given the current context in the document:\n\n```{context}```\n\nwrite me a list (can be nested) in markdown that expands the following summary: {summary}"
         # logger.info(f"prompt: {prompt}")
@@ -607,9 +994,9 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(validate_markdown_to_docling_document),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
 
-        result = convert_markdown_to_docling_document(text=answer.value)
+        result = convert_markdown_to_docling_document(text=answer)
 
         return result if result is not None else DoclingDocument(name="content")

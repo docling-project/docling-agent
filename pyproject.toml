@@ -36,7 +36,7 @@ classifiers = [
 requires-python = ">=3.10,<4.0"
 dependencies = [
     "docling>=2.61.0",
-    "docling-core>=2.70.2",
+    "docling-core>=2.77.0",
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
     "typer>=0.12.5",
@@ -98,7 +98,8 @@ target-version = "py310"
 line-length = 120
 respect-gitignore = true
 exclude = [
-    "tests/data/**"
+    "tests/data/**",
+    "_reference/**",
 ]
 
 [tool.ruff.format]

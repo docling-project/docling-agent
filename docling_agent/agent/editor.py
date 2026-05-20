@@ -1,21 +1,22 @@
+import re
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 
 from docling_core.experimental.serializer.outline import OutlineFormat
 from docling_core.types.base import _JSON_POINTER_REGEX
 from docling_core.types.doc.document import (
+    DocItemLabel,
     DoclingDocument,
     RefItem,
     SectionHeaderItem,
     TableItem,
     TextItem,
+    TitleItem,
 )
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
-from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
@@ -30,7 +31,7 @@ from docling_agent.agent.base_functions import (
     serialize_table_to_html,
     validate_html_to_docling_table,
 )
-from docling_agent.agent_models import setup_local_session, view_linear_context
+from docling_agent.agent_models import view_linear_context
 from docling_agent.logging import logger
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
@@ -60,7 +61,16 @@ class SectionHeadingLevelChange(BaseModel):
     """A single section heading level change."""
 
     ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
-    to_level: Annotated[int, Field(ge=0)]
+    to_level: Annotated[int, Field(ge=-1)]
+
+
+class MissingSectionHeadingInsertion(BaseModel):
+    """Insert a missing section heading inferred between two existing headings."""
+
+    previous_ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
+    next_ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
+    regex: str
+    level: Annotated[int, Field(ge=1)]
 
 
 class UpdateSectionHeadingLevelOperation(BaseModel):
@@ -68,6 +78,7 @@ class UpdateSectionHeadingLevelOperation(BaseModel):
 
     operation: Literal["update_section_heading_level"]
     changes: list[SectionHeadingLevelChange]
+    insertions: list[MissingSectionHeadingInsertion] = Field(default_factory=list)
 
 
 DocumentOperation = Annotated[
@@ -82,10 +93,15 @@ class DoclingEditingAgent(BaseDoclingAgent):
 
     system_prompt_expert_writer: ClassVar[str] = SYSTEM_PROMPT_EXPERT_WRITER
 
-    def __init__(self, *, model_id: ModelIdentifier, tools: list):
+    def __init__(
+        self,
+        *,
+        tools: list,
+        backend=None,
+    ):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_EDITOR,
-            model_id=model_id,
+            backend=backend or self.default_backend(),
             tools=tools,
         )
 
@@ -111,7 +127,12 @@ class DoclingEditingAgent(BaseDoclingAgent):
                 refs=op.refs,
             )
         elif isinstance(op, UpdateSectionHeadingLevelOperation):
-            self._update_section_heading_level(task=task, document=document, changes=op.changes)
+            self._update_section_heading_level(
+                task=task,
+                document=document,
+                changes=op.changes,
+                insertions=op.insertions,
+            )
         else:
             message = f"Could not execute operation: {op}"
             logger.info(message)
@@ -153,21 +174,24 @@ For heading level tasks specifically:
     - Determine the correct level for each section based on its position in the document hierarchy
     - Remember: sibling sections should have the same level, child sections should be one level deeper than their parent
     - Include ALL section_header items that need level adjustments in your changes list
+    - Use `to_level = -1` if a section_header is actually body text and should become a TextItem
+    - Use `to_level = 0` if a section_header is actually the document title and should become a TitleItem
+    - There can be at most one TitleItem in the final document
+    - If a section heading is missing between 2 existing section headers, provide an `insertions` entry with
+      `previous_ref`, `next_ref`, `regex`, and `level`
 
 IMPORTANT: You must return EXACTLY ONE operation in a ```json...``` block with 1 JSON object containing the fields:
     - "operation" (not "action") set to one of: update_content, rewrite_content, update_section_heading_level
     - "ref", "refs", or "changes", depending on the operation
-    - For update_section_heading_level: provide a complete "changes" list with all sections that need adjustment.
+    - For update_section_heading_level: provide a complete "changes" list and, when needed, an "insertions" list
 
 Now, provide me with the operation to execute the task using the exact field names specified above!
 """
 
         prompt = f"{context}{identification}"
+        logger.info(f"prompt: {prompt}")
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_for_editing_document,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_document)
 
         def _validate_operation_format(content: str) -> bool:
             """Validate that the response contains a valid operation JSON with correct field names."""
@@ -192,19 +216,19 @@ Now, provide me with the operation to execute the task using the exact field nam
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
             requirements=[
                 Requirement(
                     description='Return exactly one JSON object in ```json...``` format with an "operation" field',
                     validation_fn=simple_validate(_validate_operation_format),
                 ),
             ],
+            retry_budget=loop_budget,
         )
-        logger.info(f"answer: {answer.value}")
+        logger.info(f"answer: {answer}")
 
         view_linear_context(m)
 
-        ops: list[dict] = find_json_dicts(text=answer.value)
+        ops: list[dict] = find_json_dicts(text=answer)
 
         if len(ops) == 0:
             raise ValueError("No operation is detected")
@@ -250,16 +274,12 @@ Now, provide me with the operation to execute the task using the exact field nam
 
 Execute the following task: {task}
 """
-        # logger.info(f"prompt: {prompt}")
+        logger.info(f"prompt: {prompt}")
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_for_editing_table,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_table)
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
             requirements=[
                 Requirement(
                     description="Put the resulting HTML table in the format ```html <insert-content>```",
@@ -270,11 +290,12 @@ Execute the following task: {task}
                     validation_fn=simple_validate(validate_html_to_docling_table),
                 ),
             ],
+            retry_budget=loop_budget,
         )
 
-        logger.info(f"response: {answer.value}")
+        logger.info(f"response: {answer}")
 
-        new_tables = convert_html_to_docling_table(text=answer.value)
+        new_tables = convert_html_to_docling_table(text=answer)
 
         if new_tables and len(new_tables) == 1:
             table.data = new_tables[0].data
@@ -301,20 +322,17 @@ Execute the following task: {task}
 
 Execute the following task: {task}
 """
-        # logger.info(f"prompt: {prompt}")
+        logger.info(f"prompt: {prompt}")
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_for_editing_table,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_table)
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
-        # logger.info(f"response: {answer.value}")
+        logger.info(f"response: {answer}")
 
-        updated_doc = convert_markdown_to_docling_document(text=answer.value)
+        updated_doc = convert_markdown_to_docling_document(text=answer)
         if updated_doc is None:
             logger.warning("No valid document produced for updated content.")
             return
@@ -322,16 +340,180 @@ Execute the following task: {task}
         document = insert_document(item=item, doc=document, updated_doc=updated_doc)
 
     def _update_section_heading_level(
-        self, task: str, document: DoclingDocument, changes: list[SectionHeadingLevelChange]
+        self,
+        task: str,
+        document: DoclingDocument,
+        changes: list[SectionHeadingLevelChange],
+        insertions: list[MissingSectionHeadingInsertion],
     ):
         for change in changes:
-            ref = RefItem(cref=change.ref)
-            item = ref.resolve(document)
+            self._apply_section_heading_change(document=document, change=change)
 
-            if isinstance(item, SectionHeaderItem):
-                item.level = change.to_level
-            else:
-                logger.warning(f"{change.ref} is not SectionHeaderItem (got {type(item).__name__})")
+        for insertion in insertions:
+            self._insert_missing_section_header(document=document, insertion=insertion)
+
+    def _apply_section_heading_change(
+        self,
+        *,
+        document: DoclingDocument,
+        change: SectionHeadingLevelChange,
+    ) -> None:
+        item = RefItem(cref=change.ref).resolve(document)
+
+        if not isinstance(item, SectionHeaderItem):
+            logger.warning(f"{change.ref} is not SectionHeaderItem (got {type(item).__name__})")
+            return
+
+        if change.to_level == -1:
+            self._convert_section_header_to_text_item(document=document, item=item)
+            return
+
+        if change.to_level == 0:
+            self._convert_section_header_to_title_item(document=document, item=item)
+            return
+
+        item.level = change.to_level
+
+    def _convert_section_header_to_text_item(
+        self,
+        *,
+        document: DoclingDocument,
+        item: SectionHeaderItem,
+    ) -> None:
+        replacement = TextItem(
+            self_ref=item.self_ref,
+            parent=item.parent,
+            children=list(item.children),
+            content_layer=item.content_layer,
+            meta=item.meta,
+            label=DocItemLabel.TEXT,
+            prov=list(item.prov),
+            source=list(item.source),
+            comments=list(item.comments),
+            orig=item.orig,
+            text=item.text,
+            formatting=item.formatting,
+            hyperlink=item.hyperlink,
+        )
+        self._replace_text_item_in_place(document=document, old_item=item, new_item=replacement)
+
+    def _convert_section_header_to_title_item(
+        self,
+        *,
+        document: DoclingDocument,
+        item: SectionHeaderItem,
+    ) -> None:
+        existing_titles = [
+            candidate
+            for candidate in document.texts
+            if isinstance(candidate, TitleItem) and candidate.self_ref != item.self_ref
+        ]
+        if existing_titles:
+            raise ValueError(
+                f"Cannot convert {item.self_ref} to TitleItem because the document already contains "
+                f"{existing_titles[0].self_ref}."
+            )
+
+        replacement = TitleItem(
+            self_ref=item.self_ref,
+            parent=item.parent,
+            children=list(item.children),
+            content_layer=item.content_layer,
+            meta=item.meta,
+            prov=list(item.prov),
+            source=list(item.source),
+            comments=list(item.comments),
+            orig=item.orig,
+            text=item.text,
+            formatting=item.formatting,
+            hyperlink=item.hyperlink,
+        )
+        self._replace_text_item_in_place(document=document, old_item=item, new_item=replacement)
+
+    def _replace_text_item_in_place(
+        self,
+        *,
+        document: DoclingDocument,
+        old_item: TextItem,
+        new_item: TextItem,
+    ) -> None:
+        try:
+            index = int(old_item.self_ref.split("/")[-1])
+        except (IndexError, ValueError) as exc:
+            raise ValueError(f"Cannot determine text index from ref: {old_item.self_ref}") from exc
+
+        if index < 0 or index >= len(document.texts):
+            raise ValueError(f"Text index out of bounds for ref: {old_item.self_ref}")
+
+        document.texts[index] = new_item
+
+    def _insert_missing_section_header(
+        self,
+        *,
+        document: DoclingDocument,
+        insertion: MissingSectionHeadingInsertion,
+    ) -> None:
+        candidate = self._find_matching_text_item_between_refs(document=document, insertion=insertion)
+        if candidate is None:
+            logger.warning(
+                f"No matching TextItem found between {insertion.previous_ref} and {insertion.next_ref} "
+                f"for regex {insertion.regex!r}"
+            )
+            return
+
+        replacement = SectionHeaderItem(
+            self_ref=candidate.self_ref,
+            parent=candidate.parent,
+            children=list(candidate.children),
+            content_layer=candidate.content_layer,
+            meta=candidate.meta,
+            prov=list(candidate.prov),
+            source=list(candidate.source),
+            comments=list(candidate.comments),
+            orig=candidate.orig,
+            text=candidate.text,
+            formatting=candidate.formatting,
+            hyperlink=candidate.hyperlink,
+            level=insertion.level,
+        )
+        self._replace_text_item_in_place(document=document, old_item=candidate, new_item=replacement)
+
+    def _find_matching_text_item_between_refs(
+        self,
+        *,
+        document: DoclingDocument,
+        insertion: MissingSectionHeadingInsertion,
+    ) -> TextItem | None:
+        ordered_items = [item for item, _ in document.iterate_items(with_groups=True)]
+        refs = [item.self_ref for item in ordered_items]
+
+        try:
+            previous_index = refs.index(insertion.previous_ref)
+            next_index = refs.index(insertion.next_ref)
+        except ValueError:
+            logger.warning(f"Could not locate insertion boundaries: {insertion.previous_ref} .. {insertion.next_ref}")
+            return None
+
+        if previous_index >= next_index:
+            logger.warning(f"Invalid insertion boundaries: {insertion.previous_ref} is not before {insertion.next_ref}")
+            return None
+
+        pattern = re.compile(insertion.regex)
+        matches = [
+            item
+            for item in ordered_items[previous_index + 1 : next_index]
+            if isinstance(item, TextItem)
+            and not isinstance(item, SectionHeaderItem | TitleItem)
+            and pattern.search(item.text)
+        ]
+
+        if len(matches) > 1:
+            logger.warning(
+                f"Found multiple matching TextItems for regex {insertion.regex!r} between "
+                f"{insertion.previous_ref} and {insertion.next_ref}; using {matches[0].self_ref}"
+            )
+
+        return matches[0] if matches else None
 
     def _rewrite_content(
         self,
@@ -361,18 +543,15 @@ Execute the following task: {task}
 """
         logger.info(f"prompt: {prompt}")
 
-        m = setup_local_session(
-            model_id=self.model_id,
-            system_prompt=self.system_prompt_expert_writer,
-        )
+        m = self._create_reasoning_session(system_prompt=self.system_prompt_expert_writer)
 
         answer = m.instruct(
             prompt,
-            strategy=RejectionSamplingStrategy(loop_budget=loop_budget),
+            retry_budget=loop_budget,
         )
-        logger.info(f"response: {answer.value}")
+        logger.info(f"response: {answer}")
 
-        updated_doc = convert_markdown_to_docling_document(text=answer.value)
+        updated_doc = convert_markdown_to_docling_document(text=answer)
         if updated_doc is None:
             logger.warning("No valid document produced for rewrite.")
             return

@@ -4,21 +4,28 @@ from pathlib import Path
 from docling_core.types.doc.document import (
     DoclingDocument,
 )
-from mellea.backends import model_ids
 
-from docling_agent.agents import DoclingEditingAgent, logger
+from docling_agent.agents import BackendConfig, DoclingEditingAgent, ModelConfig, create_backend, logger
 
 
 def run_task(
     ipath: Path,
     opath: Path,
     task: str,
-    model_id=model_ids.OPENAI_GPT_OSS_20B,
+    model_name: str = "OPENAI_GPT_OSS_20B",
     tools: list = [],
 ):
     document = DoclingDocument.load_from_json(ipath)
 
-    agent = DoclingEditingAgent(model_id=model_id, tools=tools)
+    agent = DoclingEditingAgent(
+        backend=create_backend(
+            BackendConfig(
+                type="mellea",
+                models=ModelConfig(reasoning=model_name, writing=model_name),
+            )
+        ),
+        tools=tools,
+    )
 
     document = agent.run(task=task, document=document)
     document.save_as_html(filename=opath)
@@ -30,7 +37,7 @@ def main():
     out_dir = Path("scratch/example_02")
     os.makedirs(out_dir, exist_ok=True)
     ipath = Path("examples/data/20250815_125216.json")
-    model_id = model_ids.OPENAI_GPT_OSS_20B
+    model_name = "OPENAI_GPT_OSS_20B"
 
     for task, output in [
         (
@@ -44,7 +51,7 @@ def main():
         ),
         ("Expand the Introduction to three paragraphs.", out_dir / Path(ipath.stem + "_updated_introduction.html")),
     ]:
-        run_task(ipath=ipath, opath=output, task=task, model_id=model_id)
+        run_task(ipath=ipath, opath=output, task=task, model_name=model_name)
 
 
 if __name__ == "__main__":

@@ -18,9 +18,7 @@ from docling_core.types.doc.document import (
     SectionHeaderItem,
     TitleItem,
 )
-from mellea.backends.model_ids import ModelIdentifier
 from mellea.stdlib.requirements import Requirement, simple_validate
-from mellea.stdlib.sampling import RejectionSamplingStrategy
 from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
@@ -39,7 +37,6 @@ from docling_agent.agent.rag_models import (
     RAGResult,
     SectionSelection,
 )
-from docling_agent.agent_models import setup_local_session
 from docling_agent.logging import logger
 
 
@@ -66,14 +63,14 @@ class DoclingRAGAgent(BaseDoclingAgent):
     def __init__(
         self,
         *,
-        model_id: ModelIdentifier,
         tools: list,
+        backend=None,
         max_iterations: int = 5,
         verbose: bool = False,
     ):
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_RAG,
-            model_id=model_id,
+            backend=backend or self.default_backend(),
             tools=tools,
         )
         self.max_iterations = max_iterations
@@ -122,10 +119,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
     # ------------------------------------------------------------------
 
     def _rag_loop(self, *, query: str, doc: DoclingDocument) -> RAGResult:
-        m = setup_local_session(
-            model_id=self.get_reasoning_model_id(),
-            system_prompt=self._RAG_SYSTEM_PROMPT,
-        )
+        m = self._create_reasoning_session(system_prompt=self._RAG_SYSTEM_PROMPT)
 
         visited: set[str] = set()
         iterations: list[RAGIteration] = []
@@ -327,10 +321,10 @@ class DoclingRAGAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(_validate),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=3),
+            retry_budget=3,
         )
 
-        dicts = find_json_dicts(answer.value)
+        dicts = find_json_dicts(answer)
         d = dicts[0] if dicts else {}
         if not isinstance(d.get("reason"), str) or d.get("section_ref") not in unvisited:
             # Rejection sampling exhausted without a valid response; pick first unvisited
@@ -420,10 +414,10 @@ class DoclingRAGAgent(BaseDoclingAgent):
                     validation_fn=simple_validate(_validate),
                 ),
             ],
-            strategy=RejectionSamplingStrategy(loop_budget=3),
+            retry_budget=3,
         )
 
-        d = find_json_dicts(answer.value)[0]
+        d = find_json_dicts(answer)[0]
         return AnswerAttempt(can_answer=d["can_answer"], response=d["response"])
 
     # ------------------------------------------------------------------
@@ -434,16 +428,15 @@ class DoclingRAGAgent(BaseDoclingAgent):
         if len(answers) == 1:
             return answers[0]
 
-        m = setup_local_session(
-            model_id=self.get_writing_model_id(),
+        m = self._create_writing_session(
             system_prompt=(
                 "You are a precise scientific writer. "
                 "Synthesize the provided partial answers into a single coherent response."
-            ),
+            )
         )
         formatted = "\n\n".join(f"[Source {i + 1}]\n{a}" for i, a in enumerate(answers))
         answer = m.instruct(
             f"Query: {query}\n\nPartial answers:\n{formatted}\n\nSynthesize a final answer.",
-            strategy=RejectionSamplingStrategy(loop_budget=3),
+            retry_budget=3,
         )
-        return answer.value.strip()
+        return answer.strip()

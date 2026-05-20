@@ -1,11 +1,25 @@
 import json
+import re
 from pathlib import Path
 
-import pytest
 from docling_core.types.doc.document import DoclingDocument
-from mellea.backends import model_ids
 
+from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
+from docling_agent.backends import create_backend
+from docling_agent.task_model import BackendConfig, ModelConfig
+
+
+def _backend():
+    return create_backend(
+        BackendConfig(
+            type="mellea",
+            models=ModelConfig(
+                reasoning="OPENAI_GPT_OSS_20B",
+                writing="OPENAI_GPT_OSS_20B",
+            ),
+        )
+    )
 
 
 def test_heading_levels_problem_exists():
@@ -57,17 +71,34 @@ def test_heading_levels_problem_exists():
     print("   But '3.4 Extensibility' should have level > 1 since it's a subsection!")
 
 
-@pytest.mark.slow
-def test_fix_heading_levels():
+def test_fix_heading_levels(monkeypatch):
     """Test that _fix_heading_levels correctly adjusts section header levels.
 
     This test shows the before/after state of all section headers in the document.
     The main issue is that subsections (e.g., "3.1", "3.2", "3.4") have the same
     level as their parent section ("3 Processing pipeline").
 
-    Note: This test is marked as 'slow' because it makes LLM calls.
-    Skip with: pytest -m "not slow"
+    The editor call is stubbed so the test stays deterministic and does not
+    depend on a live backend.
     """
+
+    def _fake_editor_run(self, task: str, document: DoclingDocument | None = None, **kwargs):
+        assert document is not None
+
+        for item, _ in document.iterate_items():
+            if not (hasattr(item, "text") and hasattr(item, "level") and item.label == "section_header"):
+                continue
+
+            text = item.text or ""
+            if re.match(r"^\d+\.\d+(?:\.\d+)*\s", text):
+                item.level = 2
+            elif re.match(r"^\d+\s", text):
+                item.level = 1
+
+        return document
+
+    monkeypatch.setattr(DoclingEditingAgent, "run", _fake_editor_run)
+
     # Expected section headers BEFORE fixing (all at level 1 - incorrect!)
     expected_before = [
         ("Docling Technical Report", 1),
@@ -115,10 +146,10 @@ def test_fix_heading_levels():
     assert headers_before == expected_before, "Before state doesn't match expected"
 
     # Call _fix_heading_levels
-    enricher = DoclingEnrichingAgent(model_id=model_ids.OPENAI_GPT_OSS_20B, tools=[])
+    enricher = DoclingEnrichingAgent(backend=_backend(), tools=[])
 
     print("\n" + "=" * 70)
-    print("Calling _fix_heading_levels...")
+    print("Calling _fix_heading_levels with stubbed editor...")
     print("=" * 70)
     enricher._fix_heading_levels(document=document)
 
