@@ -1,3 +1,9 @@
+## [v0.2.0](https://github.com/docling-project/docling-agent/releases/tag/v0.2.0) - 2026-05-20
+
+### Feature
+
+* Add new backends to agent ([#27](https://github.com/docling-project/docling-agent/issues/27)) ([`3ef9f7f`](https://github.com/docling-project/docling-agent/commit/3ef9f7f1b88ba5f2b03992e16bc4743ece381098))
+
 ## [v0.1.0](https://github.com/docling-project/docling-agent/releases/tag/v0.1.0) - 2026-04-10
 
 ### Feature
