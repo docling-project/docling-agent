@@ -2,7 +2,7 @@ import json
 import re
 from pathlib import Path
 
-from docling_core.types.doc.document import DoclingDocument
+from docling_core.types.doc.document import DoclingDocument, EntityMention
 
 from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
@@ -185,6 +185,43 @@ def test_fix_heading_levels(monkeypatch):
     print("\n" + "=" * 70)
     print("✓ Test passed: heading levels were correctly fixed!")
     print("=" * 70)
+
+
+def test_make_entity_mention():
+    """Regression test for _make_entity_mention function."""
+    enricher = DoclingEnrichingAgent(backend=_backend(), tools=[])
+    source_text = "International Business Machines is a technology company based in Armonk."
+
+    # Basic entity mention
+    item = {"text": "International Business Machines"}
+    mention = enricher._make_entity_mention(item=item, source_text=source_text)
+    assert isinstance(mention, EntityMention)
+    assert mention.text == "International Business Machines"
+    assert mention.charspan == (0, 31)
+
+    # Entity with original and label
+    item = {"text": "IBM", "original": "International Business Machines", "label": "ORGANIZATION"}
+    mention = enricher._make_entity_mention(item=item, source_text=source_text)
+    assert mention.text == "IBM"
+    assert mention.orig == "International Business Machines"
+    assert mention.label == "ORGANIZATION"
+    assert mention.charspan == (0, 31)
+
+    # Case-insensitive matching
+    item = {"text": "international business machines"}
+    mention = enricher._make_entity_mention(item=item, source_text=source_text)
+    assert mention.charspan == (0, 31)
+
+    # Entity not found
+    item = {"text": "Red Hat"}
+    mention = enricher._make_entity_mention(item=item, source_text=source_text)
+    assert mention.charspan is None
+
+    # Original takes precedence in search
+    source_abbrev = "The CEO of IBM announced products."
+    item = {"text": "International Business Machines", "original": "IBM"}
+    mention = enricher._make_entity_mention(item=item, source_text=source_abbrev)
+    assert mention.charspan == (11, 14)
 
 
 if __name__ == "__main__":

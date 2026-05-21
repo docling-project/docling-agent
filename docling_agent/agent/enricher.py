@@ -891,7 +891,7 @@ Return no extra commentary. Include all operations that are materially requested
         label = str(item["label"]).strip() if item.get("label") else None
         needle = original or text
         span = self._find_entity_span(source_text=source_text, needle=needle, search_start=search_start)
-        mention = EntityMention(text=text, original=original, label=label, span=span, created_by=created_by)
+        mention = EntityMention(text=text, orig=original, label=label, charspan=span, created_by=created_by)
         logger.info("_generate_entities: mention=%s", mention)
         return mention
 
