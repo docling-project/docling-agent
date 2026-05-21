@@ -78,7 +78,7 @@ class BackendConfig(BaseModel):
     """
 
     type: Annotated[
-        Literal["ollama", "lmstudio", "litellm", "mellea"],
+        Literal["ollama", "lmstudio", "litellm", "mellea", "llama-server"],
         Field(description="Backend type to use for LLM inference."),
     ] = "mellea"
     base_url: Annotated[

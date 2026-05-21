@@ -54,7 +54,7 @@ sources:
 
 # Backend configuration -------------------------------------------------------
 # backend:
-#   type: mellea     # mellea | ollama | lmstudio | litellm
+#   type: mellea     # mellea | ollama | lmstudio | litellm | llama-server
 #   base_url:
 #   timeout:
 #   api_key_env:
