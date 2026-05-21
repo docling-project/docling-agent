@@ -32,14 +32,14 @@ from docling_core.types.doc.document import (
 )
 from docling_core.types.io import DocumentStream
 
-from docling_agent.logging import logger
+from docling_agent.logging import log_debug, log_error, log_info, log_warning
 
 
 def find_crefs(text: str) -> list[RefItem]:
     """
     Check if a string matches the pattern ```markdown(.*)?```
     """
-    logger.info("find_crefs")
+    log_info("find_crefs")
     labels: str = "|".join(e.value for e in DocItemLabel)
     pattern = rf"#/({labels})/\d+"
 
@@ -51,7 +51,7 @@ def find_crefs(text: str) -> list[RefItem]:
 
 
 def has_crefs(text: str) -> bool:
-    logger.info("has_crefs")
+    log_info("has_crefs")
     return len(find_crefs(text)) > 0
 
 
@@ -59,7 +59,7 @@ def has_json_dicts(text: str) -> bool:
     """
     Extract JSON dictionaries from ```json code blocks
     """
-    logger.info("has_json_dicts")
+    log_info("has_json_dicts")
     pattern = r"```json\s*(.*?)\s*```"
     matches = re.findall(pattern, text, re.DOTALL)
 
@@ -68,7 +68,7 @@ def has_json_dicts(text: str) -> bool:
         try:
             calls.append(json.loads(json_content))
         except Exception as e:
-            logger.error("Failed to parse JSON call block: %s", e)
+            log_error("Failed to parse JSON call block: %s", e)
             return False
 
     return len(calls) > 0
@@ -78,7 +78,7 @@ def find_json_dicts(text: str) -> list[dict]:
     """
     Extract JSON dictionaries from ```json code blocks
     """
-    logger.info("find_json_dicts")
+    log_info("find_json_dicts")
     pattern = r"```json\s*(.*?)\s*```"
     matches = re.findall(pattern, text, re.DOTALL)
 
@@ -92,7 +92,7 @@ def find_json_dicts(text: str) -> list[dict]:
             else:
                 calls.append(parsed)
         except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON in match {i}: {e}")
+            log_warning(f"Failed to parse JSON in match {i}: {e}")
 
     return calls
 
@@ -111,7 +111,7 @@ def create_document_outline(
     Returns:
         A text representation of a document outline.
     """
-    logger.debug("create_document_outline")
+    log_debug("create_document_outline")
 
     # Use OutlineDocSerializer with JSON format to get structured data
     params = OutlineParams(
@@ -127,7 +127,7 @@ def create_document_outline(
 
 def serialize_item_to_markdown(item: TextItem, doc: DoclingDocument) -> str:
     """Serialize a text item to markdown format using existing serializer."""
-    logger.info("serialize_item_to_markdown")
+    log_info("serialize_item_to_markdown")
 
     serializer = MarkdownDocSerializer(doc=doc, params=MarkdownParams())
 
@@ -136,7 +136,7 @@ def serialize_item_to_markdown(item: TextItem, doc: DoclingDocument) -> str:
 
 
 def serialize_table_to_html(table: TableItem, doc: DoclingDocument) -> str:
-    logger.info("serialize_table_to_html")
+    log_info("serialize_table_to_html")
     from docling_core.transforms.serializer.html import (
         HTMLDocSerializer,
         HTMLTableSerializer,
@@ -158,7 +158,7 @@ def find_html_code_block(text: str) -> str | None:
     """
     Check if a string matches the pattern ```html(.*)?```
     """
-    logger.info("find_html_code_block")
+    log_info("find_html_code_block")
     pattern = r"```html(.*?)```"
     match = re.search(pattern, text, re.DOTALL)
     return match.group(1) if match else None
@@ -168,7 +168,7 @@ def has_html_code_block(text: str) -> bool:
     """
     Check if a string contains a html code block pattern anywhere in the text
     """
-    logger.info("has_html_code_block")
+    log_info("has_html_code_block")
     return find_html_code_block(text) is not None
 
 
@@ -176,7 +176,7 @@ def find_markdown_code_block(text: str) -> str | None:
     """
     Check if a string matches the pattern ```(md|markdown)(.*)?```
     """
-    logger.info("find_markdown_code_block")
+    log_info("find_markdown_code_block")
     pattern = r"```(md|markdown)(.*?)```"
     match = re.search(pattern, text, re.DOTALL)
     return match.group(2) if match else None
@@ -186,12 +186,12 @@ def has_markdown_code_block(text: str) -> bool:
     """
     Check if a string contains a markdown code block pattern anywhere in the text
     """
-    logger.info("has_markdown_code_block")
+    log_info("has_markdown_code_block")
     return find_markdown_code_block(text) is not None
 
 
 def convert_html_to_docling_table(text: str) -> list[TableItem] | None:
-    logger.info("convert_html_to_docling_table")
+    log_info("convert_html_to_docling_table")
     text_ = find_html_code_block(text)
     if text_ is None:
         text_ = text  # assume the entire text is html
@@ -208,19 +208,19 @@ def convert_html_to_docling_table(text: str) -> list[TableItem] | None:
             return conv.document.tables
 
     except Exception as exc:
-        logger.error(exc)
+        log_error("Failed to convert HTML to docling table", exception=exc)
         return None
 
     return None
 
 
 def validate_html_to_docling_table(text: str) -> bool:
-    logger.info("validate_html_to_docling_table")
+    log_info("validate_html_to_docling_table")
     return convert_html_to_docling_table(text) is not None
 
 
 def convert_markdown_to_docling_document(text: str) -> DoclingDocument | None:
-    logger.info("convert_markdown_to_docling_document")
+    log_info("convert_markdown_to_docling_document")
     text_ = find_markdown_code_block(text)
     if text_ is None:
         text_ = text  # assume the entire text is html
@@ -242,12 +242,12 @@ def convert_markdown_to_docling_document(text: str) -> DoclingDocument | None:
 
 
 def validate_markdown_to_docling_document(text: str) -> bool:
-    logger.info("validate_markdown_to_docling_document")
+    log_info("validate_markdown_to_docling_document")
     return convert_markdown_to_docling_document(text) is not None
 
 
 def convert_html_to_docling_document(text: str) -> DoclingDocument | None:
-    logger.info("convert_html_to_docling_document")
+    log_info("convert_html_to_docling_document")
     text_ = find_html_code_block(text)
     if text_ is None:
         text_ = text  # assume the entire text is html
@@ -263,19 +263,19 @@ def convert_html_to_docling_document(text: str) -> DoclingDocument | None:
         if conv.status == ConversionStatus.SUCCESS:
             return conv.document
     except Exception as exc:
-        logger.error(f"error: {exc}")
+        log_error(f"error: {exc}")
         return None
 
     return None
 
 
 def validate_html_to_docling_document(text: str) -> bool:
-    logger.info("validate_html_to_docling_document")
+    log_info("validate_html_to_docling_document")
     return convert_html_to_docling_document(text) is not None
 
 
 def insert_document(*, item: NodeItem, doc: DoclingDocument, updated_doc: DoclingDocument) -> DoclingDocument:
-    logger.info(f"insert_document: item={item.self_ref}")
+    log_info(f"insert_document: item={item.self_ref}")
 
     group_item = GroupItem(
         label=GroupLabel.UNSPECIFIED,
@@ -295,10 +295,10 @@ def insert_document(*, item: NodeItem, doc: DoclingDocument, updated_doc: Doclin
             to_item[_item.self_ref] = group_item
 
         elif _item.parent is None:
-            logger.error(f"Item with null parent: {_item}")
+            log_error(f"Item with null parent: {_item}")
 
         elif _item.parent.cref not in to_item:
-            logger.error(f"Item with unknown parent: {_item}")
+            log_error(f"Item with unknown parent: {_item}")
 
         elif isinstance(_item, GroupItem):
             gr = doc.add_group(
@@ -341,7 +341,7 @@ def insert_document(*, item: NodeItem, doc: DoclingDocument, updated_doc: Doclin
                 to_item[_item.self_ref] = te
 
         else:
-            logger.warning(f"No support to insert items of type: {type(item).__name__}")
+            log_warning(f"No support to insert items of type: {type(item).__name__}")
 
     return doc
 
@@ -353,7 +353,7 @@ def insert_document(*, item: NodeItem, doc: DoclingDocument, updated_doc: Doclin
 
 def get_item_by_ref(doc: DoclingDocument, ref: str) -> NodeItem | None:
     """Resolve a self_ref string to a NodeItem. Returns None on failure."""
-    logger.info(f"get_item_by_ref: ref={ref!r}")
+    log_info(f"get_item_by_ref: ref={ref!r}")
     try:
         return RefItem(cref=ref).resolve(doc)
     except Exception:
@@ -368,7 +368,7 @@ def collect_subtree_text(node: NodeItem, doc: DoclingDocument) -> str:
     Non-text nodes (TableItem, PictureItem, GroupItem) are traversed for their
     children but do not contribute text directly.
     """
-    logger.info(f"collect_subtree_text: node={node.self_ref!r}")
+    log_info(f"collect_subtree_text: node={node.self_ref!r}")
     parts: list[str] = []
     if hasattr(node, "text") and node.text:
         parts.append(node.text)
@@ -389,7 +389,7 @@ def _copy_list_group(
     target_doc: DoclingDocument,
     parent: NodeItem,
 ) -> ListGroup:
-    logger.info(f"_copy_list_group: source={source.self_ref!r}")
+    log_info(f"_copy_list_group: source={source.self_ref!r}")
     new_group = target_doc.add_list_group(parent=parent)
     new_group.meta = source.meta
     for child_ref in source.children or []:
@@ -411,7 +411,7 @@ def _copy_list_group(
                     except Exception:
                         pass
         except Exception as exc:
-            logger.warning(f"Could not copy list child: {exc}")
+            log_warning(f"Could not copy list child: {exc}")
     return new_group
 
 
@@ -421,7 +421,7 @@ def _copy_table(
     target_doc: DoclingDocument,
     parent: NodeItem,
 ) -> TableItem:
-    logger.info(f"_copy_table: source={source.self_ref!r}")
+    log_info(f"_copy_table: source={source.self_ref!r}")
     new_table = target_doc.add_table(data=source.data, parent=parent)
     new_table.meta = source.meta
     for cap_ref in source.captions:
@@ -432,7 +432,7 @@ def _copy_table(
                 new_cap.meta = cap.meta
                 new_table.captions.append(new_cap.get_ref())
         except Exception as exc:
-            logger.warning(f"Could not copy table caption: {exc}")
+            log_warning(f"Could not copy table caption: {exc}")
     return new_table
 
 
@@ -442,7 +442,7 @@ def _copy_picture(
     target_doc: DoclingDocument,
     parent: NodeItem,
 ) -> PictureItem:
-    logger.info(f"_copy_picture: source={source.self_ref!r}")
+    log_info(f"_copy_picture: source={source.self_ref!r}")
     new_pic = target_doc.add_picture(image=source.image, parent=parent)
     new_pic.meta = source.meta
     for cap_ref in source.captions:
@@ -453,7 +453,7 @@ def _copy_picture(
                 new_cap.meta = cap.meta
                 new_pic.captions.append(new_cap.get_ref())
         except Exception as exc:
-            logger.warning(f"Could not copy picture caption: {exc}")
+            log_warning(f"Could not copy picture caption: {exc}")
     return new_pic
 
 
@@ -464,12 +464,12 @@ def _flatten_into(
     target_parent: NodeItem,
 ) -> None:
     """Recursively add node's children to target_parent, preserving atomic units."""
-    logger.info(f"_flatten_into: node={node.self_ref!r}")
+    log_info(f"_flatten_into: node={node.self_ref!r}")
     for child_ref in node.children or []:
         try:
             child = child_ref.resolve(source_doc)
         except Exception as exc:
-            logger.warning(f"Could not resolve child {child_ref}: {exc}")
+            log_warning(f"Could not resolve child {child_ref}: {exc}")
             continue
 
         if isinstance(child, ListGroup):
@@ -487,7 +487,7 @@ def _flatten_into(
             new_item.meta = child.meta
             _flatten_into(child, source_doc, target_doc, target_parent)
         elif isinstance(child, ListItem):
-            logger.warning(f"ListItem {child.self_ref} found outside a ListGroup; skipping")
+            log_warning(f"ListItem {child.self_ref} found outside a ListGroup; skipping")
         elif isinstance(child, GroupItem):
             # Dissolve other groups (recurse into children without adding the group)
             _flatten_into(child, source_doc, target_doc, target_parent)
@@ -498,13 +498,13 @@ def _flatten_into(
 
 def make_flat_document(doc: DoclingDocument) -> DoclingDocument:
     """Normalize the document in place with Docling's native heading flattening."""
-    logger.info(f"make_flat_document: doc={doc.name!r}")
+    log_info(f"make_flat_document: doc={doc.name!r}")
     doc._flatten()
     return doc
 
 
 def make_hierarchical_document(doc: DoclingDocument) -> DoclingDocument:
     """Normalize the document in place with Docling's native hierarchy normalization applied."""
-    logger.info(f"make_hierarchical_document: doc={doc.name!r}")
+    log_info(f"make_hierarchical_document: doc={doc.name!r}")
     doc._hierarchize()
     return doc

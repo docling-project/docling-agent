@@ -32,7 +32,7 @@ from docling_agent.agent.base_functions import (
     validate_html_to_docling_table,
 )
 from docling_agent.agent_models import view_linear_context
-from docling_agent.logging import logger
+from docling_agent.logging import log_debug, log_error, log_info, log_warning
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
@@ -135,7 +135,7 @@ class DoclingEditingAgent(BaseDoclingAgent):
             )
         else:
             message = f"Could not execute operation: {op}"
-            logger.info(message)
+            log_info(message)
             raise ValueError(message)
 
         return document
@@ -146,11 +146,11 @@ class DoclingEditingAgent(BaseDoclingAgent):
         document: DoclingDocument,
         loop_budget: int = 3,
     ) -> DocumentOperation:
-        logger.info(f"task: {task}")
+        log_info(f"task: {task}")
 
         # TODO: check best format for describing the outline (MARKDOWN vs JSON) for short and long documents
         outline = create_document_outline(doc=document, format=OutlineFormat.MARKDOWN)
-        logger.debug(f"outline: {outline}")
+        log_debug(f"outline: {outline}")
 
         context = rf"""Given the current outline of the document:
 
@@ -189,7 +189,7 @@ Now, provide me with the operation to execute the task using the exact field nam
 """
 
         prompt = f"{context}{identification}"
-        logger.info(f"prompt: {prompt}")
+        log_info(f"prompt: {prompt}")
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_document)
 
@@ -197,21 +197,21 @@ Now, provide me with the operation to execute the task using the exact field nam
             """Validate that the response contains a valid operation JSON with correct field names."""
             ops: list[dict] = find_json_dicts(text=content)
             if len(ops) == 0:
-                logger.debug("No JSON objects found in response")
+                log_debug("No JSON objects found in response")
                 return False
 
             op: dict = ops[0]
 
             try:
                 TypeAdapter(DocumentOperation).validate_python(op)
-                logger.debug(f"Successfully validated operation: {op.get('operation')}")
+                log_debug(f"Successfully validated operation: {op.get('operation')}")
                 return True
 
             except ValidationError as e:
-                logger.debug(f"Validation error for operation: {e}")
+                log_debug(f"Validation error for operation: {e}")
                 return False
             except Exception as e:
-                logger.debug(f"Unexpected error during validation: {e}")
+                log_debug(f"Unexpected error during validation: {e}")
                 return False
 
         answer = m.instruct(
@@ -224,7 +224,7 @@ Now, provide me with the operation to execute the task using the exact field nam
             ],
             retry_budget=loop_budget,
         )
-        logger.info(f"answer: {answer}")
+        log_info(f"answer: {answer}")
 
         view_linear_context(m)
 
@@ -241,7 +241,7 @@ Now, provide me with the operation to execute the task using the exact field nam
             raise ValueError(f"Operation validation failed: {e}") from e
 
     def _update_content(self, task: str, document: DoclingDocument, sref: str):
-        logger.info("_update_content_of_document_items")
+        log_info("_update_content_of_document_items")
 
         ref = RefItem(cref=sref)
         item = ref.resolve(document)
@@ -253,7 +253,7 @@ Now, provide me with the operation to execute the task using the exact field nam
             self._update_content_of_textitem(task=task, document=document, item=item)
 
         else:
-            logger.warning(f"Dont know how to update the item (of label={item.label}) for task: {task}")
+            log_warning(f"Dont know how to update the item (of label={item.label}) for task: {task}")
 
     def _update_content_of_table(
         self,
@@ -262,7 +262,7 @@ Now, provide me with the operation to execute the task using the exact field nam
         table: TableItem,
         loop_budget: int = 3,
     ):
-        logger.info("_update_content_of_table")
+        log_info("_update_content_of_table")
 
         html_table = serialize_table_to_html(table=table, doc=document)
 
@@ -274,7 +274,7 @@ Now, provide me with the operation to execute the task using the exact field nam
 
 Execute the following task: {task}
 """
-        logger.info(f"prompt: {prompt}")
+        log_info(f"prompt: {prompt}")
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_table)
 
@@ -293,14 +293,14 @@ Execute the following task: {task}
             retry_budget=loop_budget,
         )
 
-        logger.info(f"response: {answer}")
+        log_info(f"response: {answer}")
 
         new_tables = convert_html_to_docling_table(text=answer)
 
         if new_tables and len(new_tables) == 1:
             table.data = new_tables[0].data
         elif new_tables and len(new_tables) > 1:
-            logger.error("too many tables returned ...")
+            log_error("too many tables returned ...")
             table.data = new_tables[0].data
 
     def _update_content_of_textitem(
@@ -310,7 +310,7 @@ Execute the following task: {task}
         item: TextItem,
         loop_budget: int = 3,
     ):
-        logger.info("_update_content_of_text")
+        log_info("_update_content_of_text")
 
         text = serialize_item_to_markdown(item=item, doc=document)
 
@@ -322,7 +322,7 @@ Execute the following task: {task}
 
 Execute the following task: {task}
 """
-        logger.info(f"prompt: {prompt}")
+        log_info(f"prompt: {prompt}")
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_editing_table)
 
@@ -330,11 +330,11 @@ Execute the following task: {task}
             prompt,
             retry_budget=loop_budget,
         )
-        logger.info(f"response: {answer}")
+        log_info(f"response: {answer}")
 
         updated_doc = convert_markdown_to_docling_document(text=answer)
         if updated_doc is None:
-            logger.warning("No valid document produced for updated content.")
+            log_warning("No valid document produced for updated content.")
             return
 
         document = insert_document(item=item, doc=document, updated_doc=updated_doc)
@@ -361,7 +361,7 @@ Execute the following task: {task}
         item = RefItem(cref=change.ref).resolve(document)
 
         if not isinstance(item, SectionHeaderItem):
-            logger.warning(f"{change.ref} is not SectionHeaderItem (got {type(item).__name__})")
+            log_warning(f"{change.ref} is not SectionHeaderItem (got {type(item).__name__})")
             return
 
         if change.to_level == -1:
@@ -455,7 +455,7 @@ Execute the following task: {task}
     ) -> None:
         candidate = self._find_matching_text_item_between_refs(document=document, insertion=insertion)
         if candidate is None:
-            logger.warning(
+            log_warning(
                 f"No matching TextItem found between {insertion.previous_ref} and {insertion.next_ref} "
                 f"for regex {insertion.regex!r}"
             )
@@ -491,11 +491,11 @@ Execute the following task: {task}
             previous_index = refs.index(insertion.previous_ref)
             next_index = refs.index(insertion.next_ref)
         except ValueError:
-            logger.warning(f"Could not locate insertion boundaries: {insertion.previous_ref} .. {insertion.next_ref}")
+            log_warning(f"Could not locate insertion boundaries: {insertion.previous_ref} .. {insertion.next_ref}")
             return None
 
         if previous_index >= next_index:
-            logger.warning(f"Invalid insertion boundaries: {insertion.previous_ref} is not before {insertion.next_ref}")
+            log_warning(f"Invalid insertion boundaries: {insertion.previous_ref} is not before {insertion.next_ref}")
             return None
 
         pattern = re.compile(insertion.regex)
@@ -508,7 +508,7 @@ Execute the following task: {task}
         ]
 
         if len(matches) > 1:
-            logger.warning(
+            log_warning(
                 f"Found multiple matching TextItems for regex {insertion.regex!r} between "
                 f"{insertion.previous_ref} and {insertion.next_ref}; using {matches[0].self_ref}"
             )
@@ -522,7 +522,7 @@ Execute the following task: {task}
         refs: list[str],
         loop_budget: int = 3,
     ):
-        logger.info("_update_content_of_text")
+        log_info("_update_content_of_text")
 
         texts = []
         for sref in refs:
@@ -541,7 +541,7 @@ Execute the following task: {task}
 
 Execute the following task: {task}
 """
-        logger.info(f"prompt: {prompt}")
+        log_info(f"prompt: {prompt}")
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_expert_writer)
 
@@ -549,11 +549,11 @@ Execute the following task: {task}
             prompt,
             retry_budget=loop_budget,
         )
-        logger.info(f"response: {answer}")
+        log_info(f"response: {answer}")
 
         updated_doc = convert_markdown_to_docling_document(text=answer)
         if updated_doc is None:
-            logger.warning("No valid document produced for rewrite.")
+            log_warning("No valid document produced for rewrite.")
             return
 
         ref = RefItem(cref=refs[0])

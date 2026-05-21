@@ -2,7 +2,6 @@ import json
 import re
 from contextlib import contextmanager
 from pathlib import Path
-from time import perf_counter
 from typing import Any, ClassVar, Protocol, cast
 
 from docling_core.types.doc.document import (
@@ -41,7 +40,13 @@ from docling_agent.agent.base_functions import (
 )
 from docling_agent.agent_models import view_linear_context
 from docling_agent.backends.base import BaseSession
-from docling_agent.logging import logger
+from docling_agent.logging import (
+    log_debug,
+    log_info,
+    log_stage_start,
+    log_warning,
+    timed_operation,
+)
 
 
 class _GenerateFn(Protocol):
@@ -120,13 +125,8 @@ Return no extra commentary. Include all operations that are materially requested
 
     @contextmanager
     def _timed_stage(self, name: str):
-        logger.info(f"_enricher_stage: {name} start")
-        started = perf_counter()
-        try:
-            yield
-        finally:
-            elapsed = perf_counter() - started
-            logger.info(f"_enricher_stage: {name} done in {elapsed:.2f}s")
+        """Context manager for timing enrichment stages."""
+        return timed_operation(name)
 
     def __init__(
         self,
@@ -153,14 +153,14 @@ Return no extra commentary. Include all operations that are materially requested
         # Explicit operations list bypasses LLM routing entirely
         operations: list[str] | None = kwargs.get("operations")
         if operations is not None:
-            logger.info(f"_enricher: explicit operations={operations}")
+            log_info("Using explicit operations", operations=operations)
             return self._run_operations(task=task, document=document, operations=operations)
 
         with self._timed_stage("routing"):
             plan = self._choose_operations(task=task)
         self.last_operation = plan
         inferred_operations = plan.get("operations", [])
-        logger.info(f"Chosen enrichment operations: {inferred_operations}")
+        log_info("Chosen enrichment operations", operations=inferred_operations)
         return self._run_operations(
             task=task,
             document=document,
@@ -188,7 +188,7 @@ Return no extra commentary. Include all operations that are materially requested
         return result
 
     def _choose_operations(self, *, task: str, loop_budget: int = 5) -> dict[str, Any]:
-        logger.info(f"task: {task}")
+        log_debug("Analyzing task for operations", task=task[:100])
 
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_enrichment_routing)
 
@@ -331,7 +331,7 @@ Return no extra commentary. Include all operations that are materially requested
                     set_meta_fn=set_meta_fn,
                 )
             except Exception as exc:
-                logger.warning(f"Could not resolve child {child_ref}: {exc}")
+                log_warning("Could not resolve child", child_ref=child_ref, exception=exc)
 
     def _enrich_leaf_items(
         self,
@@ -439,7 +439,7 @@ Return no extra commentary. Include all operations that are materially requested
             )
             return answer.strip() or None
         except Exception as exc:
-            logger.warning(f"Content generation failed: {exc}")
+            log_warning("Content generation failed", exception=exc)
             return None
 
     def _generate_summary(
@@ -501,7 +501,7 @@ Return no extra commentary. Include all operations that are materially requested
                 try:
                     return json.loads(match.group(1))
                 except Exception as exc:
-                    logger.warning(f"Failed to parse keywords JSON: {exc}")
+                    log_warning("Failed to parse keywords JSON", exception=exc)
         return None
 
     # ------------------------------------------------------------------
@@ -516,7 +516,7 @@ Return no extra commentary. Include all operations that are materially requested
         min_text_length: int = 100,
         loop_budget: int = 5,
     ) -> DoclingDocument:
-        logger.info("_find_search_keywords: starting")
+        log_stage_start("Finding search keywords")
 
         if fix_heading_levels:
             with self._timed_stage("keywords: fix heading levels"):
@@ -603,7 +603,7 @@ Return no extra commentary. Include all operations that are materially requested
         min_text_length: int = 100,
         loop_budget: int = 5,
     ) -> DoclingDocument:
-        logger.info("_detect_key_entities: starting")
+        log_stage_start("Detecting key entities")
 
         if fix_heading_levels:
             with self._timed_stage("entities: fix heading levels"):
@@ -613,8 +613,8 @@ Return no extra commentary. Include all operations that are materially requested
             hier_doc = make_hierarchical_document(document)
 
         m = self._create_extraction_session()
-        logger.info("_detect_key_entities: using extraction model %s", self.get_extraction_model_id())
-        with self._timed_stage("entities: infer target brief"):
+        log_info("Using extraction model", model=self.get_extraction_model_id())
+        with self._timed_stage("infer_entity_targets"):
             entity_targets = self._infer_entity_targets(
                 m=m,
                 task=task,
@@ -735,7 +735,7 @@ Return no extra commentary. Include all operations that are materially requested
         task: str | None,
     ) -> None:
         """Add entities to leaf items (tables, pictures)."""
-        logger.info("_extract_entities_from_leaf_items: starting leaf scan")
+        log_debug("Extracting entities from leaf items")
 
         def set_entities(meta: BaseMeta, result: Any) -> None:
             meta.entities = result
@@ -812,8 +812,7 @@ Return no extra commentary. Include all operations that are materially requested
                     "If an entity is not relevant to that brief, omit it."
                 )
 
-        logger.info("_generate_entities: task=%s", task)
-        logger.info("_generate_entities: text=%s", text)
+        log_debug("Generating entities", task=task[:50] if task else "", text_length=len(text))
 
         result = self._generate_content(
             m=m,
@@ -832,7 +831,7 @@ Return no extra commentary. Include all operations that are materially requested
             loop_budget=loop_budget,
         )
 
-        logger.info("_generate_entities: raw llm result=%s", result)
+        log_debug("Entity generation result received", result_length=len(result) if result else 0)
 
         if result:
             match = re.search(r"```json\s*(.*?)\s*```", result, re.DOTALL)
@@ -853,12 +852,12 @@ Return no extra commentary. Include all operations that are materially requested
                         if mention.charspan is not None:
                             search_start = mention.charspan[1]
                         mentions.append(mention)
-                    logger.info("_generate_entities: parsed entities=%s", mentions)
+                    log_debug("Parsed entities", count=len(mentions))
                     if mentions:
                         return EntitiesMetaField(mentions=mentions)
                     return EntitiesMetaField.model_construct(mentions=[])
                 except Exception as exc:
-                    logger.warning(f"Failed to parse entities JSON: {exc}")
+                    log_warning("Failed to parse entities JSON", exception=exc)
         return None
 
     @staticmethod
@@ -892,7 +891,7 @@ Return no extra commentary. Include all operations that are materially requested
         needle = original or text
         span = self._find_entity_span(source_text=source_text, needle=needle, search_start=search_start)
         mention = EntityMention(text=text, orig=original, label=label, charspan=span, created_by=created_by)
-        logger.info("_generate_entities: mention=%s", mention)
+        log_debug("Created entity mention", text=text, label=label)
         return mention
 
     # ------------------------------------------------------------------
@@ -905,7 +904,7 @@ Return no extra commentary. Include all operations that are materially requested
         document: DoclingDocument,
         loop_budget: int = 5,
     ) -> DoclingDocument:
-        logger.info("_classify_items: starting")
+        log_stage_start("Classifying items")
 
         for item, _ in document.iterate_items():
             if not isinstance(item, PictureItem):
@@ -913,7 +912,7 @@ Return no extra commentary. Include all operations that are materially requested
 
             text = self._picture_context(item=item, document=document)
             if not text:
-                logger.info("Skipping picture classification without textual context")
+                log_debug("Skipping picture classification without textual context")
                 continue
 
             meta = self._ensure_picture_meta(item)

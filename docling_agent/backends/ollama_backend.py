@@ -8,7 +8,7 @@ from typing_extensions import Self
 
 from docling_agent.agent_models import should_log_llm_io
 from docling_agent.backends.base import BaseBackend, BaseSession
-from docling_agent.logging import logger
+from docling_agent.logging import log_llm_request, log_llm_response, log_validation_attempt
 from docling_agent.task_model import BackendConfig
 
 
@@ -71,11 +71,16 @@ class OllamaSession(BaseSession):
         self._messages.append(user_message)
 
         if should_log_llm_io():
-            logger.debug(f"[LLM REQUEST]\n{prompt}")
+            log_llm_request(
+                prompt,
+                model=self.model,
+                retry_budget=retry_budget,
+                options=self.options,
+            )
 
         last_error: Exception | None = None
         try:
-            for _attempt in range(attempts):
+            for attempt_num in range(attempts):
                 try:
                     response = self._client.post(
                         "/api/chat",
@@ -91,11 +96,23 @@ class OllamaSession(BaseSession):
                     if not text.strip():
                         raise ValueError("Ollama returned an empty response.")
                     self._messages.append({"role": "assistant", "content": text})
+
                     if should_log_llm_io():
-                        logger.debug(f"[LLM RESPONSE]\n{text}")
+                        if attempt_num > 0:
+                            log_validation_attempt(attempt_num + 1, attempts, True)
+                        log_llm_response(text, model=self.model)
+
                     return text
                 except Exception as exc:
                     last_error = exc
+                    if should_log_llm_io() and attempt_num < attempts - 1:
+                        log_validation_attempt(
+                            attempt_num + 1,
+                            attempts,
+                            False,
+                            reason=str(exc),
+                        )
+
             if last_error is not None:
                 raise last_error
             raise ValueError("Ollama request failed without an explicit error.")

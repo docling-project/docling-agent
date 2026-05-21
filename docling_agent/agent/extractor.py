@@ -16,7 +16,7 @@ from mellea.stdlib.requirements import Requirement, simple_validate
 from pydantic import Field
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
-from docling_agent.logging import logger
+from docling_agent.logging import log_error, log_info
 
 
 class DoclingExtractingAgent(BaseDoclingAgent):
@@ -51,7 +51,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
     ) -> DoclingDocument:
         # If the task already includes a JSON schema, use it; otherwise generate one.
         schema = self._extract_schema_from_task(task=task)
-        logger.info("Schema generated from task.")
+        log_info("Schema generated from task.")
 
         total = len(sources)
         successes = 0
@@ -59,9 +59,9 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         total_items = 0
         self.last_results = {}
 
-        logger.info(f"Starting extraction for {total} source(s) for schema: {schema}")
+        log_info(f"Starting extraction for {total} source(s) for schema: {schema}")
         for idx, source in enumerate(sources, start=1):
-            logger.info(f"[{idx}/{total}] Extracting from: {source}")
+            log_info(f"[{idx}/{total}] Extracting from: {source}")
             if isinstance(source, Path):
                 try:
                     if self.extractor is None:
@@ -76,17 +76,15 @@ class DoclingExtractingAgent(BaseDoclingAgent):
                     self.last_results[str(source)] = items  # key by path string
                     successes += 1
                     total_items += len(items)
-                    logger.info(f"Completed {source} with {len(items)} item(s) extracted.")
+                    log_info(f"Completed {source} with {len(items)} item(s) extracted.")
                 except Exception as e:
                     failures += 1
-                    logger.error(f"Failed to extract from {source}: {e}")
+                    log_error(f"Failed to extract from {source}: {e}")
             else:
                 failures += 1
-                logger.error(f"source {source} is not the right type (expected Path)")
+                log_error(f"source {source} is not the right type (expected Path)")
 
-        logger.info(
-            f"Extraction summary: files={total}, successes={successes}, failures={failures}, items={total_items}"
-        )
+        log_info(f"Extraction summary: files={total}, successes={successes}, failures={failures}, items={total_items}")
 
         # Build a document with headings per source and fenced JSON blocks per item.
         doc = DoclingDocument(name="extraction results")
@@ -119,7 +117,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
             schema = json.loads(task)
             return schema
         except Exception:
-            logger.info("not a direct json")
+            log_info("not a direct json")
 
         def validate_json_str(text: str) -> bool:
             try:
@@ -131,7 +129,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         m = self._create_extraction_session(system_prompt=self.system_prompt_schema_extraction)
 
         prompt = f"{task}"
-        logger.info(f"prompt: {prompt}")
+        log_info(f"prompt: {prompt}")
 
         answer = m.instruct(
             prompt,

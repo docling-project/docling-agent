@@ -9,7 +9,7 @@ from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
 from pydantic import BaseModel, Field
 
-from docling_agent.logging import logger
+from docling_agent.logging import log_debug, log_error, log_warning
 
 
 class DocStatus(BaseModel):
@@ -137,7 +137,7 @@ class DoclingLibrary:
         self._index.source_to_id[source_path] = doc_id
         self._save_index()
 
-        logger.debug(f"Library: stored {doc.name!r} → {doc_id} (source={source_path!r})")
+        log_debug(f"Library: stored {doc.name!r} → {doc_id} (source={source_path!r})")
         return entry
 
     def store_in_memory(self, doc: DoclingDocument) -> DocLibraryEntry:
@@ -162,19 +162,19 @@ class DoclingLibrary:
         """Load and return the DoclingDocument for *doc_id*, or None."""
         doc_path = self.path / doc_id / self.DOC_FILE
         if not doc_path.exists():
-            logger.warning(f"Library: document file missing for {doc_id}")
+            log_warning(f"Library: document file missing for {doc_id}")
             return None
         try:
             return DoclingDocument.model_validate_json(doc_path.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.error(f"Library: failed to load {doc_path}: {exc}")
+            log_error(f"Library: failed to load {doc_path}: {exc}")
             return None
 
     def update_status(self, doc_id: str, **flags: bool) -> None:
         """Set status flags on the entry (e.g. ``has_summaries=True``)."""
         entry = self._index.entries.get(doc_id)
         if entry is None:
-            logger.warning(f"Library: update_status called for unknown doc_id={doc_id!r}")
+            log_warning(f"Library: update_status called for unknown doc_id={doc_id!r}")
             return
         for field, value in flags.items():
             if hasattr(entry.status, field):
@@ -223,7 +223,7 @@ class DoclingLibrary:
             try:
                 return DocLibraryIndex.model_validate_json(index_path.read_text(encoding="utf-8"))
             except Exception as exc:
-                logger.warning(f"Library: could not load index, starting fresh: {exc}")
+                log_warning(f"Library: could not load index, starting fresh: {exc}")
         return DocLibraryIndex()
 
     def _save_index(self) -> None:
