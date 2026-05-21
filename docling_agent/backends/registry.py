@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from docling_agent.backends.base import BaseBackend
 from docling_agent.backends.litellm_backend import LiteLLMBackend
+from docling_agent.backends.llama_server_backend import LlamaServerBackend
 from docling_agent.backends.lmstudio_backend import LMStudioBackend
 from docling_agent.backends.mellea_backend import MelleaBackend
 from docling_agent.backends.ollama_backend import OllamaBackend
@@ -17,6 +18,7 @@ BACKEND_REGISTRY: dict[str, type[BaseBackend]] = {
     "ollama": OllamaBackend,
     "lmstudio": LMStudioBackend,
     "litellm": LiteLLMBackend,
+    "llama-server": LlamaServerBackend,
 }
 """Registry mapping backend type names to their implementation classes.
 
@@ -28,7 +30,7 @@ def get_backend_class(name: str) -> type[BaseBackend]:
     """Look up a backend implementation class by its configuration name.
 
     Args:
-        name: Backend type identifier (e.g., "mellea", "ollama", "lmstudio", "litellm").
+        name: Backend type identifier (e.g., "mellea", "ollama", "lmstudio", "litellm", "llama-server").
 
     Returns:
         The backend class corresponding to the given name.

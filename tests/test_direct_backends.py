@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from docling_agent.backends.litellm_backend import LiteLLMBackend
+from docling_agent.backends.llama_server_backend import LlamaServerBackend
 from docling_agent.backends.lmstudio_backend import LMStudioBackend
 from docling_agent.backends.ollama_backend import OllamaBackend
 from docling_agent.task_model import BackendConfig, ModelConfig
@@ -106,6 +107,46 @@ def test_lmstudio_session_tracks_history(monkeypatch: pytest.MonkeyPatch):
         )
     )
     session = backend.create_session(model="granite-3.3-8b-instruct", system_prompt="You are helpful.")
+
+    assert session.instruct("hello") == "First completion"
+    assert session.instruct("follow up") == "Second completion"
+
+    assert sink[0]["path"] == "/chat/completions"
+    assert sink[0]["json"]["messages"] == [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "hello"},
+    ]
+    assert sink[1]["json"]["messages"] == [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "First completion"},
+        {"role": "user", "content": "follow up"},
+    ]
+
+
+def test_llama_server_session_tracks_history(monkeypatch: pytest.MonkeyPatch):
+    sink: list[dict[str, Any]] = []
+    responses = [
+        {"choices": [{"message": {"content": "First completion"}}]},
+        {"choices": [{"message": {"content": "Second completion"}}]},
+    ]
+
+    def _fake_client_factory(*, base_url: str, timeout: float, headers: dict[str, str] | None = None):
+        return _FakeClient(base_url=base_url, timeout=timeout, headers=headers, responses=responses, sink=sink)
+
+    monkeypatch.setattr("docling_agent.backends.openai_compatible.httpx.Client", _fake_client_factory)
+
+    backend = LlamaServerBackend.from_config(
+        BackendConfig(
+            type="llama-server",
+            models=ModelConfig(
+                reasoning="gpt-oss-20b",
+                writing="gpt-oss-20b",
+            ),
+        )
+    )
+    assert backend.base_url == "http://localhost:8080/v1"
+    session = backend.create_session(model="gpt-oss-20b", system_prompt="You are helpful.")
 
     assert session.instruct("hello") == "First completion"
     assert session.instruct("follow up") == "Second completion"

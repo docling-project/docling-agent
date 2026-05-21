@@ -34,7 +34,7 @@ mode: edit
 
 # Backend configuration -------------------------------------------------------
 backend:
-  type: lmstudio     # mellea | ollama | lmstudio | litellm
+  type: lmstudio     # mellea | ollama | lmstudio | litellm | llama-server
   # base_url: http://localhost:1234
   timeout: 1200
   models:

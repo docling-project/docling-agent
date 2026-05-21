@@ -18,7 +18,7 @@ Docling-agent simplifies agentic operation on documents, such as writing, editin
 - [Targeted editing](examples/example_02_edit_report.py): Load an existing Docling JSON and apply focused edits with natural-language tasks.
 - [Schema-guided extraction](examples/example_03_extract_schema.py): Extract typed fields from PDFs/images using a simple schema and produce HTML reports. See examples on curriculum_vitae, papers, invoices, etc.
 - [Document enrichment](examples/example_04_enrich_document.py): Enrich existing documents with summaries, search keywords, key entities, and item classifications (language/function).
-- Model-agnostic: Choose `mellea`, `ollama`, `lmstudio`, or `litellm` through backend configuration.
+- Model-agnostic: Choose `mellea`, `ollama`, `lmstudio`, `litellm`, or `llama-server` through backend configuration.
 - Simple API surface: Use `agent.run(...)` with `DoclingDocument` in/out; save via `save_as_*` helpers.
 - Optional tools: Integrate external tools (e.g., MCP) when available.
 
@@ -138,7 +138,7 @@ Task files now select the backend explicitly:
 
 ```yaml
 backend:
-  type: ollama  # mellea | ollama | lmstudio | litellm
+  type: ollama  # mellea | ollama | lmstudio | litellm | llama-server
   base_url: http://localhost:11434
   timeout: 120
   models:
@@ -152,6 +152,7 @@ Typical defaults:
 - `ollama`: model names like `qwen3:8b`
 - `lmstudio`: model names like `granite-3.3-8b-instruct`
 - `litellm`: routed model names like `openai/gpt-4.1-mini`
+- `llama-server`: GGUF model names as loaded by llama.cpp's `llama-server` (default `http://localhost:8080/v1`)
 
 ## Documentation
 
