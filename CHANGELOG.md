@@ -1,3 +1,13 @@
+## [v0.3.0](https://github.com/docling-project/docling-agent/releases/tag/v0.3.0) - 2026-05-22
+
+### Feature
+
+* Added the llama-server backend ([#28](https://github.com/docling-project/docling-agent/issues/28)) ([`cb2ad4c`](https://github.com/docling-project/docling-agent/commit/cb2ad4ced04efa1784297b4599a36a0b431ba031))
+
+### Fix
+
+* **enricher:** Use the right field names of EntityMention ([#29](https://github.com/docling-project/docling-agent/issues/29)) ([`864445e`](https://github.com/docling-project/docling-agent/commit/864445ebf58d1099d365776643ec81dbce82009b))
+
 ## [v0.2.0](https://github.com/docling-project/docling-agent/releases/tag/v0.2.0) - 2026-05-20
 
 ### Feature
