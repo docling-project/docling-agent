@@ -44,7 +44,17 @@ from docling_agent.agent.base_functions import (
     validate_html_to_docling_document,
     validate_markdown_to_docling_document,
 )
-from docling_agent.logging import logger
+from docling_agent.logging import (
+    agent_context,
+    log_agent_end,
+    log_agent_start,
+    log_debug,
+    log_error,
+    log_stage_end,
+    log_stage_start,
+    log_warning,
+    operation_context,
+)
 
 # from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
@@ -115,19 +125,24 @@ class DoclingWritingAgent(BaseDoclingAgent):
     ) -> DoclingDocument:
         # Avoid mutable default list for sources
         sources = sources or []
-        # self._analyse_task_for_topics_and_followup_questions(task=task)
 
-        # self._analyse_task_for_final_destination(task=task)
+        with agent_context("WriterAgent"):
+            log_agent_start("Starting document writing", task=task[:100])
 
-        # Plan an outline for the document
-        logger.info(" === Plan an outline for the report!")
-        outline: DoclingDocument = self._make_outline_for_writing(task=task)
+            # Plan an outline for the document
+            with operation_context("outline_generation"):
+                log_stage_start("Planning document outline")
+                outline: DoclingDocument = self._make_outline_for_writing(task=task)
+                log_stage_end("Document outline created")
 
-        # Write the actual document item by item
-        logger.info(" === Write the content of the document!")
-        result_document: DoclingDocument = self._populate_document_with_content(task=task, outline=outline)
+            # Write the actual document item by item
+            with operation_context("content_generation"):
+                log_stage_start("Writing document content")
+                result_document: DoclingDocument = self._populate_document_with_content(task=task, outline=outline)
+                log_stage_end("Document content written")
 
-        return result_document
+            log_agent_end("Document writing complete", items=len(list(result_document.iterate_items())))
+            return result_document
 
     def _analyse_task_for_final_destination(self, *, task: str):
         return
@@ -229,15 +244,15 @@ class DoclingWritingAgent(BaseDoclingAgent):
         # Extract markdown block
         md = find_markdown_code_block(content)
         if not md:
-            logger.error(f"could not find markdown block in:\n\n{content}")
+            log_error("could not find markdown block in content")
             return False
 
         # Parse markdown to DoclingDocument
         try:
             converter = DocumentConverter(allowed_formats=[InputFormat.MD])
             conv: ConversionResult = converter.convert_string(content=md, format=InputFormat.MD, name="outline.md")
-        except Exception:
-            logger.error(f"could not convert markdown:\n\n{md}")
+        except Exception as e:
+            log_error("could not convert markdown", exception=e)
             return False
 
         pattern = DoclingWritingAgent._OUTLINE_LINE_PATTERN
@@ -253,7 +268,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     invalid_lines.append(item.text)
 
         if len(invalid_lines) > 0:
-            logger.error(f"found invalid lines: {invalid_lines}")
+            log_error("found invalid lines", count=len(invalid_lines))
 
         return len(invalid_lines) == 0
 
@@ -285,7 +300,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 match = pattern.match(item.text)
 
                 if not match:
-                    logger.warning(f"line `{item.text}` does not match pattern `{pattern}`")
+                    log_warning("line does not match pattern", line=item.text[:50])
                     invalid_lines.append(item.text)
                     continue
 
@@ -321,13 +336,13 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     _.meta = meta
 
                 else:
-                    logger.warning(f"label {label} is not supported")
+                    log_warning("label not supported", label=label)
 
             elif isinstance(item, GroupItem):
                 continue  # nothing to be done
 
             else:
-                logger.warning(f"could not classify item: {item}")
+                log_warning("could not classify item", item_type=type(item).__name__)
                 continue
 
         if len(invalid_lines) > 0:
@@ -335,7 +350,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 "Every content line should start with one of: "
                 f"{', '.join(self._OUTLINE_KINDS)}. The following lines need to be updated: " + "\n".join(invalid_lines)
             )
-            logger.error(message)
+            log_error(message)
             return None
 
         # Debug serializer block removed
@@ -371,7 +386,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
     def _summary_for(self, *, node: NodeItem) -> str | None:
         if node.meta and node.meta.summary and node.meta.summary.text:
             return node.meta.summary.text
-        logger.error(f"No summary found for {node}")
+        log_error("No summary found for node", node_ref=node.self_ref)
         return None
 
     def _write_and_merge(
@@ -391,7 +406,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         elif kind == "list":
             content = self._write_list(summary=summary, hierarchy=h, loop_budget=loop_budget)
         else:
-            logger.warning(f"Unsupported content kind: {kind}")
+            log_warning("Unsupported content kind", kind=kind)
             return
 
         self._update_document_with_content(
@@ -422,7 +437,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 title.meta = BaseMeta(summary=self._summary_meta(item.meta.summary.text))
 
         elif isinstance(item, SectionHeaderItem):
-            logger.info(f"starting in {item.text}")
+            log_debug("Processing section header", text=item.text[:50])
             headers = self._update_headers(item=item, headers=headers)
             heading = document.add_heading(text=item.text, level=item.level)
             if item.meta and item.meta.summary and item.meta.summary.text:
@@ -433,7 +448,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                 return headers
             summary = self._summary_for(node=item)
             if summary:
-                logger.info("writing a paragraph")
+                log_debug("Writing paragraph")
                 self._write_and_merge(
                     kind="paragraph",
                     summary=summary,
@@ -442,12 +457,12 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     loop_budget=loop_budget,
                 )
             else:
-                logger.warning(f"Skipping paragraph without summary: {item.text!r}")
+                log_warning("Skipping paragraph without summary", text=item.text[:50])
 
         elif isinstance(item, TableItem):
             summary = self._summary_for(node=item)
             if summary:
-                logger.info("writing a table")
+                log_debug("Writing table")
                 self._write_and_merge(
                     kind="table",
                     summary=summary,
@@ -456,12 +471,12 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     loop_budget=loop_budget,
                 )
             else:
-                logger.warning("Skipping table without summary")
+                log_warning("Skipping table without summary")
 
         elif isinstance(item, PictureItem):
             summary = self._summary_for(node=item)
             if summary:
-                logger.info("writing a picture")
+                log_debug("Writing picture")
                 caption = document.add_text(label=DocItemLabel.CAPTION, text=summary)
                 picture = document.add_picture(caption=caption)
                 picture.meta = self._generate_picture_meta(
@@ -470,7 +485,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     loop_budget=loop_budget,
                 )
             else:
-                logger.warning("Skipping picture without summary")
+                log_warning("Skipping picture without summary")
 
         elif isinstance(item, GroupItem) and (item.label == GroupLabel.UNSPECIFIED):
             pass  # nothing to be done ...
@@ -478,7 +493,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
         elif isinstance(item, GroupItem) and item.label == GroupLabel.LIST:
             summary = self._summary_for(node=item)
             if summary:
-                logger.info("writing a list")
+                log_debug("Writing list")
                 self._write_and_merge(
                     kind="list",
                     summary=summary,
@@ -487,10 +502,10 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     loop_budget=loop_budget,
                 )
             else:
-                logger.warning("Skipping list without summary")
+                log_warning("Skipping list without summary")
 
         else:
-            logger.info(f"Unhandled item: {item}")
+            log_debug("Unhandled item", item_type=type(item).__name__)
 
         return headers
 
@@ -545,7 +560,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                     )
                     to_item[item.self_ref] = li
                 else:
-                    logger.debug(f"Skipping ListItem without known parent: {item}")
+                    log_debug("Skipping ListItem without known parent")
 
             elif isinstance(item, TextItem):
                 if item.parent and item.parent.cref in to_item:
@@ -559,7 +574,7 @@ class DoclingWritingAgent(BaseDoclingAgent):
                         te.meta = BaseMeta(summary=self._summary_meta(summary))
                     to_item[item.self_ref] = te
                 else:
-                    logger.debug(f"Skipping TextItem without known parent: {item}")
+                    log_debug("Skipping TextItem without known parent")
 
             elif isinstance(item, TableItem):
                 if item.parent and item.parent.cref in to_item:

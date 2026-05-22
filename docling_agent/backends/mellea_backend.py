@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import cast
 
 from mellea import MelleaSession
@@ -13,8 +14,11 @@ from typing_extensions import Self
 
 from docling_agent.agent_models import should_log_llm_io
 from docling_agent.backends.base import BaseBackend, BaseSession
-from docling_agent.logging import logger
+from docling_agent.logging import log_llm_request, log_llm_response
 from docling_agent.task_model import BackendConfig
+
+# Suppress Mellea's template warnings about unused Message attributes
+logging.getLogger("mellea").setLevel(logging.ERROR)
 
 
 class MelleaSessionAdapter(BaseSession):
@@ -53,17 +57,29 @@ class MelleaSessionAdapter(BaseSession):
             ValueError: If Mellea returns no response text.
         """
         if should_log_llm_io():
-            logger.debug(f"[LLM REQUEST]\n{prompt}")
+            log_llm_request(
+                prompt,
+                model=self._session.backend.model_id if hasattr(self._session.backend, "model_id") else None,
+                retry_budget=retry_budget,
+                has_requirements=requirements is not None,
+            )
+
         result = self._session.instruct(
             prompt,
             requirements=cast(list[Requirement | str], requirements or []),
             strategy=RejectionSamplingStrategy(loop_budget=retry_budget),
         )
+
         value = result.value
         if value is None:
             raise ValueError("Mellea returned no response text.")
+
         if should_log_llm_io():
-            logger.debug(f"[LLM RESPONSE]\n{value}")
+            log_llm_response(
+                value,
+                model=self._session.backend.model_id if hasattr(self._session.backend, "model_id") else None,
+            )
+
         return value
 
     def debug_context_rows(self) -> list[tuple[int, str, str]] | None:

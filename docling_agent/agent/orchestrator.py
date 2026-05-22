@@ -24,7 +24,7 @@ from docling_agent.agent.extractor import DoclingExtractingAgent
 from docling_agent.agent.library import DoclingLibrary
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
-from docling_agent.logging import logger
+from docling_agent.logging import log_error, log_info, log_warning
 from docling_agent.task_model import (
     AgentTask,
     EditingTask,
@@ -42,7 +42,7 @@ class _SourcePairs(list):
     """List of ``_SourcePair`` with a compact repr to avoid polluting rich tracebacks."""
 
     def __repr__(self) -> str:
-        logger.info("_SourcePairs.__repr__")
+        log_info("_SourcePairs.__repr__")
         entries = ", ".join(
             f"(DoclingDocument(name={doc.name!r}, version={doc.version!r}, body=[]), {did!r})" for doc, did in self
         )
@@ -66,7 +66,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         backend=None,
         library_path: Path | None = None,
     ) -> None:
-        logger.info("DoclingOrchestratorAgent.__init__")
+        log_info("DoclingOrchestratorAgent.__init__")
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_ORCHESTRATOR,
             backend=backend or self.default_backend(),
@@ -83,7 +83,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> DoclingDocument:
-        logger.info("DoclingOrchestratorAgent.run")
+        log_info("DoclingOrchestratorAgent.run")
         raise NotImplementedError("Use run_task(AgentTask) instead.")
 
     # ------------------------------------------------------------------
@@ -92,14 +92,14 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
     def run_task(self, task: AgentTask) -> DoclingDocument:
         """Convert sources, enrich lazily, and dispatch to the right sub-agent."""
-        logger.info(f"DoclingOrchestratorAgent.run_task: mode={task.mode!r}")
+        log_info(f"DoclingOrchestratorAgent.run_task: mode={task.mode!r}")
         return self._dispatch(task, DoclingLibrary(path=self.library_path))
 
     def _dispatch(self, task: AgentTask, library: DoclingLibrary) -> DoclingDocument:
-        logger.info(f"_dispatch: mode={task.mode!r}")
+        log_info(f"_dispatch: mode={task.mode!r}")
         source_pairs = self._resolve_sources(task, library)
 
-        logger.info(f"Orchestrator: mode={task.mode}, sources={len(source_pairs)}")
+        log_info(f"Orchestrator: mode={task.mode}, sources={len(source_pairs)}")
 
         if task.mode is None:
             return self._run_plan(task=task, source_pairs=source_pairs, library=library)
@@ -122,7 +122,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
     def _resolve_sources(self, task: AgentTask, library: DoclingLibrary) -> list[_SourcePair]:
         """Expand paths/globs, load from library cache or convert, return (doc, doc_id) pairs."""
-        logger.info(f"_resolve_sources: sources={task.sources}")
+        log_info(f"_resolve_sources: sources={task.sources}")
         raw_paths = self._expand_paths(task)
         if not raw_paths and not task.sources:
             return []
@@ -144,20 +144,20 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                         # Refresh stored document in case file changed
                         library.store(doc, source_key)
                     results.append((doc, entry.doc_id))
-                    logger.info(f"Loaded pre-converted document: {p.name}")
+                    log_info(f"Loaded pre-converted document: {p.name}")
                     continue
                 except Exception as exc:
-                    logger.warning(f"Could not load {p} as DoclingDocument: {exc}")
+                    log_warning(f"Could not load {p} as DoclingDocument: {exc}")
 
             # Check library cache for already-converted files
             entry = library.lookup_by_source(source_key)
             if entry is not None:
                 cached_doc: DoclingDocument | None = library.load_doc(entry.doc_id)
                 if cached_doc is not None:
-                    logger.info(f"Library cache hit: {p.name} → {entry.doc_id}")
+                    log_info(f"Library cache hit: {p.name} → {entry.doc_id}")
                     results.append((cached_doc, entry.doc_id))
                     continue
-                logger.warning(f"Library entry exists but document missing; reconverting {p.name}")
+                log_warning(f"Library entry exists but document missing; reconverting {p.name}")
 
             raw_to_convert.append(p)
 
@@ -172,18 +172,18 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                         doc = conv.document
                         entry = library.store(doc, source_key)
                         results.append((doc, entry.doc_id))
-                        logger.info(f"Converted and cached: {p.name} → {entry.doc_id}")
+                        log_info(f"Converted and cached: {p.name} → {entry.doc_id}")
                     else:
-                        logger.warning(f"Conversion failed for {p.name}: {conv.status}")
+                        log_warning(f"Conversion failed for {p.name}: {conv.status}")
                 except Exception as exc:
-                    logger.error(f"Error converting {p}: {exc}")
+                    log_error(f"Error converting {p}: {exc}")
 
-        logger.info(f"Resolved {len(results)} document(s)")
+        log_info(f"Resolved {len(results)} document(s)")
         return results
 
     def _expand_paths(self, task: AgentTask) -> list[Path]:
         """Expand task.sources (with optional glob for directories)."""
-        logger.info("_expand_paths")
+        log_info("_expand_paths")
         glob_pattern: str = getattr(task, "glob", None) or "**/*"
         raw_paths: list[Path] = []
         for src in task.sources:
@@ -193,7 +193,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             elif p.is_file():
                 raw_paths.append(p)
             else:
-                logger.warning(f"Source not found, skipping: {src}")
+                log_warning(f"Source not found, skipping: {src}")
         return raw_paths
 
     # ------------------------------------------------------------------
@@ -211,7 +211,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         Returns updated (doc, doc_id) pairs where each doc is the enriched
         version (``_summarize_items`` returns a hierarchical document).
         """
-        logger.info(f"_ensure_enriched: operations={operations}, docs={len(source_pairs)}")
+        log_info(f"_ensure_enriched: operations={operations}, docs={len(source_pairs)}")
         enricher = DoclingEnrichingAgent(
             backend=self.backend,
             tools=[],
@@ -228,7 +228,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 needed.remove("keywords")
 
             if needed:
-                logger.info(f"Enriching {doc.name!r} with operations={needed}")
+                log_info(f"Enriching {doc.name!r} with operations={needed}")
                 enriched_doc = enricher.run(task="", document=doc, operations=needed)
                 # Persist enriched document back to library
                 library.store(enriched_doc, entry.source_path if entry else "in-memory")
@@ -244,14 +244,14 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 self._update_library_meta(doc_id, enriched_doc, library)
                 updated.append((enriched_doc, doc_id))
             else:
-                logger.info(f"Skipping enrichment for {doc.name!r} (already done)")
+                log_info(f"Skipping enrichment for {doc.name!r} (already done)")
                 updated.append((doc, doc_id))
 
         return updated
 
     def _update_library_meta(self, doc_id: str, doc: DoclingDocument, library: DoclingLibrary) -> None:
         """Extract document-level summary and keywords from enriched doc and persist."""
-        logger.info(f"_update_library_meta: doc_id={doc_id!r}")
+        log_info(f"_update_library_meta: doc_id={doc_id!r}")
         summary: str | None = None
         keywords: list[str] = []
 
@@ -276,7 +276,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         source_pairs: list[_SourcePair],
         library: DoclingLibrary,
     ) -> DoclingDocument:
-        logger.info(f"_run_rag: query={task.query!r}, docs={len(source_pairs)}")
+        log_info(f"_run_rag: query={task.query!r}, docs={len(source_pairs)}")
         if task.enrich_before_rag:
             source_pairs = self._ensure_enriched(source_pairs, library, operations=["summarize"])
 
@@ -294,7 +294,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         task: ExtractTask,
         source_pairs: list[_SourcePair],
     ) -> DoclingDocument:
-        logger.info(f"_run_extract: query={task.query!r}, docs={len(source_pairs)}")
+        log_info(f"_run_extract: query={task.query!r}, docs={len(source_pairs)}")
         extractor = DoclingExtractingAgent(
             backend=self.backend,
             tools=[],
@@ -311,7 +311,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         task: WriteTask,
         source_pairs: list[_SourcePair],
     ) -> DoclingDocument:
-        logger.info(f"_run_write: query={task.query!r}, docs={len(source_pairs)}")
+        log_info(f"_run_write: query={task.query!r}, docs={len(source_pairs)}")
         writer = DoclingWritingAgent(
             backend=self.backend,
             tools=[],
@@ -325,7 +325,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         task: EditingTask,
         source_pairs: list[_SourcePair],
     ) -> DoclingDocument:
-        logger.info(f"_run_edit: query={task.query!r}, docs={len(source_pairs)}")
+        log_info(f"_run_edit: query={task.query!r}, docs={len(source_pairs)}")
         editor = DoclingEditingAgent(
             backend=self.backend,
             tools=[],
@@ -342,12 +342,12 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         source_pairs: list[_SourcePair],
         library: DoclingLibrary,
     ) -> DoclingDocument:
-        logger.info(f"_run_enrich: docs={len(source_pairs)}")
+        log_info(f"_run_enrich: docs={len(source_pairs)}")
         if task.operations is None:
             enriched_pairs = []
             for doc, doc_id in source_pairs:
                 enricher = DoclingEnrichingAgent(backend=self.backend, tools=[])
-                logger.info(f"Enriching {doc.name!r} by inferred operations from query")
+                log_info(f"Enriching {doc.name!r} by inferred operations from query")
                 enriched_doc = enricher.run(task=task.query, document=doc)
                 entry = library.get_entry(doc_id)
                 library.store(enriched_doc, entry.source_path if entry else "in-memory")
@@ -407,7 +407,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         library: DoclingLibrary,
     ) -> DoclingDocument:
         """Use an LLM to decide which mode(s) best serve the query, then execute them."""
-        logger.info(f"_run_plan: query={task.query!r}, docs={len(source_pairs)}")
+        log_info(f"_run_plan: query={task.query!r}, docs={len(source_pairs)}")
         source_names = [doc.name for doc, _ in source_pairs]
         sources_text = "\n".join(f"  - {n}" for n in source_names) if source_names else "  (none)"
 
@@ -438,7 +438,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             raise ValueError(f"Planner did not return a valid plan; got: {raw!r}")
 
         planned_tasks = dicts[0]["tasks"]
-        logger.info(f"Planner produced {len(planned_tasks)} sub-task(s)")
+        log_info(f"Planner produced {len(planned_tasks)} sub-task(s)")
 
         name_to_pair: dict[str, _SourcePair] = {doc.name: (doc, did) for doc, did in source_pairs}
         results: list[DoclingDocument] = []
@@ -449,7 +449,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             planned_sources: list[str] = plan.get("sources", source_names)
             resolved = [name_to_pair[n] for n in planned_sources if n in name_to_pair] or source_pairs
 
-            logger.info(f"  sub-task: mode={mode!r}, query={query!r}")
+            log_info(f"  sub-task: mode={mode!r}, query={query!r}")
 
             if mode == "rag":
                 results.append(
@@ -514,7 +514,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     )
                 )
             else:
-                logger.warning(f"Planner produced unknown mode {mode!r}, skipping")
+                log_warning(f"Planner produced unknown mode {mode!r}, skipping")
 
         if not results:
             raise ValueError("Planner produced no executable sub-tasks")

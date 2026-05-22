@@ -37,7 +37,7 @@ from docling_agent.agent.rag_models import (
     RAGResult,
     SectionSelection,
 )
-from docling_agent.logging import logger
+from docling_agent.logging import log_debug, log_info, log_warning
 
 
 class DoclingRAGAgent(BaseDoclingAgent):
@@ -102,7 +102,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
             result = self._rag_loop(query=task, doc=doc)
             per_doc_answers.append(result.answer)
             all_iterations.extend(result.iterations)
-            logger.info(f"RAG loop finished: converged={result.converged}, iterations={len(result.iterations)}")
+            log_info(f"RAG loop finished: converged={result.converged}, iterations={len(result.iterations)}")
 
         if len(docs) > 1:
             self._rprint(Rule(f"[bold cyan]Merging answers from {len(docs)} documents[/bold cyan]"))
@@ -125,7 +125,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         iterations: list[RAGIteration] = []
 
         outline_text = create_document_outline(doc, format=OutlineFormat.MARKDOWN)
-        logger.debug(f"[RAG OUTLINE — {doc.name!r}]\n{outline_text}")
+        log_debug(f"[RAG OUTLINE — {doc.name!r}]\n{outline_text}")
         valid_refs = self._extract_section_refs(doc)
 
         self._rprint(Rule(f"[bold cyan]RAG loop — {doc.name!r}[/bold cyan]"))
@@ -141,7 +141,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
         # Fallback: no section headers → return full doc text
         if not valid_refs:
-            logger.warning("No section headers found; falling back to full document text.")
+            log_warning("No section headers found; falling back to full document text.")
             self._rprint(
                 Text(
                     "⚠ No section headers found — returning full document.",
@@ -155,7 +155,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         for i in range(self.max_iterations):
             unvisited = valid_refs - visited
             if not unvisited:
-                logger.info("All sections visited; stopping early.")
+                log_info("All sections visited; stopping early.")
                 self._rprint(Text("All sections visited — stopping early.", style="yellow"))
                 break
 
@@ -339,7 +339,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         """Return all text belonging to the given section node."""
         node = get_item_by_ref(doc, section_ref)
         if node is None:
-            logger.warning(f"Could not resolve section ref {section_ref!r}")
+            log_warning(f"Could not resolve section ref {section_ref!r}")
             return ""
 
         # For hierarchical docs, collect_subtree_text gathers all nested content.
