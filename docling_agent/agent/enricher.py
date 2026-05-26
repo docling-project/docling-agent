@@ -1,9 +1,16 @@
 import json
 import re
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, ClassVar, Protocol, cast
+from typing import Any, ClassVar, Literal, Protocol, cast
 
+from docling_core.transforms.serializer.markdown import (
+    ImageRefMode,
+    MarkdownDocSerializer,
+    MarkdownParams,
+    MarkdownTableSerializer,
+)
 from docling_core.types.doc.document import (
     BaseMeta,
     CodeLanguageLabel,
@@ -126,7 +133,8 @@ Return no extra commentary. Include all operations that are materially requested
     @contextmanager
     def _timed_stage(self, name: str):
         """Context manager for timing enrichment stages."""
-        return timed_operation(name)
+        with timed_operation(name):
+            yield
 
     def __init__(
         self,
@@ -413,6 +421,171 @@ Return no extra commentary. Include all operations that are materially requested
             set_meta_fn=set_summary,
         )
 
+    def _summarize_pages(
+        self,
+        *,
+        document: DoclingDocument,
+        style: Literal["sentences", "keyphrases"] = "keyphrases",
+        loop_budget: int = 5,
+        save_callback: Callable[[DoclingDocument, int], None] | None = None,
+        document_summary_pages: int = 3,
+    ) -> DoclingDocument:
+        """Summarize each page of the document independently.
+
+        Creates one summary per page by serializing page content and generating
+        a summary with no conversation history between pages. This is particularly
+        useful for RAG applications where page-level summaries serve as retrieval units.
+
+        After page-level summarization, generates a document-level summary from the
+        first N pages' actual content, which provides better context than concatenating
+        page-level keyphrases.
+
+        Args:
+            document: Document to enrich with page summaries
+            style: Summary style - "sentences" for readable text, "keyphrases" for RAG (default)
+            loop_budget: Retry budget for each summary generation
+            save_callback: Optional callback(document, page_no) called after each page for fault tolerance
+            document_summary_pages: Number of initial pages to use for document summary (default: 3)
+
+        Returns:
+            Document with page-level summaries added to first item of each page,
+            and a document-level summary added to the body element
+        """
+
+        if not document.pages:
+            log_warning("Document has no pages, skipping page summarization")
+            return document
+
+        # Markdown serialization parameters
+        md_params = MarkdownParams(
+            image_mode=ImageRefMode.PLACEHOLDER,
+            image_placeholder="",
+            escape_underscores=False,
+            escape_html=False,
+            compact_tables=True,
+            traverse_pictures=True,
+        )
+
+        serializer = MarkdownDocSerializer(doc=document, table_serializer=MarkdownTableSerializer(), params=md_params)
+
+        with self._timed_stage(f"summarize pages ({style} style)"):
+            for page_no in document.pages.keys():
+                # Get first item on page
+                try:
+                    first_item, _ = next(iter(document.iterate_items(traverse_pictures=True, page_no=page_no)))
+                except StopIteration:
+                    log_warning(f"Page {page_no} has no items, skipping")
+                    continue
+
+                if not isinstance(first_item, NodeItem):
+                    log_warning(f"Page {page_no} has no NodeItem, skipping")
+                    continue
+
+                # Skip if already has summary
+                if first_item.meta and first_item.meta.summary:
+                    log_info(f"Page {page_no} already has summary, skipping")
+                    continue
+
+                page_text = serializer.serialize(pages={page_no}).text
+
+                # Create fresh session for this page (no conversation history)
+                m = self._create_extraction_session()
+
+                summary = self._generate_summary(
+                    m=m,
+                    text=page_text,
+                    loop_budget=loop_budget,
+                    style=style,
+                )
+
+                if summary:
+                    if not first_item.meta:
+                        first_item.meta = BaseMeta()
+                    first_item.meta.summary = SummaryMetaField(text=summary)
+                    log_info(f"Added {style} summary to page {page_no}")
+
+                    # Call save callback if provided (for fault tolerance)
+                    if save_callback:
+                        save_callback(document, page_no)
+                else:
+                    log_warning(f"Failed to generate summary for page {page_no}")
+
+        # Generate document-level summary from first N pages
+        with self._timed_stage("generate document-level summary"):
+            doc_summary = self._generate_document_level_summary(
+                document=document,
+                serializer=serializer,
+                num_pages=document_summary_pages,
+                loop_budget=loop_budget,
+                style=style,
+            )
+            if doc_summary:
+                if not document.body.meta:
+                    document.body.meta = BaseMeta()
+                document.body.meta.summary = SummaryMetaField(text=doc_summary)
+                log_info("Added document-level summary to body element")
+
+        return document
+
+    def _generate_document_level_summary(
+        self,
+        *,
+        document: DoclingDocument,
+        serializer: MarkdownDocSerializer,
+        num_pages: int = 3,
+        loop_budget: int = 5,
+        style: Literal["sentences", "keyphrases"] = "keyphrases",
+    ) -> str | None:
+        """Generate a document-level summary from the first N pages' actual content.
+
+        This approach provides better context than concatenating page-level keyphrases,
+        as it uses the full content of the initial pages to understand the document's
+        overall theme and purpose.
+
+        Args:
+            document: Document to summarize
+            serializer: Markdown serializer for rendering pages
+            num_pages: Number of initial pages to use (default: 3)
+            loop_budget: Retry budget for summary generation
+            style: Summary style - "sentences" or "keyphrases"
+
+        Returns:
+            Document-level summary or None if generation fails
+        """
+        if not document.pages:
+            log_warning("Document has no pages, cannot generate document summary")
+            return None
+
+        # Determine how many pages to use (min of num_pages and total pages)
+        page_numbers = sorted(document.pages.keys())
+        pages_to_use = page_numbers[: min(num_pages, len(page_numbers))]
+
+        if not pages_to_use:
+            log_warning("No pages available for document summary")
+            return None
+
+        log_info(f"Generating document-level summary from first {len(pages_to_use)} page(s)")
+
+        # Serialize the first N pages
+        combined_text = serializer.serialize(pages=set(pages_to_use)).text
+
+        # Create a fresh session for document-level summary
+        m = self._create_extraction_session()
+
+        # Use _generate_summary with scope="document" to get document-level prompts
+        try:
+            summary = self._generate_summary(
+                m=m,
+                text=combined_text,
+                loop_budget=loop_budget,
+                style=style,
+                scope="document",
+            )
+            return summary
+        except Exception as exc:
+            log_warning("Document-level summary generation failed", exception=exc)
+            return None
+
     def _generate_content(
         self,
         *,
@@ -448,22 +621,87 @@ Return no extra commentary. Include all operations that are materially requested
         m: BaseSession,
         text: str,
         loop_budget: int = 5,
+        style: Literal["sentences", "keyphrases"] = "sentences",
+        scope: Literal["section", "document"] = "section",
     ) -> str | None:
-        def _validate_summary(content: str) -> bool:
-            sentences = [s.strip() for s in content.split(".") if s.strip()]
-            return 1 <= len(sentences) <= 5
+        """Generate summary in different styles and scopes.
 
-        return self._generate_content(
-            m=m,
-            text=text,
-            task_prompt=(
-                "Summarize the following content in two or three succinct sentences. "
-                "Return only plain text with no markdown formatting."
-            ),
-            requirement_description="Write 2-3 succinct sentences summarizing the content. Return plain text only.",
-            validation_fn=_validate_summary,
-            loop_budget=loop_budget,
-        )
+        Args:
+            m: Backend session
+            text: Text to summarize
+            loop_budget: Retry budget for validation
+            style: Summary style - "sentences" for readable text, "keyphrases" for RAG
+            scope: Summary scope - "section" for section-level, "document" for document-level
+
+        Returns:
+            Generated summary or None if generation fails
+
+        Warning:
+            The "keyphrases" style is a temporary solution for RAG use cases.
+            This method will be refactored once docling-core supports enrichment
+            of document items with "keywords" as part of the meta field (similar
+            to how "summary" and "entities" are currently supported).
+        """
+        if style == "keyphrases":
+
+            def _validate_keyphrases(content: str) -> bool:
+                phrases = [p.strip() for p in content.split(";") if p.strip()]
+                return 2 <= len(phrases) <= 6
+
+            if scope == "document":
+                task_prompt = (
+                    "Based on the content from the first pages shown below, extract the most important "
+                    "concepts and facts that represent the ENTIRE DOCUMENT's main themes and topics. "
+                    "Use 3-5 concise phrases separated by semicolons. "
+                    "Focus on document-level themes, not just the content of these specific pages. "
+                    "Return only the phrases, no explanations or markdown."
+                )
+            else:  # section
+                task_prompt = (
+                    "Extract the most important concepts and facts from this content as key phrases. "
+                    "Use 3-5 concise phrases separated by semicolons. "
+                    "Focus on entities, actions, and key facts that would be useful for search and retrieval. "
+                    "Return only the phrases, no explanations or markdown."
+                )
+
+            return self._generate_content(
+                m=m,
+                text=text,
+                task_prompt=task_prompt,
+                requirement_description=(
+                    "Provide 3-5 key phrases separated by semicolons. "
+                    "Example: 'revenue growth 15%; market expansion Asia; new product launch; Q4 earnings $2.1B'"
+                ),
+                validation_fn=_validate_keyphrases,
+                loop_budget=loop_budget,
+            )
+        else:  # sentences (default)
+
+            def _validate_summary(content: str) -> bool:
+                sentences = [s.strip() for s in content.split(".") if s.strip()]
+                return 1 <= len(sentences) <= 5
+
+            if scope == "document":
+                task_prompt = (
+                    "Based on the content from the first pages shown below, write a 2-3 sentence summary "
+                    "that captures the ENTIRE DOCUMENT's main purpose and key themes. "
+                    "This should be a document-level overview, not just a summary of these specific pages. "
+                    "Return only plain text with no markdown formatting."
+                )
+            else:  # section
+                task_prompt = (
+                    "Summarize the following content in two or three succinct sentences. "
+                    "Return only plain text with no markdown formatting."
+                )
+
+            return self._generate_content(
+                m=m,
+                text=text,
+                task_prompt=task_prompt,
+                requirement_description="Write 2-3 succinct sentences summarizing the content. Return plain text only.",
+                validation_fn=_validate_summary,
+                loop_budget=loop_budget,
+            )
 
     def _generate_keywords(
         self,
