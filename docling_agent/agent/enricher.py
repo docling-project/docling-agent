@@ -797,17 +797,28 @@ Return no extra commentary. Include all operations that are materially requested
 
         target_clause = ""
         rewritten_task = task or ""
+        allowed_labels: list[str] = []
         if entity_targets:
-            labels = entity_targets.get("labels", [])
+            allowed_labels = [str(lbl).strip() for lbl in entity_targets.get("labels", []) if str(lbl).strip()]
             focus_terms = entity_targets.get("focus_terms", [])
             rewritten_task = entity_targets.get("rewritten_task", rewritten_task)
             generic = entity_targets.get("generic", False)
-            if not generic or labels or focus_terms or rewritten_task:
+            if allowed_labels:
+                target_clause = (
+                    "\nHARD CONSTRAINT — you MUST obey this:\n"
+                    f"Use ONLY these label values: {allowed_labels}.\n"
+                    "Reject any other entity type. If a candidate mention does not fit one of those labels, "
+                    "omit it entirely — do NOT output it under a different label, do NOT invent new labels.\n"
+                    "Apply the same definitions to every paragraph and every section, including reference lists, "
+                    "captions, and tables.\n"
+                    f"\nExtraction brief (for context only, does not expand the label set):\n{rewritten_task}\n"
+                    f"- focus_terms (hints, not exhaustive): {focus_terms}\n"
+                )
+            elif not generic or focus_terms or rewritten_task:
                 target_clause = (
                     "\nUse this rewritten extraction brief:\n"
                     f"{rewritten_task}\n"
                     "Focus on entities that match the brief, including obvious instances even if the wording differs.\n"
-                    f"- labels: {labels}\n"
                     f"- focus_terms: {focus_terms}\n"
                     "If an entity is not relevant to that brief, omit it."
                 )
@@ -839,11 +850,18 @@ Return no extra commentary. Include all operations that are materially requested
             if match:
                 try:
                     payload = json.loads(match.group(1))
+                    allowed_lookup = {lbl.casefold() for lbl in allowed_labels}
                     mentions: list[EntityMention] = []
+                    dropped_by_label: dict[str, int] = {}
                     search_start = 0
                     for item in payload:
                         if not isinstance(item, dict) or not str(item.get("text", "")).strip():
                             continue
+                        if allowed_lookup:
+                            raw_label = str(item.get("label", "")).strip()
+                            if raw_label.casefold() not in allowed_lookup:
+                                dropped_by_label[raw_label or "<empty>"] = dropped_by_label.get(raw_label or "<empty>", 0) + 1
+                                continue
                         mention = self._make_entity_mention(
                             item=item,
                             source_text=text,
@@ -853,6 +871,12 @@ Return no extra commentary. Include all operations that are materially requested
                         if mention.charspan is not None:
                             search_start = mention.charspan[1]
                         mentions.append(mention)
+                    if dropped_by_label:
+                        logger.info(
+                            "_generate_entities: dropped %d mentions with disallowed labels: %s",
+                            sum(dropped_by_label.values()),
+                            dropped_by_label,
+                        )
                     logger.info("_generate_entities: parsed entities=%s", mentions)
                     if mentions:
                         return EntitiesMetaField(mentions=mentions)

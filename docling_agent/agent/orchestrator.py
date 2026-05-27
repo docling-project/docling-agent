@@ -205,6 +205,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         source_pairs: list[_SourcePair],
         library: DoclingLibrary,
         operations: list[str],
+        task: str = "",
     ) -> list[_SourcePair]:
         """Run enrichment on documents that are missing the requested enrichments.
 
@@ -229,7 +230,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
             if needed:
                 logger.info(f"Enriching {doc.name!r} with operations={needed}")
-                enriched_doc = enricher.run(task="", document=doc, operations=needed)
+                enriched_doc = enricher.run(task=task, document=doc, operations=needed)
                 # Persist enriched document back to library
                 library.store(enriched_doc, entry.source_path if entry else "in-memory")
                 # Update status flags
@@ -278,7 +279,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     ) -> DoclingDocument:
         logger.info(f"_run_rag: query={task.query!r}, docs={len(source_pairs)}")
         if task.enrich_before_rag:
-            source_pairs = self._ensure_enriched(source_pairs, library, operations=["summarize"])
+            source_pairs = self._ensure_enriched(source_pairs, library, operations=["summarize"], task=task.query)
 
         docs: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
         rag_agent = DoclingRAGAgent(
@@ -364,7 +365,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 enriched_pairs.append((enriched_doc, doc_id))
         else:
             ops: list[str] = list(task.operations)
-            enriched_pairs = self._ensure_enriched(source_pairs, library, operations=ops)
+            enriched_pairs = self._ensure_enriched(source_pairs, library, operations=ops, task=task.query)
 
         # Return: single doc → return it directly; multiple → a composite summary doc
         if len(enriched_pairs) == 1:
