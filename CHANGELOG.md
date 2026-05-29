@@ -1,3 +1,13 @@
+## [v0.5.0](https://github.com/docling-project/docling-agent/releases/tag/v0.5.0) - 2026-05-29
+
+### Feature
+
+* **eval:** Add extraction evaluation utility ([#22](https://github.com/docling-project/docling-agent/issues/22)) ([`ac68801`](https://github.com/docling-project/docling-agent/commit/ac688010f1f18bb65d173f05307339540b232124))
+
+### Fix
+
+* Linting on 'perfs' folder ([#33](https://github.com/docling-project/docling-agent/issues/33)) ([`ee2259e`](https://github.com/docling-project/docling-agent/commit/ee2259edeaee951d7e2edfd8905311d5f354dadf))
+
 ## [v0.4.0](https://github.com/docling-project/docling-agent/releases/tag/v0.4.0) - 2026-05-29
 
 ### Feature
