@@ -73,9 +73,7 @@ def evaluate(
     for item in ground_truths:
         all_fields.update(item.keys())
 
-    metric_counts: dict[str, dict[str, int]] = {
-        field: {"tp": 0, "fp": 0, "fn": 0} for field in sorted(all_fields)
-    }
+    metric_counts: dict[str, dict[str, int]] = {field: {"tp": 0, "fp": 0, "fn": 0} for field in sorted(all_fields)}
 
     for pred_item, gt_item in zip(predictions, ground_truths):
         for field in metric_counts:
