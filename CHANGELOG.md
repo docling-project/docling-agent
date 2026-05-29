@@ -1,3 +1,9 @@
+## [v0.4.0](https://github.com/docling-project/docling-agent/releases/tag/v0.4.0) - 2026-05-29
+
+### Feature
+
+* **enricher:** Add page-level summarization ([#32](https://github.com/docling-project/docling-agent/issues/32)) ([`2d88ad2`](https://github.com/docling-project/docling-agent/commit/2d88ad2068e30afad0e99022496d743c8f012add))
+
 ## [v0.3.0](https://github.com/docling-project/docling-agent/releases/tag/v0.3.0) - 2026-05-22
 
 ### Feature
