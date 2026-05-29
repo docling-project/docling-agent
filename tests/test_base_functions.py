@@ -3,9 +3,10 @@ from pathlib import Path
 
 from docling_core.experimental.serializer.outline import OutlineMode
 from docling_core.types.doc.document import DoclingDocument, SectionHeaderItem
-from test_data_gen_flag import GEN_TEST_DATA
 
 from docling_agent.agent.base_functions import create_document_outline, find_json_dicts, make_hierarchical_document
+
+from .test_data_gen_flag import GEN_TEST_DATA
 
 
 def test_find_json_dicts_with_list_input():

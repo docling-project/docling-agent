@@ -53,6 +53,9 @@ dependencies = [
 vlm = [
     "docling[vlm]~=2.53",
 ]
+evaluation = [
+    "ranx>=0.3.21",
+]
 
 [dependency-groups]
 dev = [

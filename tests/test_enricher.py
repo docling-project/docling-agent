@@ -2,27 +2,61 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+from docling_core.transforms.serializer.markdown import (
+    ImageRefMode,
+    MarkdownDocSerializer,
+    MarkdownParams,
+    MarkdownTableSerializer,
+)
 from docling_core.types.doc.document import DoclingDocument, EntityMention
 
 from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
-from docling_agent.backends import create_backend
-from docling_agent.task_model import BackendConfig, ModelConfig
+
+from .test_utils import MockBackend
 
 
-def _backend():
-    return create_backend(
-        BackendConfig(
-            type="mellea",
-            models=ModelConfig(
-                reasoning="OPENAI_GPT_OSS_20B",
-                writing="OPENAI_GPT_OSS_20B",
-            ),
-        )
+@pytest.fixture(scope="module")
+def mock_backend():
+    """Fixture providing a mocked backend instance."""
+    return MockBackend()
+
+
+@pytest.fixture(scope="module")
+def test_document():
+    """Fixture providing the test document loaded from JSON."""
+    json_path = Path("tests/data/2408.09869v5.json")
+    with open(json_path) as f:
+        doc_dict = json.load(f)
+    return DoclingDocument.model_validate(doc_dict)
+
+
+@pytest.fixture(scope="module")
+def enricher(mock_backend):
+    """Fixture providing a DoclingEnrichingAgent instance."""
+    return DoclingEnrichingAgent(backend=mock_backend, tools=[])
+
+
+@pytest.fixture(scope="module")
+def markdown_serializer(test_document):
+    """Fixture providing a configured MarkdownDocSerializer."""
+    md_params = MarkdownParams(
+        image_mode=ImageRefMode.PLACEHOLDER,
+        image_placeholder="",
+        escape_underscores=False,
+        escape_html=False,
+        compact_tables=True,
+        traverse_pictures=True,
+    )
+    return MarkdownDocSerializer(
+        doc=test_document,
+        table_serializer=MarkdownTableSerializer(),
+        params=md_params,
     )
 
 
-def test_heading_levels_problem_exists():
+def test_heading_levels_problem_exists(test_document):
     """Demonstrate that the document has incorrect heading levels.
 
     The document has:
@@ -32,12 +66,7 @@ def test_heading_levels_problem_exists():
     This is incorrect because "3.4 Extensibility" should have level > 1
     since it's a subsection of "3 Processing pipeline".
     """
-    # Load the test document
-    json_path = Path("tests/data/2408.09869v5.json")
-    with open(json_path) as f:
-        doc_dict = json.load(f)
-
-    document = DoclingDocument.model_validate(doc_dict)
+    document = test_document
 
     # Find the section headers
     processing_pipeline = None
@@ -71,7 +100,7 @@ def test_heading_levels_problem_exists():
     print("   But '3.4 Extensibility' should have level > 1 since it's a subsection!")
 
 
-def test_fix_heading_levels(monkeypatch):
+def test_fix_heading_levels(monkeypatch, test_document, enricher):
     """Test that _fix_heading_levels correctly adjusts section header levels.
 
     This test shows the before/after state of all section headers in the document.
@@ -123,12 +152,7 @@ def test_fix_heading_levels(monkeypatch):
         ("Baselines for Object Detection", 1),
     ]
 
-    # Load the test document
-    json_path = Path("tests/data/2408.09869v5.json")
-    with open(json_path) as f:
-        doc_dict = json.load(f)
-
-    document = DoclingDocument.model_validate(doc_dict)
+    document = test_document
 
     # Extract section headers BEFORE fixing
     headers_before = []
@@ -146,8 +170,6 @@ def test_fix_heading_levels(monkeypatch):
     assert headers_before == expected_before, "Before state doesn't match expected"
 
     # Call _fix_heading_levels
-    enricher = DoclingEnrichingAgent(backend=_backend(), tools=[])
-
     print("\n" + "=" * 70)
     print("Calling _fix_heading_levels with stubbed editor...")
     print("=" * 70)
@@ -187,9 +209,8 @@ def test_fix_heading_levels(monkeypatch):
     print("=" * 70)
 
 
-def test_make_entity_mention():
+def test_make_entity_mention(enricher):
     """Regression test for _make_entity_mention function."""
-    enricher = DoclingEnrichingAgent(backend=_backend(), tools=[])
     source_text = "International Business Machines is a technology company based in Armonk."
 
     # Basic entity mention
@@ -222,6 +243,96 @@ def test_make_entity_mention():
     item = {"text": "International Business Machines", "original": "IBM"}
     mention = enricher._make_entity_mention(item=item, source_text=source_abbrev)
     assert mention.charspan == (11, 14)
+
+
+def test_generate_summary(monkeypatch, enricher):
+    """Regression test for _generate_summary function with different styles and scopes."""
+
+    def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
+        # Return different outputs based on the requirement_description to simulate different styles
+        if "key phrases" in requirement_description.lower():
+            return "concept A; concept B; concept C"
+        else:
+            return "This is a test summary. It has multiple sentences."
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
+
+    m = enricher._create_extraction_session()
+
+    # Test sentences style with section scope (default)
+    summary = enricher._generate_summary(m=m, text="Sample text", style="sentences", scope="section")
+    assert summary == "This is a test summary. It has multiple sentences."
+
+    # Test keyphrases style with section scope
+    summary = enricher._generate_summary(m=m, text="Sample text", style="keyphrases", scope="section")
+    assert summary == "concept A; concept B; concept C"
+
+    # Test sentences style with document scope
+    summary = enricher._generate_summary(m=m, text="Sample text", style="sentences", scope="document")
+    assert summary == "This is a test summary. It has multiple sentences."
+
+    # Test keyphrases style with document scope
+    summary = enricher._generate_summary(m=m, text="Sample text", style="keyphrases", scope="document")
+    assert summary == "concept A; concept B; concept C"
+
+
+def test_generate_document_level_summary(monkeypatch, test_document, enricher, markdown_serializer):
+    """Regression test for _generate_document_level_summary function."""
+
+    def _fake_generate_summary(self, *, m, text, loop_budget=5, style="sentences", scope="section"):
+        return "Document-level summary from first pages."
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_summary", _fake_generate_summary)
+
+    document = test_document
+    serializer = markdown_serializer
+
+    # Test with default parameters
+    summary = enricher._generate_document_level_summary(
+        document=document, serializer=serializer, num_pages=3, style="sentences"
+    )
+    assert summary == "Document-level summary from first pages."
+
+    # Test with keyphrases style
+    summary = enricher._generate_document_level_summary(
+        document=document, serializer=serializer, num_pages=2, style="keyphrases"
+    )
+    assert summary == "Document-level summary from first pages."
+
+
+def test_summarize_pages(monkeypatch, test_document, enricher):
+    """Regression test for _summarize_pages function."""
+
+    def _fake_generate_summary(self, *, m, text, loop_budget=5, style="sentences", scope="section"):
+        if scope == "document":
+            return "Overall document summary."
+        return f"Page summary in {style} style."
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_summary", _fake_generate_summary)
+
+    document = test_document
+
+    # Test with keyphrases style (default)
+    result_doc = enricher._summarize_pages(document=document, style="keyphrases")
+
+    # Verify document-level summary was added to body
+    assert result_doc.body.meta is not None
+    assert result_doc.body.meta.summary is not None
+    assert result_doc.body.meta.summary.text == "Overall document summary."
+
+    # Verify page-level summaries were added
+    pages_with_summaries = 0
+    for page_no in document.pages.keys():
+        try:
+            first_item, _ = next(iter(document.iterate_items(traverse_pictures=True, page_no=page_no)))
+            if hasattr(first_item, "meta") and first_item.meta and first_item.meta.summary:
+                pages_with_summaries += 1
+                assert first_item.meta.summary.text == "Page summary in keyphrases style."
+        except StopIteration:
+            continue
+
+    # At least some pages should have summaries
+    assert pages_with_summaries > 0
 
 
 if __name__ == "__main__":
