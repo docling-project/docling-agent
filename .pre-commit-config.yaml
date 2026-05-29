@@ -6,13 +6,13 @@ repos:
         name: "Ruff linter"
         entry: uv run --no-sync ruff check --exit-non-zero-on-fix --fix --config=pyproject.toml
         language: system
-        files: '^(docling_agent|tests|examples).*\.(py|ipynb)$'
+        files: '^(docling_agent|tests|examples|perfs).*\.(py|ipynb)$'
         pass_filenames: false
       - id: ruff-format
         name: "Ruff formatter"
         entry: uv run --no-sync ruff format --config=pyproject.toml
         language: system
-        files: '^(docling_agent|tests|examples).*\.(py|ipynb)$'
+        files: '^(docling_agent|tests|examples|perfs).*\.(py|ipynb)$'
         pass_filenames: false
   - repo: local
     hooks:

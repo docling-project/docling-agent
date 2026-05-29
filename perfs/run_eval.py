@@ -34,18 +34,11 @@ def _print_report(result: EvalResult) -> None:
         )
 
     print("")
-    print(
-        "macro\t"
-        f"{result.macro_precision:.4f}\t"
-        f"{result.macro_recall:.4f}\t"
-        f"{result.macro_f1:.4f}"
-    )
+    print(f"macro\t{result.macro_precision:.4f}\t{result.macro_recall:.4f}\t{result.macro_f1:.4f}")
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Evaluate extraction quality against ground-truth JSON files."
-    )
+    parser = argparse.ArgumentParser(description="Evaluate extraction quality against ground-truth JSON files.")
     parser.add_argument(
         "--predictions",
         type=Path,
