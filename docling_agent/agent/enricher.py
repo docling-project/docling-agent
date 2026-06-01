@@ -860,8 +860,9 @@ Return no extra commentary. Include all operations that are materially requested
             )
 
         with self._timed_stage("entities: leaf entities"):
+            m_leaf = self._create_extraction_session()
             self._extract_entities_from_leaf_items(
-                m=m,
+                m=m_leaf,
                 document=hier_doc,
                 loop_budget=loop_budget,
                 entity_targets=entity_targets,
@@ -1092,9 +1093,14 @@ Return no extra commentary. Include all operations that are materially requested
 
         if result:
             match = re.search(r"```json\s*(.*?)\s*```", result, re.DOTALL)
-            if match:
+            json_text = match.group(1) if match else result.strip()
+            if json_text:
                 try:
-                    payload = json.loads(match.group(1))
+                    payload = json.loads(json_text)
+                    if isinstance(payload, dict) and isinstance(payload.get("entities"), list):
+                        payload = payload["entities"]
+                    if not isinstance(payload, list):
+                        payload = []
                     allowed_lookup = {lbl.casefold() for lbl in allowed_labels}
                     mentions: list[EntityMention] = []
                     dropped_by_label: dict[str, int] = {}
