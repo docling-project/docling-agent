@@ -880,11 +880,20 @@ Return no extra commentary. Include all operations that are materially requested
         if not task:
             return None
 
-        def _validate_entity_target_spec(content: str) -> bool:
+        def _parse_spec_dict(content: str) -> dict | None:
             matches = find_json_dicts(text=content)
-            if len(matches) != 1:
+            if len(matches) == 1 and isinstance(matches[0], dict):
+                return matches[0]
+            try:
+                parsed = json.loads(content.strip())
+            except (json.JSONDecodeError, ValueError):
+                return None
+            return parsed if isinstance(parsed, dict) else None
+
+        def _validate_entity_target_spec(content: str) -> bool:
+            spec = _parse_spec_dict(content)
+            if spec is None:
                 return False
-            spec = matches[0]
             labels = spec.get("labels", [])
             focus_terms = spec.get("focus_terms", [])
             generic = spec.get("generic", False)
@@ -923,8 +932,7 @@ Return no extra commentary. Include all operations that are materially requested
         if not answer:
             return None
 
-        specs = find_json_dicts(text=answer)
-        return specs[0] if specs else None
+        return _parse_spec_dict(answer)
 
     def _walk_and_extract_entities(
         self,
