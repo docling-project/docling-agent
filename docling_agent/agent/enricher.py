@@ -1111,7 +1111,9 @@ Return no extra commentary. Include all operations that are materially requested
                         if allowed_lookup:
                             raw_label = str(item.get("label", "")).strip()
                             if raw_label.casefold() not in allowed_lookup:
-                                dropped_by_label[raw_label or "<empty>"] = dropped_by_label.get(raw_label or "<empty>", 0) + 1
+                                dropped_by_label[raw_label or "<empty>"] = (
+                                    dropped_by_label.get(raw_label or "<empty>", 0) + 1
+                                )
                                 continue
                         mention = self._make_entity_mention(
                             item=item,
