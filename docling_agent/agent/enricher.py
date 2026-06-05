@@ -1036,6 +1036,8 @@ Return no extra commentary. Include all operations that are materially requested
                 return False
             try:
                 val = json.loads(match.group(1))
+                if isinstance(val, dict) and isinstance(val.get("entities"), list):
+                    val = val["entities"]
                 if not isinstance(val, list):
                     return False
                 return all(isinstance(item, dict) and "text" in item for item in val)
