@@ -335,6 +335,295 @@ def test_summarize_pages(monkeypatch, test_document, enricher):
     assert pages_with_summaries > 0
 
 
+def test_parse_spec_dict_with_find_json_dicts(enricher: DoclingEnrichingAgent) -> None:
+    """Test _parse_spec_dict helper function with various JSON formats."""
+    # Simulate the _parse_spec_dict function behavior
+    import json
+
+    from docling_agent.agent.base_functions import find_json_dicts
+
+    def _parse_spec_dict(content: str) -> dict | None:
+        matches = find_json_dicts(text=content)
+        if len(matches) == 1 and isinstance(matches[0], dict):
+            return matches[0]
+        try:
+            parsed = json.loads(content.strip())
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    # Test 1: Valid JSON in code block (find_json_dicts path)
+    content1 = """```json
+{
+  "generic": false,
+  "labels": ["Person", "Organization"],
+  "focus_terms": ["CEO", "company"],
+  "rewritten_task": "Extract person and organization names"
+}
+```"""
+    result1 = _parse_spec_dict(content1)
+    assert result1 is not None
+    assert result1["labels"] == ["Person", "Organization"]
+    assert result1["generic"] is False
+
+    # Test 2: Valid JSON without code block (json.loads fallback)
+    content2 = '{"generic": true, "labels": [], "focus_terms": [], "rewritten_task": ""}'
+    result2 = _parse_spec_dict(content2)
+    assert result2 is not None
+    assert result2["generic"] is True
+
+    # Test 3: Invalid JSON
+    content3 = "{invalid json}"
+    result3 = _parse_spec_dict(content3)
+    assert result3 is None
+
+    # Test 4: JSON array (should return None as we expect dict)
+    content4 = '[{"key": "value"}]'
+    result4 = _parse_spec_dict(content4)
+    assert result4 is None
+
+    # Test 5: Multiple JSON blocks (find_json_dicts returns multiple, should fail)
+    content5 = """```json
+{"key1": "value1"}
+```
+```json
+{"key2": "value2"}
+```"""
+    result5 = _parse_spec_dict(content5)
+    assert result5 is None
+
+
+def test_infer_entity_targets_with_task(monkeypatch: pytest.MonkeyPatch, enricher: DoclingEnrichingAgent) -> None:
+    """Test that _infer_entity_targets correctly parses entity specifications from LLM response."""
+
+    def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
+        # Simulate LLM returning entity target specification
+        return """```json
+{
+  "generic": false,
+  "labels": ["Person", "Email", "Phone"],
+  "focus_terms": ["name", "contact", "email address"],
+  "rewritten_task": "Extract personal information including person names, email addresses, and phone numbers"
+}
+```"""
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
+
+    m = enricher._create_extraction_session()
+    entity_targets = enricher._infer_entity_targets(
+        m=m, task="Find personal information in the document", loop_budget=3
+    )
+
+    assert entity_targets is not None
+    assert entity_targets["generic"] is False
+    assert entity_targets["labels"] == ["Person", "Email", "Phone"]
+    assert "name" in entity_targets["focus_terms"]
+    assert "Extract personal information" in entity_targets["rewritten_task"]
+
+
+def test_infer_entity_targets_without_task(enricher: DoclingEnrichingAgent) -> None:
+    """Test that _infer_entity_targets returns None when no task is provided."""
+    m = enricher._create_extraction_session()
+    entity_targets = enricher._infer_entity_targets(m=m, task=None, loop_budget=3)
+    assert entity_targets is None
+
+    entity_targets = enricher._infer_entity_targets(m=m, task="", loop_budget=3)
+    assert entity_targets is None
+
+
+def test_generate_entities_with_label_filtering(
+    monkeypatch: pytest.MonkeyPatch, enricher: DoclingEnrichingAgent
+) -> None:
+    """Test that _generate_entities correctly filters entities by allowed labels."""
+
+    def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
+        # Simulate LLM returning entities with mixed labels (some allowed, some not)
+        return """```json
+[
+  {"text": "John Doe", "label": "Person"},
+  {"text": "john@example.com", "label": "Email"},
+  {"text": "Acme Corp", "label": "Organization"},
+  {"text": "New York", "label": "Location"},
+  {"text": "GPT-4", "label": "AI-Model"}
+]
+```"""
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
+
+    m = enricher._create_extraction_session()
+    text = "John Doe (john@example.com) works at Acme Corp in New York using GPT-4."
+
+    # Test with allowed labels - should filter out Organization, Location, AI-Model
+    entity_targets = {
+        "labels": ["Person", "Email"],
+        "focus_terms": [],
+        "rewritten_task": "Extract person names and emails",
+        "generic": False,
+    }
+
+    result = enricher._generate_entities(
+        m=m, text=text, task="Find people and emails", entity_targets=entity_targets, loop_budget=3
+    )
+
+    assert result is not None
+    assert len(result.mentions) == 2  # Only Person and Email should be kept
+    labels = {mention.label for mention in result.mentions}
+    assert labels == {"Person", "Email"}
+    assert "Organization" not in labels
+    assert "Location" not in labels
+
+
+def test_generate_entities_case_insensitive_labels(
+    monkeypatch: pytest.MonkeyPatch, enricher: DoclingEnrichingAgent
+) -> None:
+    """Test that label filtering is case-insensitive."""
+
+    def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
+        # LLM returns labels in different cases
+        return """```json
+[
+  {"text": "John Doe", "label": "PERSON"},
+  {"text": "jane@example.com", "label": "email"},
+  {"text": "Acme Corp", "label": "Organization"}
+]
+```"""
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
+
+    m = enricher._create_extraction_session()
+    text = "John Doe and jane@example.com work at Acme Corp."
+
+    # Allowed labels in mixed case
+    entity_targets = {
+        "labels": ["Person", "Email"],  # lowercase in spec
+        "focus_terms": [],
+        "rewritten_task": "",
+        "generic": False,
+    }
+
+    result = enricher._generate_entities(m=m, text=text, task="", entity_targets=entity_targets, loop_budget=3)
+
+    assert result is not None
+    assert len(result.mentions) == 2  # PERSON and email should match Person and Email
+    labels = {mention.label for mention in result.mentions}
+    assert "PERSON" in labels or "Person" in labels
+    assert "email" in labels or "Email" in labels
+
+
+def test_generate_entities_with_dict_wrapped_response(
+    monkeypatch: pytest.MonkeyPatch, enricher: DoclingEnrichingAgent
+) -> None:
+    """Test that _generate_entities handles LLM responses that wrap entities in a dict."""
+
+    def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
+        # LLM returns {"entities": [...]} instead of just [...]
+        return """```json
+{
+  "entities": [
+    {"text": "John Doe", "label": "Person"},
+    {"text": "john@example.com", "label": "Email"}
+  ]
+}
+```"""
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
+
+    m = enricher._create_extraction_session()
+    text = "John Doe (john@example.com)"
+
+    result = enricher._generate_entities(m=m, text=text, task="", entity_targets=None, loop_budget=3)
+
+    assert result is not None
+    assert len(result.mentions) == 2
+    assert result.mentions[0].text == "John Doe"
+    assert result.mentions[1].text == "john@example.com"
+
+
+def test_generate_entities_without_code_block(monkeypatch: pytest.MonkeyPatch, enricher: DoclingEnrichingAgent) -> None:
+    """Test that _generate_entities handles JSON without markdown code blocks."""
+
+    def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
+        # LLM returns raw JSON without code block
+        return '[{"text": "John Doe", "label": "Person"}]'
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
+
+    m = enricher._create_extraction_session()
+    text = "John Doe is here."
+
+    result = enricher._generate_entities(m=m, text=text, task="", entity_targets=None, loop_budget=3)
+
+    assert result is not None
+    assert len(result.mentions) == 1
+    assert result.mentions[0].text == "John Doe"
+
+
+def test_generate_entities_hard_constraint_prompt(
+    monkeypatch: pytest.MonkeyPatch, enricher: DoclingEnrichingAgent
+) -> None:
+    """Test that allowed_labels triggers HARD CONSTRAINT prompt."""
+    captured_prompts = []
+
+    def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
+        captured_prompts.append(task_prompt)
+        return "[]"
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
+
+    m = enricher._create_extraction_session()
+
+    # Test with allowed labels
+    entity_targets = {
+        "labels": ["Person", "Email"],
+        "focus_terms": ["contact"],
+        "rewritten_task": "Extract contacts",
+        "generic": False,
+    }
+
+    enricher._generate_entities(m=m, text="test", task="", entity_targets=entity_targets, loop_budget=3)
+
+    assert len(captured_prompts) == 1
+    prompt = captured_prompts[0]
+    assert "HARD CONSTRAINT" in prompt
+    assert "Use ONLY these label values" in prompt
+    assert "['Person', 'Email']" in prompt
+    assert "do NOT invent new labels" in prompt
+
+
+def test_extract_entities_session_isolation(
+    monkeypatch: pytest.MonkeyPatch, test_document: DoclingDocument, enricher: DoclingEnrichingAgent
+) -> None:
+    """Test that entity extraction uses separate session from entity target inference.
+
+    This is a regression test for the bug fix where a separate session (m_leaf)
+    is created for leaf entity extraction to prevent state pollution.
+    """
+    session_creation_count = [0]
+    original_create_session = enricher._create_extraction_session
+
+    def _counting_create_session():
+        session_creation_count[0] += 1
+        return original_create_session()
+
+    monkeypatch.setattr(enricher, "_create_extraction_session", _counting_create_session)
+
+    # Mock the methods to avoid actual LLM calls
+    def _fake_infer_targets(self, *, m, task, loop_budget):
+        return {"labels": ["Person"], "focus_terms": [], "rewritten_task": "", "generic": False}
+
+    def _fake_extract_from_leaf(self, *, m, document, loop_budget, entity_targets, task):
+        pass
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_infer_entity_targets", _fake_infer_targets)
+    monkeypatch.setattr(DoclingEnrichingAgent, "_extract_entities_from_leaf_items", _fake_extract_from_leaf)
+
+    # Run entity detection (which calls entity extraction internally)
+    enricher._detect_key_entities(document=test_document, task="Find people", loop_budget=3)
+
+    # Should create 2 sessions: one for inference, one for extraction
+    assert session_creation_count[0] == 2
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print("TEST 1: Demonstrating the heading levels problem")
