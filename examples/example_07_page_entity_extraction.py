@@ -49,18 +49,18 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 # CONFIG — edit these to match your environment
 # ---------------------------------------------------------------------------
-PAPERS_DIR  = Path("./papers")         # directory containing input PDFs
-RUNS_DIR    = Path("./runs")           # output root
-CACHE_DIR   = Path("./docling-cache")  # cached Docling conversions
-LMS_BIN     = Path.home() / ".lmstudio/bin/lms"   # LM Studio CLI (optional)
-LMS_URL     = "http://localhost:1234/v1"
+PAPERS_DIR = Path("./papers")  # directory containing input PDFs
+RUNS_DIR = Path("./runs")  # output root
+CACHE_DIR = Path("./docling-cache")  # cached Docling conversions
+LMS_BIN = Path.home() / ".lmstudio/bin/lms"  # LM Studio CLI (optional)
+LMS_URL = "http://localhost:1234/v1"
 CONTEXT_LEN = 32768
 
 # Models to compare — (LM Studio model ID, short slug for filenames)
 MODELS = [
     ("openai/gpt-oss-20b", "gpt-oss-20b"),
-    ("granite-4.1-8b",     "granite-4.1-8b"),
-    ("nuextract3",         "nuextract3"),
+    ("granite-4.1-8b", "granite-4.1-8b"),
+    ("nuextract3", "nuextract3"),
 ]
 
 # Entity types and extraction prompt
@@ -83,6 +83,7 @@ Return ONLY a JSON array. No prose, no markdown fences, no outer object.
 If no entities found, return [].
 Example: [{"mention":"BERT","name":"BERT","type":"MODEL"},{"mention":"F1 score","name":"F1","type":"KPI"}]"""
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -102,7 +103,8 @@ def switch_model(model_id: str) -> None:
             subprocess.run([str(LMS_BIN), "unload", parts[0]], capture_output=True)
     subprocess.run(
         [str(LMS_BIN), "load", model_id, "--context-length", str(CONTEXT_LEN)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     log(f"  Loaded {model_id} (ctx={CONTEXT_LEN})")
 
@@ -144,7 +146,7 @@ def call_model(client: OpenAI, model_id: str, page_text: str) -> str:
         model=model_id,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": page_text},
+            {"role": "user", "content": page_text},
         ],
         temperature=0,
         timeout=120,
@@ -169,8 +171,8 @@ def parse_entities(raw: str) -> list[dict]:
             if not isinstance(e, dict):
                 continue
             mention = str(e.get("mention") or e.get("text") or "").strip()
-            name    = str(e.get("name") or e.get("canonical") or mention).strip()
-            etype   = str(e.get("type") or e.get("label") or "").strip().upper()
+            name = str(e.get("name") or e.get("canonical") or mention).strip()
+            etype = str(e.get("type") or e.get("label") or "").strip().upper()
             if mention and etype in ENTITY_TYPES:
                 out.append({"mention": mention, "name": name, "type": etype})
         return out
@@ -258,11 +260,7 @@ def run_model(
 
         log(f"  {stem}")
         doc = convert_pdf(pdf)
-        page_numbers = sorted({
-            prov.page_no
-            for item, _ in doc.iterate_items()
-            for prov in getattr(item, "prov", [])
-        })
+        page_numbers = sorted({prov.page_no for item, _ in doc.iterate_items() for prov in getattr(item, "prov", [])})
         log(f"    {len(page_numbers)} pages")
 
         pages: dict[int, list[dict]] = {}
@@ -275,8 +273,7 @@ def run_model(
 
             if not page_text.strip():
                 pages[page_no] = []
-                _write_empty_row(csv_writer, stem, page_no, model_slug,
-                                 "page skipped — no serializable content", 0.0)
+                _write_empty_row(csv_writer, stem, page_no, model_slug, "page skipped — no serializable content", 0.0)
                 continue
 
             try:
@@ -300,13 +297,19 @@ def run_model(
         elapsed = round(time.time() - t0, 1)
         log(f"    → {total_entities} entities in {elapsed}s ({hallucinated} unverified)")
 
-        out_json.write_text(json.dumps({
-            "document": stem, "model": model_slug,
-            "pages": {str(k): v for k, v in pages.items()},
-            "total_entities": total_entities,
-            "hallucinated": hallucinated,
-            "processing_time_s": elapsed,
-        }, indent=2))
+        out_json.write_text(
+            json.dumps(
+                {
+                    "document": stem,
+                    "model": model_slug,
+                    "pages": {str(k): v for k, v in pages.items()},
+                    "total_entities": total_entities,
+                    "hallucinated": hallucinated,
+                    "processing_time_s": elapsed,
+                },
+                indent=2,
+            )
+        )
         out_html.write_text(build_html(stem, model_slug, pages))
         with open(run_dir / "run.log", "a") as f:
             f.write(f"[{datetime.now()}] {stem}: {total_entities} entities, {elapsed}s\n")
@@ -315,9 +318,19 @@ def run_model(
 
 
 def _write_empty_row(w, doc, page, model, note, t):
-    w.writerow({"document": doc, "page": page, "model": model,
-                "entity_name": "", "entity_type": "", "entity_mentions": "",
-                "verified": "", "note": note, "processing_time_s": t})
+    w.writerow(
+        {
+            "document": doc,
+            "page": page,
+            "model": model,
+            "entity_name": "",
+            "entity_type": "",
+            "entity_mentions": "",
+            "verified": "",
+            "note": note,
+            "processing_time_s": t,
+        }
+    )
 
 
 def _write_page_rows(w, doc, page_no, model, entities, note, page_time):
@@ -331,13 +344,19 @@ def _write_page_rows(w, doc, page_no, model, entities, note, page_time):
         grouped.setdefault(k, []).append(e["mention"])
         vmap[k] = vmap.get(k, False) or e.get("verified", True)
     for (name, etype), mentions in grouped.items():
-        w.writerow({
-            "document": doc, "page": page_no, "model": model,
-            "entity_name": name, "entity_type": etype,
-            "entity_mentions": "; ".join(dict.fromkeys(mentions)),
-            "verified": vmap[(name, etype)], "note": note,
-            "processing_time_s": page_time,
-        })
+        w.writerow(
+            {
+                "document": doc,
+                "page": page_no,
+                "model": model,
+                "entity_name": name,
+                "entity_type": etype,
+                "entity_mentions": "; ".join(dict.fromkeys(mentions)),
+                "verified": vmap[(name, etype)],
+                "note": note,
+                "processing_time_s": page_time,
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -348,9 +367,14 @@ def build_complete_csv(raw_csv: Path, out_csv: Path) -> None:
     with open(raw_csv, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
 
-    stats: dict[tuple, dict] = defaultdict(lambda: {
-        "total_entities": 0, "unverified": 0, "total_time_s": 0.0, "_pages": set(),
-    })
+    stats: dict[tuple, dict] = defaultdict(
+        lambda: {
+            "total_entities": 0,
+            "unverified": 0,
+            "total_time_s": 0.0,
+            "_pages": set(),
+        }
+    )
     for r in rows:
         s = stats[(r["document"], r["model"])]
         if r["page"] not in s["_pages"]:
@@ -362,11 +386,19 @@ def build_complete_csv(raw_csv: Path, out_csv: Path) -> None:
                 s["unverified"] += 1
 
     fields = [
-        "document", "page", "model",
-        "entity_name", "entity_type", "entity_mentions",
-        "hallucinated", "note", "page_processing_time_s",
-        "doc_model_total_entities", "doc_model_hallucinations",
-        "doc_model_hallucination_rate_pct", "doc_model_total_time_s",
+        "document",
+        "page",
+        "model",
+        "entity_name",
+        "entity_type",
+        "entity_mentions",
+        "hallucinated",
+        "note",
+        "page_processing_time_s",
+        "doc_model_total_entities",
+        "doc_model_hallucinations",
+        "doc_model_hallucination_rate_pct",
+        "doc_model_total_time_s",
     ]
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields)
@@ -375,18 +407,23 @@ def build_complete_csv(raw_csv: Path, out_csv: Path) -> None:
             s = stats[(r["document"], r["model"])]
             total, unver = s["total_entities"], s["unverified"]
             v = str(r["verified"]).lower()
-            w.writerow({
-                "document": r["document"], "page": r["page"], "model": r["model"],
-                "entity_name": r["entity_name"], "entity_type": r["entity_type"],
-                "entity_mentions": r["entity_mentions"],
-                "hallucinated": "yes" if v == "false" else "no" if v == "true" else "",
-                "note": r["note"],
-                "page_processing_time_s": r["processing_time_s"],
-                "doc_model_total_entities": total,
-                "doc_model_hallucinations": unver,
-                "doc_model_hallucination_rate_pct": round(100 * unver / total, 1) if total else 0.0,
-                "doc_model_total_time_s": round(s["total_time_s"], 1),
-            })
+            w.writerow(
+                {
+                    "document": r["document"],
+                    "page": r["page"],
+                    "model": r["model"],
+                    "entity_name": r["entity_name"],
+                    "entity_type": r["entity_type"],
+                    "entity_mentions": r["entity_mentions"],
+                    "hallucinated": "yes" if v == "false" else "no" if v == "true" else "",
+                    "note": r["note"],
+                    "page_processing_time_s": r["processing_time_s"],
+                    "doc_model_total_entities": total,
+                    "doc_model_hallucinations": unver,
+                    "doc_model_hallucination_rate_pct": round(100 * unver / total, 1) if total else 0.0,
+                    "doc_model_total_time_s": round(s["total_time_s"], 1),
+                }
+            )
     log(f"Complete CSV → {out_csv}  ({len(rows)} rows)")
 
 
@@ -396,13 +433,13 @@ def build_complete_csv(raw_csv: Path, out_csv: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--papers", type=Path, default=PAPERS_DIR, help="Directory of input PDFs")
-    parser.add_argument("--out",    type=Path, default=RUNS_DIR,   help="Output root directory")
-    parser.add_argument("--url",    default=LMS_URL,               help="LM Studio base URL")
-    parser.add_argument("--test",   action="store_true",           help="Run on first PDF only")
+    parser.add_argument("--out", type=Path, default=RUNS_DIR, help="Output root directory")
+    parser.add_argument("--url", default=LMS_URL, help="LM Studio base URL")
+    parser.add_argument("--test", action="store_true", help="Run on first PDF only")
     args = parser.parse_args()
 
     papers_dir = args.papers
-    runs_dir   = args.out
+    runs_dir = args.out
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     pdfs = sorted(papers_dir.glob("*.pdf"))
@@ -414,11 +451,20 @@ def main() -> None:
     date = datetime.now().strftime("%Y-%m-%d")
     log(f"Papers: {len(pdfs)} | Models: {len(MODELS)}")
 
-    raw_csv   = runs_dir / f"{date}_entities_raw.csv"
+    raw_csv = runs_dir / f"{date}_entities_raw.csv"
     final_csv = runs_dir / f"{date}_entities.csv"
 
-    raw_fields = ["document", "page", "model", "entity_name",
-                  "entity_type", "entity_mentions", "verified", "note", "processing_time_s"]
+    raw_fields = [
+        "document",
+        "page",
+        "model",
+        "entity_name",
+        "entity_type",
+        "entity_mentions",
+        "verified",
+        "note",
+        "processing_time_s",
+    ]
 
     with open(raw_csv, "w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=raw_fields)
