@@ -21,6 +21,7 @@ from docling_core.types.doc.document import (
     EntityMention,
     FloatingMeta,
     GroupItem,
+    KeywordsMetaField,
     NodeItem,
     PictureClassificationMetaField,
     PictureClassificationPrediction,
@@ -425,7 +426,6 @@ Return no extra commentary. Include all operations that are materially requested
         self,
         *,
         document: DoclingDocument,
-        style: Literal["sentences", "keyphrases"] = "keyphrases",
         loop_budget: int = 5,
         save_callback: Callable[[DoclingDocument, int], None] | None = None,
         document_summary_pages: int = 3,
@@ -437,12 +437,10 @@ Return no extra commentary. Include all operations that are materially requested
         useful for RAG applications where page-level summaries serve as retrieval units.
 
         After page-level summarization, generates a document-level summary from the
-        first N pages' actual content, which provides better context than concatenating
-        page-level keyphrases.
+        first N pages' actual content.
 
         Args:
             document: Document to enrich with page summaries
-            style: Summary style - "sentences" for readable text, "keyphrases" for RAG (default)
             loop_budget: Retry budget for each summary generation
             save_callback: Optional callback(document, page_no) called after each page for fault tolerance
             document_summary_pages: Number of initial pages to use for document summary (default: 3)
@@ -468,7 +466,7 @@ Return no extra commentary. Include all operations that are materially requested
 
         serializer = MarkdownDocSerializer(doc=document, table_serializer=MarkdownTableSerializer(), params=md_params)
 
-        with self._timed_stage(f"summarize pages ({style} style)"):
+        with self._timed_stage("summarize pages"):
             for page_no in document.pages.keys():
                 # Get first item on page
                 try:
@@ -495,14 +493,13 @@ Return no extra commentary. Include all operations that are materially requested
                     m=m,
                     text=page_text,
                     loop_budget=loop_budget,
-                    style=style,
                 )
 
                 if summary:
                     if not first_item.meta:
                         first_item.meta = BaseMeta()
                     first_item.meta.summary = SummaryMetaField(text=summary)
-                    log_info(f"Added {style} summary to page {page_no}")
+                    log_info(f"Added summary to page {page_no}")
 
                     # Call save callback if provided (for fault tolerance)
                     if save_callback:
@@ -517,7 +514,6 @@ Return no extra commentary. Include all operations that are materially requested
                 serializer=serializer,
                 num_pages=document_summary_pages,
                 loop_budget=loop_budget,
-                style=style,
             )
             if doc_summary:
                 if not document.body.meta:
@@ -534,12 +530,10 @@ Return no extra commentary. Include all operations that are materially requested
         serializer: MarkdownDocSerializer,
         num_pages: int = 3,
         loop_budget: int = 5,
-        style: Literal["sentences", "keyphrases"] = "keyphrases",
     ) -> str | None:
         """Generate a document-level summary from the first N pages' actual content.
 
-        This approach provides better context than concatenating page-level keyphrases,
-        as it uses the full content of the initial pages to understand the document's
+        Uses the full content of the initial pages to understand the document's
         overall theme and purpose.
 
         Args:
@@ -547,7 +541,6 @@ Return no extra commentary. Include all operations that are materially requested
             serializer: Markdown serializer for rendering pages
             num_pages: Number of initial pages to use (default: 3)
             loop_budget: Retry budget for summary generation
-            style: Summary style - "sentences" or "keyphrases"
 
         Returns:
             Document-level summary or None if generation fails
@@ -578,7 +571,6 @@ Return no extra commentary. Include all operations that are materially requested
                 m=m,
                 text=combined_text,
                 loop_budget=loop_budget,
-                style=style,
                 scope="document",
             )
             return summary
@@ -621,87 +613,45 @@ Return no extra commentary. Include all operations that are materially requested
         m: BaseSession,
         text: str,
         loop_budget: int = 5,
-        style: Literal["sentences", "keyphrases"] = "sentences",
         scope: Literal["section", "document"] = "section",
     ) -> str | None:
-        """Generate summary in different styles and scopes.
+        """Generate summary as readable sentences.
 
         Args:
             m: Backend session
             text: Text to summarize
             loop_budget: Retry budget for validation
-            style: Summary style - "sentences" for readable text, "keyphrases" for RAG
             scope: Summary scope - "section" for section-level, "document" for document-level
 
         Returns:
             Generated summary or None if generation fails
-
-        Warning:
-            The "keyphrases" style is a temporary solution for RAG use cases.
-            This method will be refactored once docling-core supports enrichment
-            of document items with "keywords" as part of the meta field (similar
-            to how "summary" and "entities" are currently supported).
         """
-        if style == "keyphrases":
 
-            def _validate_keyphrases(content: str) -> bool:
-                phrases = [p.strip() for p in content.split(";") if p.strip()]
-                return 2 <= len(phrases) <= 6
+        def _validate_summary(content: str) -> bool:
+            sentences = [s.strip() for s in content.split(".") if s.strip()]
+            return 1 <= len(sentences) <= 5
 
-            if scope == "document":
-                task_prompt = (
-                    "Based on the content from the first pages shown below, extract the most important "
-                    "concepts and facts that represent the ENTIRE DOCUMENT's main themes and topics. "
-                    "Use 3-5 concise phrases separated by semicolons. "
-                    "Focus on document-level themes, not just the content of these specific pages. "
-                    "Return only the phrases, no explanations or markdown."
-                )
-            else:  # section
-                task_prompt = (
-                    "Extract the most important concepts and facts from this content as key phrases. "
-                    "Use 3-5 concise phrases separated by semicolons. "
-                    "Focus on entities, actions, and key facts that would be useful for search and retrieval. "
-                    "Return only the phrases, no explanations or markdown."
-                )
-
-            return self._generate_content(
-                m=m,
-                text=text,
-                task_prompt=task_prompt,
-                requirement_description=(
-                    "Provide 3-5 key phrases separated by semicolons. "
-                    "Example: 'revenue growth 15%; market expansion Asia; new product launch; Q4 earnings $2.1B'"
-                ),
-                validation_fn=_validate_keyphrases,
-                loop_budget=loop_budget,
+        if scope == "document":
+            task_prompt = (
+                "Based on the content from the first pages shown below, write a 2-3 sentence summary "
+                "that captures the ENTIRE DOCUMENT's main purpose and key themes. "
+                "This should be a document-level overview, not just a summary of these specific pages. "
+                "Return only plain text with no markdown formatting."
             )
-        else:  # sentences (default)
-
-            def _validate_summary(content: str) -> bool:
-                sentences = [s.strip() for s in content.split(".") if s.strip()]
-                return 1 <= len(sentences) <= 5
-
-            if scope == "document":
-                task_prompt = (
-                    "Based on the content from the first pages shown below, write a 2-3 sentence summary "
-                    "that captures the ENTIRE DOCUMENT's main purpose and key themes. "
-                    "This should be a document-level overview, not just a summary of these specific pages. "
-                    "Return only plain text with no markdown formatting."
-                )
-            else:  # section
-                task_prompt = (
-                    "Summarize the following content in two or three succinct sentences. "
-                    "Return only plain text with no markdown formatting."
-                )
-
-            return self._generate_content(
-                m=m,
-                text=text,
-                task_prompt=task_prompt,
-                requirement_description="Write 2-3 succinct sentences summarizing the content. Return plain text only.",
-                validation_fn=_validate_summary,
-                loop_budget=loop_budget,
+        else:  # section
+            task_prompt = (
+                "Summarize the following content in two or three succinct sentences. "
+                "Return only plain text with no markdown formatting."
             )
+
+        return self._generate_content(
+            m=m,
+            text=text,
+            task_prompt=task_prompt,
+            requirement_description="Write 2-3 succinct sentences summarizing the content. Return plain text only.",
+            validation_fn=_validate_summary,
+            loop_budget=loop_budget,
+        )
 
     def _generate_keywords(
         self,
@@ -711,35 +661,34 @@ Return no extra commentary. Include all operations that are materially requested
         loop_budget: int = 5,
     ) -> list[str] | None:
         def _validate_keywords(content: str) -> bool:
-            match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
-            if not match:
-                return False
-            try:
-                val = json.loads(match.group(1))
-                return isinstance(val, list) and 3 <= len(val) <= 7
-            except Exception:
-                return False
+            keywords = [k.strip() for k in content.split(";") if k.strip()]
+            return 3 <= len(keywords) <= 7
 
         result = self._generate_content(
             m=m,
             text=text,
             task_prompt=(
-                "Extract 3 to 7 compelling and specific search keywords from the following content. "
-                "Focus on key concepts, technical terms, and important topics that would help someone find this content. "
-                "Return them as a JSON array of strings in a ```json ...``` block."
+                "Extract the most important concepts and facts from this content as search keywords. "
+                "Use 3-7 concise keywords or short phrases separated by semicolons. "
+                "Focus on key concepts, technical terms, entities, actions, and important topics "
+                "that would be useful for search and retrieval. "
+                "Return only the keywords separated by semicolons, no explanations or markdown."
             ),
-            requirement_description="Return 3-7 keywords as a JSON array in a ```json ...``` block.",
+            requirement_description=(
+                "Provide 3-7 keywords or short phrases separated by semicolons. "
+                "Example: 'machine learning; neural networks; deep learning; transformers; AI models'"
+            ),
             validation_fn=_validate_keywords,
             loop_budget=loop_budget,
         )
 
         if result:
-            match = re.search(r"```json\s*(.*?)\s*```", result, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(1))
-                except Exception as exc:
-                    log_warning("Failed to parse keywords JSON", exception=exc)
+            # Parse semicolon-separated keywords
+            keywords = [k.strip() for k in result.split(";") if k.strip()]
+            if 3 <= len(keywords) <= 7:
+                return keywords
+            else:
+                log_warning(f"Generated {len(keywords)} keywords, expected 3-7")
         return None
 
     # ------------------------------------------------------------------
@@ -794,7 +743,7 @@ Return no extra commentary. Include all operations that are materially requested
         """Walk document tree and add keywords to sections."""
 
         def set_keywords(meta: BaseMeta, result: Any) -> None:
-            meta.docling_agent__keywords = result
+            meta.keywords = KeywordsMetaField(values=result)
 
         self._walk_and_enrich(
             node=node,
@@ -802,7 +751,7 @@ Return no extra commentary. Include all operations that are materially requested
             m=m,
             loop_budget=loop_budget,
             min_text_length=min_text_length,
-            meta_attr="docling_agent__keywords",
+            meta_attr="keywords",
             generate_fn=self._generate_keywords,
             set_meta_fn=set_keywords,
         )
@@ -817,13 +766,13 @@ Return no extra commentary. Include all operations that are materially requested
         """Add keywords to leaf items (tables, pictures)."""
 
         def set_keywords(meta: BaseMeta, result: Any) -> None:
-            meta.docling_agent__keywords = result
+            meta.keywords = KeywordsMetaField(values=result)
 
         self._enrich_leaf_items(
             m=m,
             document=document,
             loop_budget=loop_budget,
-            meta_attr="docling_agent__keywords",
+            meta_attr="keywords",
             generate_fn=self._generate_keywords,
             set_meta_fn=set_keywords,
         )
