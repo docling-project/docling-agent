@@ -246,40 +246,29 @@ def test_make_entity_mention(enricher):
 
 
 def test_generate_summary(monkeypatch, enricher):
-    """Regression test for _generate_summary function with different styles and scopes."""
+    """Regression test for _generate_summary function with different scopes."""
 
     def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
-        # Return different outputs based on the requirement_description to simulate different styles
-        if "key phrases" in requirement_description.lower():
-            return "concept A; concept B; concept C"
-        else:
-            return "This is a test summary. It has multiple sentences."
+        # Return summary as sentences
+        return "This is a test summary. It has multiple sentences."
 
     monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
 
     m = enricher._create_extraction_session()
 
-    # Test sentences style with section scope (default)
-    summary = enricher._generate_summary(m=m, text="Sample text", style="sentences", scope="section")
+    # Test with section scope (default)
+    summary = enricher._generate_summary(m=m, text="Sample text", scope="section")
     assert summary == "This is a test summary. It has multiple sentences."
 
-    # Test keyphrases style with section scope
-    summary = enricher._generate_summary(m=m, text="Sample text", style="keyphrases", scope="section")
-    assert summary == "concept A; concept B; concept C"
-
-    # Test sentences style with document scope
-    summary = enricher._generate_summary(m=m, text="Sample text", style="sentences", scope="document")
+    # Test with document scope
+    summary = enricher._generate_summary(m=m, text="Sample text", scope="document")
     assert summary == "This is a test summary. It has multiple sentences."
-
-    # Test keyphrases style with document scope
-    summary = enricher._generate_summary(m=m, text="Sample text", style="keyphrases", scope="document")
-    assert summary == "concept A; concept B; concept C"
 
 
 def test_generate_document_level_summary(monkeypatch, test_document, enricher, markdown_serializer):
     """Regression test for _generate_document_level_summary function."""
 
-    def _fake_generate_summary(self, *, m, text, loop_budget=5, style="sentences", scope="section"):
+    def _fake_generate_summary(self, *, m, text, loop_budget=5, scope="section"):
         return "Document-level summary from first pages."
 
     monkeypatch.setattr(DoclingEnrichingAgent, "_generate_summary", _fake_generate_summary)
@@ -288,32 +277,28 @@ def test_generate_document_level_summary(monkeypatch, test_document, enricher, m
     serializer = markdown_serializer
 
     # Test with default parameters
-    summary = enricher._generate_document_level_summary(
-        document=document, serializer=serializer, num_pages=3, style="sentences"
-    )
+    summary = enricher._generate_document_level_summary(document=document, serializer=serializer, num_pages=3)
     assert summary == "Document-level summary from first pages."
 
-    # Test with keyphrases style
-    summary = enricher._generate_document_level_summary(
-        document=document, serializer=serializer, num_pages=2, style="keyphrases"
-    )
+    # Test with different number of pages
+    summary = enricher._generate_document_level_summary(document=document, serializer=serializer, num_pages=2)
     assert summary == "Document-level summary from first pages."
 
 
 def test_summarize_pages(monkeypatch, test_document, enricher):
     """Regression test for _summarize_pages function."""
 
-    def _fake_generate_summary(self, *, m, text, loop_budget=5, style="sentences", scope="section"):
+    def _fake_generate_summary(self, *, m, text, loop_budget=5, scope="section"):
         if scope == "document":
             return "Overall document summary."
-        return f"Page summary in {style} style."
+        return "Page summary."
 
     monkeypatch.setattr(DoclingEnrichingAgent, "_generate_summary", _fake_generate_summary)
 
     document = test_document
 
-    # Test with keyphrases style (default)
-    result_doc = enricher._summarize_pages(document=document, style="keyphrases")
+    # Test page summarization
+    result_doc = enricher._summarize_pages(document=document)
 
     # Verify document-level summary was added to body
     assert result_doc.body.meta is not None
@@ -327,7 +312,7 @@ def test_summarize_pages(monkeypatch, test_document, enricher):
             first_item, _ = next(iter(document.iterate_items(traverse_pictures=True, page_no=page_no)))
             if hasattr(first_item, "meta") and first_item.meta and first_item.meta.summary:
                 pages_with_summaries += 1
-                assert first_item.meta.summary.text == "Page summary in keyphrases style."
+                assert first_item.meta.summary.text == "Page summary."
         except StopIteration:
             continue
 
@@ -622,6 +607,68 @@ def test_extract_entities_session_isolation(
 
     # Should create 2 sessions: one for inference, one for extraction
     assert session_creation_count[0] == 2
+
+
+def test_generate_keywords(monkeypatch: pytest.MonkeyPatch, enricher: DoclingEnrichingAgent) -> None:
+    """Test that _generate_keywords returns a list of keywords."""
+
+    def _fake_generate_content(self, *, m, text, task_prompt, requirement_description, validation_fn, loop_budget=5):
+        # Simulate LLM returning keywords as semicolon-separated string
+        return "machine learning; neural networks; deep learning; AI; transformers"
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_content", _fake_generate_content)
+
+    m = enricher._create_reasoning_session()
+    text = (
+        "This document discusses machine learning and neural networks, focusing on deep learning and AI transformers."
+    )
+
+    result = enricher._generate_keywords(m=m, text=text, loop_budget=3)
+
+    assert result is not None
+    assert isinstance(result, list)
+    assert len(result) == 5
+    assert "machine learning" in result
+    assert "transformers" in result
+
+
+def test_find_search_keywords(
+    monkeypatch: pytest.MonkeyPatch, test_document: DoclingDocument, enricher: DoclingEnrichingAgent
+) -> None:
+    """Test that _find_search_keywords adds keywords to document metadata."""
+
+    def _fake_generate_keywords(self, *, m, text, loop_budget=5):
+        # Return different keywords based on text length to simulate different sections
+        if len(text) > 500:
+            return ["document processing", "PDF analysis", "AI models"]
+        else:
+            return ["section keyword", "topic"]
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_keywords", _fake_generate_keywords)
+
+    # Mock _fix_heading_levels to avoid editor dependency
+    def _fake_fix_heading_levels(self, *, document):
+        pass
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_fix_heading_levels", _fake_fix_heading_levels)
+
+    document = test_document
+
+    # Run keyword extraction
+    result_doc = enricher._find_search_keywords(document=document, fix_heading_levels=True, min_text_length=100)
+
+    # Verify that keywords were added to at least some items
+    items_with_keywords = 0
+    for item, _ in result_doc.iterate_items():
+        if hasattr(item, "meta") and item.meta and item.meta.keywords:
+            items_with_keywords += 1
+            # Verify the structure
+            assert hasattr(item.meta.keywords, "values")
+            assert isinstance(item.meta.keywords.values, list)
+            assert len(item.meta.keywords.values) > 0
+
+    # At least some items should have keywords
+    assert items_with_keywords > 0
 
 
 if __name__ == "__main__":
