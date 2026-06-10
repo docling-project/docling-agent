@@ -4,6 +4,7 @@ from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.extractor import DoclingExtractingAgent
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent.rag import DoclingRAGAgent
+from docling_agent.agent.rag_models import RAGIteration, RAGResult, RAGTrace
 from docling_agent.agent.writer import DoclingWritingAgent
 from docling_agent.backends import (
     BaseBackend,
@@ -44,7 +45,10 @@ __all__ = [
     "ModelConfig",
     "OllamaBackend",
     "OutputConfig",
+    "RAGIteration",
+    "RAGResult",
     "RAGTask",
+    "RAGTrace",
     "WriteTask",
     "create_backend",
     "load_task",
