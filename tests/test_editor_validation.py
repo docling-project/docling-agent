@@ -4,7 +4,6 @@ import pytest
 from docling_core.types.doc.document import DocItemLabel, DoclingDocument, SectionHeaderItem, TextItem, TitleItem
 from pydantic import ValidationError
 
-from docling_agent.agent.base import DoclingAgentType
 from docling_agent.agent.editor import (
     DoclingEditingAgent,
     MissingSectionHeadingInsertion,
@@ -178,8 +177,7 @@ class TestJsonPointerPatternValidation:
 class TestSectionHeadingFixHelpers:
     @staticmethod
     def _agent() -> DoclingEditingAgent:
-        return DoclingEditingAgent.model_construct(
-            agent_type=DoclingAgentType.DOCLING_DOCUMENT_EDITOR,
+        return DoclingEditingAgent(
             backend=None,
             tools=[],
         )

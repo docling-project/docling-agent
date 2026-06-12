@@ -1,7 +1,7 @@
 """Chunkless RAG agent using DoclingDocument tree structure and per-node summaries."""
 
 from pathlib import Path
-from typing import Annotated, Any, ClassVar
+from typing import Any, ClassVar
 
 from docling_core.experimental.serializer.outline import (
     OutlineFormat,
@@ -18,11 +18,11 @@ from docling_core.types.doc import (
     TitleItem,
 )
 from mellea.stdlib.requirements import Requirement, simple_validate
-from pydantic import Field
 from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
+from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -48,6 +48,15 @@ class DoclingRAGAgent(BaseDoclingAgent):
     iteratively select the most relevant section, reads only that section's
     content, and attempts to answer the query without loading the full
     document into the context window.
+
+    Attributes:
+        max_iterations: Maximum number of RAG iterations to perform before stopping
+        verbose: Enable verbose output with rich formatting for debugging
+        enable_document_selection: Enable document filtering before RAG when multiple documents are provided
+        use_page_level: Use pages as retrieval units instead of sections
+        use_batch_selection: Use batch-based selection instead of iterative selection (experimental)
+        batch_size: Number of pages or sections to evaluate per batch when using batch selection
+        top_k: Maximum number of pages or sections to select when using batch selection
     """
 
     _RAG_SYSTEM_PROMPT: ClassVar[str] = (
@@ -57,28 +66,6 @@ class DoclingRAGAgent(BaseDoclingAgent):
         "Always ground your answer in the document content. "
         "Do not hallucinate or add information not present in the retrieved sections."
     )
-
-    max_iterations: Annotated[int, Field(description="Maximum number of RAG iterations to perform before stopping")] = 5
-
-    verbose: Annotated[bool, Field(description="Enable verbose output with rich formatting for debugging")] = False
-
-    enable_document_selection: Annotated[
-        bool, Field(description="Enable document filtering before RAG when multiple documents are provided")
-    ] = False
-
-    use_page_level: Annotated[bool, Field(description="Use pages as retrieval units instead of sections")] = False
-
-    use_batch_selection: Annotated[
-        bool, Field(description="Use batch-based selection instead of iterative selection (experimental)")
-    ] = False
-
-    batch_size: Annotated[
-        int, Field(description="Number of pages or sections to evaluate per batch when using batch selection")
-    ] = 30
-
-    top_k: Annotated[
-        int, Field(description="Maximum number of pages or sections to select when using batch selection")
-    ] = 10
 
     def __init__(
         self,
@@ -93,6 +80,19 @@ class DoclingRAGAgent(BaseDoclingAgent):
         batch_size: int = 30,
         top_k: int = 10,
     ):
+        """Initialize the RAG agent.
+
+        Args:
+            tools: List of tools available to the agent
+            backend: LLM backend to use (default: mellea)
+            max_iterations: Maximum number of RAG iterations (default: 5)
+            verbose: Enable verbose output (default: False)
+            enable_document_selection: Enable document filtering (default: False)
+            use_page_level: Use pages instead of sections (default: False)
+            use_batch_selection: Use batch-based selection (default: False)
+            batch_size: Pages/sections per batch (default: 30)
+            top_k: Maximum pages/sections to select (default: 10)
+        """
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_RAG,
             backend=backend or self.default_backend(),
@@ -112,6 +112,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         if self._console is not None:
             self._console.print(renderable)
 
+    @override
     def run(
         self,
         task: str,

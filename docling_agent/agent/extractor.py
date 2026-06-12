@@ -2,32 +2,34 @@ import json
 from pathlib import Path
 from typing import Any, ClassVar
 
-# from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling.datamodel.base_models import InputFormat
 from docling.document_extractor import DocumentExtractor
 from docling_core.types.doc import (
     CodeLanguageLabel,
     DoclingDocument,
 )
-
-# from smolagents import MCPClient, Tool, ToolCollection
-# from smolagents.models import ChatMessage, MessageRole, Model
 from mellea.stdlib.requirements import Requirement, simple_validate
-from pydantic import Field
+from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.logging import log_error, log_info
 
 
 class DoclingExtractingAgent(BaseDoclingAgent):
+    """Agent for extracting structured data from documents using schemas.
+
+    This agent:
+    1. Generates or uses a provided JSON schema describing fields to extract
+    2. Applies the schema to source documents (PDFs, images)
+    3. Returns extracted data in a structured DoclingDocument format
+
+    The agent uses Docling's DocumentExtractor for the actual extraction
+    and can process multiple source files in batch.
+    """
+
     system_prompt_schema_extraction: ClassVar[str] = (
         "You are a precise data engineer. Given a task, output only a JSON schema (no backticks) describing the fields to extract with simple value types like string, integer, float, date, or arrays/objects of those."
     )
-
-    extractor: DocumentExtractor | None = None
-
-    # Stores the last extraction results as {path_str: [items, ...]}
-    last_results: dict[str, list[Any]] = Field(default_factory=dict)
 
     def __init__(
         self,
@@ -35,13 +37,22 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         tools: list,
         backend=None,
     ):
+        """Initialize the DoclingExtractingAgent.
+
+        Args:
+            tools: List of tools available to the agent.
+            backend: Optional backend for LLM interactions. If not provided,
+                uses the default backend.
+        """
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_EXTRACTOR,
             backend=backend or self.default_backend(),
             tools=tools,
         )
-        self.extractor = DocumentExtractor(allowed_formats=[InputFormat.IMAGE, InputFormat.PDF])
+        self._extractor: DocumentExtractor = DocumentExtractor(allowed_formats=[InputFormat.IMAGE, InputFormat.PDF])
+        self._last_results: dict[str, list[Any]] = {}
 
+    @override
     def run(
         self,
         task: str,
@@ -57,23 +68,21 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         successes = 0
         failures = 0
         total_items = 0
-        self.last_results = {}
+        self._last_results = {}
 
         log_info(f"Starting extraction for {total} source(s) for schema: {schema}")
         for idx, source in enumerate(sources, start=1):
             log_info(f"[{idx}/{total}] Extracting from: {source}")
             if isinstance(source, Path):
                 try:
-                    if self.extractor is None:
-                        raise RuntimeError("DocumentExtractor is not initialized")
-                    result = self.extractor.extract(source=source, template=schema)
+                    result = self._extractor.extract(source=source, template=schema)
                     # Ensure list for values
                     items: list[Any]
                     if isinstance(result, list):
                         items = result
                     else:
                         items = [result]
-                    self.last_results[str(source)] = items  # key by path string
+                    self._last_results[str(source)] = items  # key by path string
                     successes += 1
                     total_items += len(items)
                     log_info(f"Completed {source} with {len(items)} item(s) extracted.")
@@ -89,7 +98,7 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         # Build a document with headings per source and fenced JSON blocks per item.
         doc = DoclingDocument(name="extraction results")
         doc.add_title(text="Extraction Results")
-        for path_str, items in self.last_results.items():
+        for path_str, items in self._last_results.items():
             filename = Path(path_str).name
             doc.add_heading(text=f"filename: {filename}", level=1)
             for item in items:

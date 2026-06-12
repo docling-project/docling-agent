@@ -15,6 +15,7 @@ from docling_core.types.doc.document import (
     TitleItem,
 )
 from mellea.stdlib.requirements import Requirement, simple_validate
+from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import find_json_dicts
@@ -50,14 +51,20 @@ class _SourcePairs(list):
 
 
 class DoclingOrchestratorAgent(BaseDoclingAgent):
-    """Top-level orchestrator.
+    """Top-level orchestrator agent for coordinating document operations.
 
-    Receives an ``AgentTask``, resolves source files (converting them via
-    Docling and caching results in a local library), applies lazy enrichment,
-    and dispatches to the appropriate sub-agent.
+    This agent:
+    1. Receives an AgentTask specifying the operation mode and sources
+    2. Resolves source files (converting via Docling, caching in library)
+    3. Applies lazy enrichment as needed
+    4. Dispatches to the appropriate specialized sub-agent (RAG, Writer, Editor, etc.)
+
+    The orchestrator manages a document library for caching converted documents
+    and coordinates the workflow across different agent types.
+
+    Attributes:
+        library_path: Path to the document library for caching conversions.
     """
-
-    library_path: Path = Path.home() / ".docling_agent" / "library"
 
     def __init__(
         self,
@@ -66,16 +73,25 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         backend=None,
         library_path: Path | None = None,
     ) -> None:
+        """Initialize the DoclingOrchestratorAgent.
+
+        Args:
+            tools: List of tools available to the agent.
+            backend: Optional backend for LLM interactions. If not provided,
+                uses the default backend.
+            library_path: Optional path to document library. If not provided,
+                uses ~/.docling_agent/library.
+        """
         log_info("DoclingOrchestratorAgent.__init__")
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_ORCHESTRATOR,
             backend=backend or self.default_backend(),
             tools=tools,
         )
-        if library_path is not None:
-            self.library_path = library_path
+        self.library_path: Path = library_path or (Path.home() / ".docling_agent" / "library")
 
     # BaseDoclingAgent abstract method — not used directly
+    @override
     def run(
         self,
         task: str,
@@ -352,7 +368,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 enriched_doc = enricher.run(task=task.query, document=doc)
                 entry = library.get_entry(doc_id)
                 library.store(enriched_doc, entry.source_path if entry else "in-memory")
-                inferred_ops = enricher.last_operation.get("operations", [])
+                inferred_ops = enricher.get_last_operation().get("operations", [])
                 status_updates: dict[str, bool] = {}
                 if "summarize_items" in inferred_ops:
                     status_updates["has_summaries"] = True

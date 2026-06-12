@@ -13,11 +13,9 @@ from docling_core.types.doc.document import (
     TextItem,
     TitleItem,
 )
-
-# from smolagents import MCPClient, Tool, ToolCollection
-# from smolagents.models import ChatMessage, MessageRole, Model
 from mellea.stdlib.requirements import Requirement, simple_validate
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -33,8 +31,6 @@ from docling_agent.agent.base_functions import (
 )
 from docling_agent.agent_models import view_linear_context
 from docling_agent.logging import log_debug, log_error, log_info, log_warning
-
-# from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
     SYSTEM_PROMPT_EXPERT_WRITER,
     SYSTEM_PROMPT_FOR_EDITING_DOCUMENT,
@@ -47,38 +43,45 @@ class UpdateContentOperation(BaseModel):
     """Operation to update content of a single document item."""
 
     operation: Literal["update_content"]
-    ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
+    ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX, description="JSON pointer to the document item to update")]
 
 
 class RewriteContentOperation(BaseModel):
     """Operation to rewrite content of multiple document items."""
 
     operation: Literal["rewrite_content"]
-    refs: list[Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]]
+    refs: Annotated[
+        list[Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]],
+        Field(description="List of JSON pointers to document items to rewrite"),
+    ]
 
 
 class SectionHeadingLevelChange(BaseModel):
     """A single section heading level change."""
 
-    ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
-    to_level: Annotated[int, Field(ge=-1)]
+    ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX, description="JSON pointer to the section heading")]
+    to_level: Annotated[
+        int, Field(ge=-1, description="Target heading level (-1 to convert to text, 0 for title, ≥1 for section)")
+    ]
 
 
 class MissingSectionHeadingInsertion(BaseModel):
     """Insert a missing section heading inferred between two existing headings."""
 
-    previous_ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
-    next_ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX)]
-    regex: str
-    level: Annotated[int, Field(ge=1)]
+    previous_ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX, description="JSON pointer to the previous heading")]
+    next_ref: Annotated[str, Field(pattern=_JSON_POINTER_REGEX, description="JSON pointer to the next heading")]
+    regex: Annotated[str, Field(description="Regular expression to match the heading text to insert")]
+    level: Annotated[int, Field(ge=1, description="Heading level for the inserted section")]
 
 
 class UpdateSectionHeadingLevelOperation(BaseModel):
     """Operation to update section heading levels."""
 
     operation: Literal["update_section_heading_level"]
-    changes: list[SectionHeadingLevelChange]
-    insertions: list[MissingSectionHeadingInsertion] = Field(default_factory=list)
+    changes: Annotated[list[SectionHeadingLevelChange], Field(description="List of heading level changes to apply")]
+    insertions: list[MissingSectionHeadingInsertion] = Field(
+        default_factory=list, description="List of missing headings to insert"
+    )
 
 
 DocumentOperation = Annotated[
@@ -88,6 +91,18 @@ DocumentOperation = Annotated[
 
 
 class DoclingEditingAgent(BaseDoclingAgent):
+    """Agent for editing existing DoclingDocument content.
+
+    This agent can perform various editing operations:
+    - Update content of individual document items
+    - Rewrite content across multiple items
+    - Adjust section heading levels
+    - Insert missing section headings
+
+    The agent uses LLM-based reasoning to identify the appropriate operation
+    and target items based on natural language task descriptions.
+    """
+
     system_prompt_for_editing_document: ClassVar[str] = SYSTEM_PROMPT_FOR_EDITING_DOCUMENT
     system_prompt_for_editing_table: ClassVar[str] = SYSTEM_PROMPT_FOR_EDITING_TABLE
 
@@ -99,12 +114,20 @@ class DoclingEditingAgent(BaseDoclingAgent):
         tools: list,
         backend=None,
     ):
+        """Initialize the DoclingEditingAgent.
+
+        Args:
+            tools: List of tools available to the agent.
+            backend: Optional backend for LLM interactions. If not provided,
+                uses the default backend.
+        """
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_EDITOR,
             backend=backend or self.default_backend(),
             tools=tools,
         )
 
+    @override
     def run(
         self,
         task: str,
@@ -240,7 +263,14 @@ Now, provide me with the operation to execute the task using the exact field nam
         except ValidationError as e:
             raise ValueError(f"Operation validation failed: {e}") from e
 
-    def _update_content(self, task: str, document: DoclingDocument, sref: str):
+    def _update_content(self, task: str, document: DoclingDocument, sref: str) -> None:
+        """Update content of a document item identified by reference.
+
+        Args:
+            task: The editing task description.
+            document: The document containing the item to update.
+            sref: JSON pointer reference to the item.
+        """
         log_info("_update_content_of_document_items")
 
         ref = RefItem(cref=sref)

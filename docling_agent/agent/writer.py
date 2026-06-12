@@ -30,6 +30,7 @@ from docling_core.types.doc.document import (
     TitleItem,
 )
 from mellea.stdlib.requirements import Requirement, simple_validate
+from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -55,20 +56,23 @@ from docling_agent.logging import (
     log_warning,
     operation_context,
 )
-
-# from examples.smolagents.agent_tools import MCPConfig, setup_mcp_tools
 from docling_agent.resources.prompts import (
     SYSTEM_PROMPT_EXPERT_TABLE_WRITER,
     SYSTEM_PROMPT_EXPERT_WRITER,
     SYSTEM_PROMPT_FOR_OUTLINE,
-    SYSTEM_PROMPT_FOR_TASK_ANALYSIS,
 )
 
 
 class DoclingWritingAgent(BaseDoclingAgent):
-    task_analysis: DoclingDocument = DoclingDocument(name="report")
+    """Agent for writing new DoclingDocument content from scratch.
 
-    system_prompt_for_task_analysis: ClassVar[str] = SYSTEM_PROMPT_FOR_TASK_ANALYSIS
+    This agent creates documents by:
+    1. Generating a structured outline based on the task
+    2. Populating the outline with content (text, tables, figures, etc.)
+
+    The agent can generate various content types including paragraphs, lists,
+    tables, figures, and charts with appropriate metadata.
+    """
 
     system_prompt_for_outline: ClassVar[str] = SYSTEM_PROMPT_FOR_OUTLINE
 
@@ -110,12 +114,20 @@ class DoclingWritingAgent(BaseDoclingAgent):
         tools: list,
         backend=None,
     ):
+        """Initialize the DoclingWritingAgent.
+
+        Args:
+            tools: List of tools available to the agent.
+            backend: Optional backend for LLM interactions. If not provided,
+                uses the default backend.
+        """
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_WRITER,
             backend=backend or self.default_backend(),
             tools=tools,
         )
 
+    @override
     def run(
         self,
         task: str,
@@ -143,9 +155,6 @@ class DoclingWritingAgent(BaseDoclingAgent):
 
             log_agent_end("Document writing complete", items=len(list(result_document.iterate_items())))
             return result_document
-
-    def _analyse_task_for_final_destination(self, *, task: str):
-        return
 
     def _make_outline_for_writing(self, *, task: str, loop_budget: int = 5) -> DoclingDocument:
         m = self._create_reasoning_session(system_prompt=self.system_prompt_for_outline)
