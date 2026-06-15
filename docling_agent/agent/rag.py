@@ -4,17 +4,16 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from docling_core.experimental.serializer.outline import (
-    OutlineDocSerializer,
     OutlineFormat,
-    OutlineMode,
-    OutlineParams,
 )
-from docling_core.transforms.serializer.markdown import (
-    MarkdownDocSerializer,
-)
-from docling_core.types.doc.document import (
+from docling_core.transforms.serializer.html import HTMLTableSerializer
+from docling_core.transforms.serializer.markdown import MarkdownDocSerializer, MarkdownParams
+from docling_core.types.doc import (
+    DocItem,
     DocItemLabel,
     DoclingDocument,
+    ImageRefMode,
+    NodeItem,
     SectionHeaderItem,
     TitleItem,
 )
@@ -23,6 +22,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
+from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -37,28 +37,35 @@ from docling_agent.agent.rag_models import (
     RAGResult,
     SectionSelection,
 )
+from docling_agent.agent_models import view_linear_context
 from docling_agent.logging import log_debug, log_info, log_warning
 
 
 class DoclingRAGAgent(BaseDoclingAgent):
-    """Chunkless RAG agent.
+    """Chunkless RAG agent using document structure and per-node summaries.
 
-    Builds a compact document outline (with per-node summaries), lets the LLM
+    Builds a compact document outline with per-node summaries, lets the LLM
     iteratively select the most relevant section, reads only that section's
-    content, and attempts to answer the query — without ever loading the full
+    content, and attempts to answer the query without loading the full
     document into the context window.
+
+    Attributes:
+        max_iterations: Maximum number of RAG iterations to perform before stopping
+        verbose: Enable verbose output with rich formatting for debugging
+        enable_document_selection: Enable document filtering before RAG when multiple documents are provided
+        use_page_level: Use pages as retrieval units instead of sections
+        use_batch_selection: Use batch-based selection instead of iterative selection (experimental)
+        batch_size: Number of pages or sections to evaluate per batch when using batch selection
+        top_k: Maximum number of pages or sections to select when using batch selection
     """
 
     _RAG_SYSTEM_PROMPT: ClassVar[str] = (
         "You are a precise research assistant. You are given a query and a document outline "
-        "with per-section summaries. Your job is to iteratively select the most relevant sections "
+        "with per-section summaries or keyphrases. Your job is to iteratively select the most relevant sections "
         "and build an answer from their content. "
         "Always ground your answer in the document content. "
         "Do not hallucinate or add information not present in the retrieved sections."
     )
-
-    max_iterations: int = 5
-    verbose: bool = False
 
     def __init__(
         self,
@@ -67,7 +74,25 @@ class DoclingRAGAgent(BaseDoclingAgent):
         backend=None,
         max_iterations: int = 5,
         verbose: bool = False,
+        enable_document_selection: bool = False,
+        use_page_level: bool = False,
+        use_batch_selection: bool = False,
+        batch_size: int = 30,
+        top_k: int = 10,
     ):
+        """Initialize the RAG agent.
+
+        Args:
+            tools: List of tools available to the agent
+            backend: LLM backend to use (default: mellea)
+            max_iterations: Maximum number of RAG iterations (default: 5)
+            verbose: Enable verbose output (default: False)
+            enable_document_selection: Enable document filtering (default: False)
+            use_page_level: Use pages instead of sections (default: False)
+            use_batch_selection: Use batch-based selection (default: False)
+            batch_size: Pages/sections per batch (default: 30)
+            top_k: Maximum pages/sections to select (default: 10)
+        """
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_RAG,
             backend=backend or self.default_backend(),
@@ -75,6 +100,11 @@ class DoclingRAGAgent(BaseDoclingAgent):
         )
         self.max_iterations = max_iterations
         self.verbose = verbose
+        self.enable_document_selection = enable_document_selection
+        self.use_page_level = use_page_level
+        self.use_batch_selection = use_batch_selection
+        self.batch_size = batch_size
+        self.top_k = top_k
         self._console = Console(highlight=False) if verbose else None
 
     def _rprint(self, renderable: Any) -> None:
@@ -82,6 +112,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         if self._console is not None:
             self._console.print(renderable)
 
+    @override
     def run(
         self,
         task: str,
@@ -94,6 +125,31 @@ class DoclingRAGAgent(BaseDoclingAgent):
             docs = [document]
         if not docs:
             raise ValueError("DoclingRAGAgent requires at least one DoclingDocument.")
+
+        # Optional document selection
+        if self.enable_document_selection and len(docs) > 1:
+            self._rprint(Rule(f"[bold cyan]Selecting relevant documents from {len(docs)} candidates[/bold cyan]"))
+
+            # Build document summaries
+            documents_dict = {doc.name: doc for doc in docs}
+            doc_summaries = {doc.name: self._extract_document_summary(doc) for doc in docs}
+
+            # Select relevant documents
+            selected_doc_names = self._select_relevant_documents(
+                query=task,
+                documents=documents_dict,
+                doc_summaries=doc_summaries,
+            )
+
+            # Filter docs to only selected ones
+            docs = [documents_dict[name] for name in selected_doc_names if name in documents_dict]
+            self._rprint(
+                Panel(
+                    f"Selected {len(docs)} document(s): {[d.name for d in docs]}",
+                    title="[cyan]Document Selection[/cyan]",
+                    border_style="cyan",
+                )
+            )
 
         per_doc_answers: list[str] = []
         all_iterations: list[RAGIteration] = []
@@ -256,23 +312,82 @@ class DoclingRAGAgent(BaseDoclingAgent):
             converged=False,
         )
 
-    # ------------------------------------------------------------------
-    # Outline
-    # ------------------------------------------------------------------
-
-    def _build_outline(self, doc: DoclingDocument) -> str:
-        serializer = OutlineDocSerializer(
-            doc=doc,
-            params=OutlineParams(mode=OutlineMode.OUTLINE),
-        )
-        return serializer.serialize().text
-
     def _extract_section_refs(self, doc: DoclingDocument) -> set[str]:
-        refs: set[str] = set()
+        """Extract section or page references based on mode.
+
+        Returns:
+            Set of section refs (e.g., "#/body/0") or page refs (e.g., "#/pages/0")
+        """
+        if self.use_page_level:
+            # Page-level mode: return page references using JSON pointer format
+            refs: set[str] = set()
+            num_pages = len(doc.pages) if doc.pages else 0
+            for i in range(num_pages):
+                refs.add(f"#/pages/{i}")  # Use JSON pointer format
+            return refs
+        else:
+            # Section-level mode: return section header references
+            refs = set()
+            for item, _ in doc.iterate_items():
+                if isinstance(item, TitleItem | SectionHeaderItem):
+                    refs.add(item.self_ref)
+            return refs
+
+    def _extract_page_summaries(self, doc: DoclingDocument) -> dict[int, str]:
+        """Extract page-level summaries from enriched document.
+
+        For page-level enrichment, the summary is stored in the meta field of the
+        first document item on each page.
+
+        TODO: Consider storing page summaries in a dedicated field in the future.
+        TODO: Check the case of a summary in an item with multiple page provenances.
+
+        Args:
+            doc: The enriched DoclingDocument
+
+        Returns:
+            Dictionary mapping page number (1-indexed) to summary text
+        """
+        page_summaries: dict[int, str] = {}
+
         for item, _ in doc.iterate_items():
-            if isinstance(item, TitleItem | SectionHeaderItem):
-                refs.add(item.self_ref)
-        return refs
+            if not isinstance(item, DocItem) or not item.prov:
+                continue
+            page_num = item.prov[0].page_no
+            # Only process if we haven't seen this page yet
+            if page_num not in page_summaries:
+                # Check if item has meta with summary
+                if item.meta and item.meta.summary and item.meta.summary.text:
+                    page_summaries[page_num] = item.meta.summary.text
+                    break  # Only need a summary per page
+        return page_summaries
+
+    def _extract_page_keyphrases(self, doc: DoclingDocument) -> dict[int, list[str]]:
+        """Extract page-level keyphrases from enriched document.
+
+        For page-level enrichment, keyphrases are stored in the meta field of the
+        first document item on each page.
+
+        TODO: Consider storing page summaries in a dedicated field in the future.
+        TODO: Check the case of keyphrases in an item with multiple page provenances.
+
+        Args:
+            doc: The enriched DoclingDocument
+
+        Returns:
+            Dictionary mapping page number (1-indexed) to keyphrases
+        """
+        page_keyphrases: dict[int, list[str]] = {}
+
+        for item, _ in doc.iterate_items():
+            if not isinstance(item, DocItem) or not item.prov:
+                continue
+            page_num = item.prov[0].page_no
+            if page_num not in page_keyphrases:
+                if item.meta and item.meta.keywords and item.meta.keywords.values:
+                    page_keyphrases[page_num] = item.meta.keywords.values
+                    break
+        return page_keyphrases
 
     # ------------------------------------------------------------------
     # Section selection
@@ -324,6 +439,8 @@ class DoclingRAGAgent(BaseDoclingAgent):
             retry_budget=3,
         )
 
+        view_linear_context(m)
+
         dicts = find_json_dicts(answer)
         d = dicts[0] if dicts else {}
         if not isinstance(d.get("reason"), str) or d.get("section_ref") not in unvisited:
@@ -336,7 +453,11 @@ class DoclingRAGAgent(BaseDoclingAgent):
     # ------------------------------------------------------------------
 
     def _get_section_content(self, doc: DoclingDocument, section_ref: str) -> str:
-        """Return all text belonging to the given section node."""
+        """Return all text belonging to the given section node or page."""
+        # Handle page-level mode
+        if self.use_page_level and section_ref.startswith("#/pages/"):
+            return self._get_page_content(doc, section_ref)
+
         node = get_item_by_ref(doc, section_ref)
         if node is None:
             log_warning(f"Could not resolve section ref {section_ref!r}")
@@ -352,6 +473,34 @@ class DoclingRAGAgent(BaseDoclingAgent):
             subtree = self._collect_flat_section_text(doc, section_ref)
 
         return subtree
+
+    def _get_page_content(self, doc: DoclingDocument, page_ref: str) -> str:
+        """Extract all text content from a specific page.
+
+        Serializes a document page into text using the markdown format.
+        Tables are serialized using the HTML format in order to capture
+        nested rich content.
+
+        TODO: Sync with _summarize_pages in enricher.py
+        TODO: replace page_ref parameter by page number (1-indexed)
+        TODO: reuse the serializer if this method is called multiple times
+        """
+        page_no: int = int(page_ref.split("/")[-1])
+
+        # Markdown serialization parameters
+        md_params = MarkdownParams(
+            image_mode=ImageRefMode.PLACEHOLDER,
+            image_placeholder="",
+            escape_underscores=False,
+            escape_html=False,
+            compact_tables=True,
+            traverse_pictures=True,
+        )
+
+        serializer = MarkdownDocSerializer(doc=doc, table_serializer=HTMLTableSerializer(), params=md_params)
+        page_text = serializer.serialize(pages={page_no}).text
+
+        return page_text
 
     def _collect_flat_section_text(self, doc: DoclingDocument, section_ref: str) -> str:
         """Scan iterate_items for the section and collect siblings until next section."""
@@ -417,6 +566,8 @@ class DoclingRAGAgent(BaseDoclingAgent):
             retry_budget=3,
         )
 
+        view_linear_context(m)
+
         d = find_json_dicts(answer)[0]
         return AnswerAttempt(can_answer=d["can_answer"], response=d["response"])
 
@@ -439,4 +590,101 @@ class DoclingRAGAgent(BaseDoclingAgent):
             f"Query: {query}\n\nPartial answers:\n{formatted}\n\nSynthesize a final answer.",
             retry_budget=3,
         )
+
+        view_linear_context(m)
+
         return answer.strip()
+
+    # ------------------------------------------------------------------
+    # Document selection
+    # ------------------------------------------------------------------
+
+    def _extract_document_summary(self, doc: DoclingDocument) -> str:
+        """Extract document-level summary from enriched document.
+
+        The summary is stored in the meta field of the root body item.
+        If no summary is found, return a fallback string with the document name.
+        """
+
+        item: NodeItem | None = get_item_by_ref(doc, "#/body")
+        if item and item.meta and item.meta.summary and item.meta.summary.text:
+            return item.meta.summary.text
+        else:
+            log_warning(f"No document summary found for {doc.name}")
+            return f"Document: {doc.name}"
+
+    def _select_relevant_documents(
+        self,
+        *,
+        query: str,
+        documents: dict[str, DoclingDocument],
+        doc_summaries: dict[str, str],
+    ) -> list[str]:
+        """Select which documents are relevant for answering the query.
+
+        This removes evaluation bias by not assuming we know which document
+        contains the answer. The model must decide based on document summaries.
+
+        Args:
+            query: The query to answer
+            documents: Dictionary mapping doc_id to DoclingDocument
+            doc_summaries: Dictionary mapping doc_id to document summary
+
+        Returns:
+            List of relevant doc_ids
+        """
+        log_info(f"Selecting relevant documents from {len(documents)} candidates")
+
+        # Build prompt with all document summaries
+        doc_list = "\n".join([f"Document '{doc_id}':\n{summary}" for doc_id, summary in doc_summaries.items()])
+
+        prompt = f"""You are analyzing a collection of documents to find which ones are relevant for answering a query.
+
+QUERY:
+{query}
+
+AVAILABLE DOCUMENTS:
+{doc_list}
+
+TASK:
+Identify the MOST relevant document(s) for answering the query. Be selective and precise.
+
+IMPORTANT GUIDELINES:
+- Prefer selecting few documents that are highly relevant
+- Only select additional documents if they provide essential complementary information
+- Do NOT select documents just because they might be tangentially related
+- Quality over quantity: it's better to select fewer, highly relevant documents than many loosely related ones
+- If the query is specific to one company/topic, typically only 1 document is needed
+- If the query compares multiple entities, select only the documents for those specific entities
+
+Format your response as:
+Document 'doc_id': [reason]
+
+Only include documents that are actually relevant to the query.
+"""
+
+        try:
+            # Get reasoning model
+            m = self._create_reasoning_session(system_prompt=self._RAG_SYSTEM_PROMPT)
+            response = m.instruct(prompt, retry_budget=3)
+
+            view_linear_context(m)
+
+            # Parse response to extract doc_ids
+            selected_docs = []
+            for doc_id in documents.keys():
+                # Look for the doc_id in the response
+                if f"'{doc_id}'" in response or f'"{doc_id}"' in response or doc_id in response:
+                    selected_docs.append(doc_id)
+
+            if not selected_docs:
+                log_warning("No documents selected by model, using all documents as fallback")
+                selected_docs = list(documents.keys())
+
+            log_info(f"Selected {len(selected_docs)} relevant document(s): {selected_docs}")
+            return selected_docs
+
+        except Exception as e:
+            log_warning(f"Error selecting documents: {e}")
+            # Fallback to all documents
+            return list(documents.keys())

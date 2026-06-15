@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 # from smolagents import MCPClient, Tool, ToolCollection
 # from smolagents.models import ChatMessage, MessageRole, Model
-from pydantic import BaseModel, ConfigDict
-
 from docling_agent.backends import BaseBackend, create_backend
+from docling_agent.backends.base import BaseSession
 from docling_agent.task_model import BackendConfig
 
 if TYPE_CHECKING:
@@ -47,14 +46,39 @@ class DoclingAgentType(Enum):
         return [agent_type.value for agent_type in cls]
 
 
-class BaseDoclingAgent(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+class BaseDoclingAgent(ABC):
+    """Abstract base class for all Docling agents.
 
-    agent_type: DoclingAgentType
-    backend: BaseBackend
-    tools: list
+    Agents are behavioral objects that execute natural language tasks
+    on documents using LLM backends.
 
-    max_iteration: int = 16
+    Attributes:
+        agent_type: The type of agent (writer, editor, enricher, etc.)
+        backend: The LLM backend used for model interactions
+        tools: List of tools available to the agent
+        max_iteration: Maximum number of iterations for agent operations
+    """
+
+    def __init__(
+        self,
+        *,
+        agent_type: DoclingAgentType,
+        backend: BaseBackend,
+        tools: list,
+        max_iteration: int = 16,
+    ):
+        """Initialize the base agent.
+
+        Args:
+            agent_type: The type of agent being created
+            backend: The LLM backend to use
+            tools: List of tools available to the agent
+            max_iteration: Maximum iterations for agent operations (default: 16)
+        """
+        self.agent_type = agent_type
+        self.backend = backend
+        self.tools = tools
+        self.max_iteration = max_iteration
 
     @staticmethod
     def default_backend() -> BaseBackend:
@@ -73,19 +97,43 @@ class BaseDoclingAgent(BaseModel):
         """Return the backend-scoped extraction model id."""
         return cast(str, self.backend.models.extraction)
 
-    def _create_reasoning_session(self, *, system_prompt: str | None = None):
+    def _create_reasoning_session(self, *, system_prompt: str | None = None) -> BaseSession:
+        """Create a reasoning session with the backend.
+
+        Args:
+            system_prompt: Optional system prompt to initialize the session.
+
+        Returns:
+            A backend session configured for reasoning tasks.
+        """
         return self.backend.create_session(
             model=self.get_reasoning_model_id(),
             system_prompt=system_prompt,
         )
 
-    def _create_writing_session(self, *, system_prompt: str | None = None):
+    def _create_writing_session(self, *, system_prompt: str | None = None) -> BaseSession:
+        """Create a writing session with the backend.
+
+        Args:
+            system_prompt: Optional system prompt to initialize the session.
+
+        Returns:
+            A backend session configured for writing tasks.
+        """
         return self.backend.create_session(
             model=self.get_writing_model_id(),
             system_prompt=system_prompt,
         )
 
-    def _create_extraction_session(self, *, system_prompt: str | None = None):
+    def _create_extraction_session(self, *, system_prompt: str | None = None) -> BaseSession:
+        """Create an extraction session with the backend.
+
+        Args:
+            system_prompt: Optional system prompt to initialize the session.
+
+        Returns:
+            A backend session configured for extraction tasks.
+        """
         return self.backend.create_session(
             model=self.get_extraction_model_id(),
             system_prompt=system_prompt,

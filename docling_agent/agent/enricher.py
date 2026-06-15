@@ -1,6 +1,6 @@
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, ClassVar, Literal, Protocol, cast
@@ -36,7 +36,7 @@ from docling_core.types.doc.document import (
     TitleItem,
 )
 from mellea.stdlib.requirements import Requirement, simple_validate
-from pydantic import Field
+from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import (
@@ -99,7 +99,14 @@ _ROUTING_OPS = (
 
 class DoclingEnrichingAgent(BaseDoclingAgent):
     """Agent for enriching a document with metadata like summaries, keywords,
-    entities, and classifications."""
+    entities, and classifications.
+
+    This agent provides operations for:
+    - Summarizing document items at various levels (leaf items, pages, document)
+    - Extracting search keywords from content
+    - Detecting and extracting named entities
+    - Classifying pictures and charts
+    """
 
     system_prompt_for_enrichment_routing: ClassVar[str] = """
 You are a precise document enrichment router. Given a natural language task description, select one or more enrichment operations to run and return only one JSON object in a ```json ...``` block, with the following schema:
@@ -129,11 +136,16 @@ Return no extra commentary. Include all operations that are materially requested
         {"bar-chart", "line-chart", "pie-chart", "scatter-chart", "spider-chart"}
     )
 
-    last_operation: dict[str, Any] = Field(default_factory=dict)
-
     @contextmanager
-    def _timed_stage(self, name: str):
-        """Context manager for timing enrichment stages."""
+    def _timed_stage(self, name: str) -> Iterator[None]:
+        """Context manager for timing enrichment stages.
+
+        Args:
+            name: Name of the stage for logging purposes.
+
+        Yields:
+            None
+        """
         with timed_operation(name):
             yield
 
@@ -143,12 +155,29 @@ Return no extra commentary. Include all operations that are materially requested
         tools: list,
         backend=None,
     ):
+        """Initialize the DoclingEnrichingAgent.
+
+        Args:
+            tools: List of tools available to the agent.
+            backend: Optional backend for LLM interactions. If not provided,
+                uses the default backend.
+        """
         super().__init__(
             agent_type=DoclingAgentType.DOCLING_DOCUMENT_ENRICHER,
             backend=backend or self.default_backend(),
             tools=tools,
         )
+        self._last_operation: dict[str, Any] = {}
 
+    def get_last_operation(self) -> dict[str, Any]:
+        """Get the last operation plan that was executed.
+
+        Returns:
+            Dictionary containing the last operation plan with 'operations' key.
+        """
+        return self._last_operation
+
+    @override
     def run(
         self,
         task: str,
@@ -167,7 +196,7 @@ Return no extra commentary. Include all operations that are materially requested
 
         with self._timed_stage("routing"):
             plan = self._choose_operations(task=task)
-        self.last_operation = plan
+        self._last_operation = plan
         inferred_operations = plan.get("operations", [])
         log_info("Chosen enrichment operations", operations=inferred_operations)
         return self._run_operations(
@@ -900,7 +929,7 @@ Return no extra commentary. Include all operations that are materially requested
         def set_entities(meta: BaseMeta, result: Any) -> None:
             meta.entities = result
 
-        def generate_entities(*, m: BaseSession, text: str, loop_budget: int):
+        def generate_entities(*, m: BaseSession, text: str, loop_budget: int) -> Any:
             result = self._generate_entities(
                 m=m,
                 task=task,
@@ -936,7 +965,7 @@ Return no extra commentary. Include all operations that are materially requested
         def set_entities(meta: BaseMeta, result: Any) -> None:
             meta.entities = result
 
-        def generate_entities(*, m: BaseSession, text: str, loop_budget: int):
+        def generate_entities(*, m: BaseSession, text: str, loop_budget: int) -> Any:
             return self._generate_entities(
                 m=m,
                 task=task,

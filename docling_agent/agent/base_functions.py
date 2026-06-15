@@ -353,7 +353,7 @@ def insert_document(*, item: NodeItem, doc: DoclingDocument, updated_doc: Doclin
 
 def get_item_by_ref(doc: DoclingDocument, ref: str) -> NodeItem | None:
     """Resolve a self_ref string to a NodeItem. Returns None on failure."""
-    log_info(f"get_item_by_ref: ref={ref!r}")
+    log_debug(f"get_item_by_ref: ref={ref!r}")
     try:
         return RefItem(cref=ref).resolve(doc)
     except Exception:
@@ -373,13 +373,11 @@ def collect_subtree_text(node: NodeItem, doc: DoclingDocument) -> str:
     if hasattr(node, "text") and node.text:
         parts.append(node.text)
     for child_ref in node.children or []:
-        try:
-            child = child_ref.resolve(doc)
+        child = get_item_by_ref(doc, child_ref.cref)
+        if child:
             subtree = collect_subtree_text(child, doc)
             if subtree:
                 parts.append(subtree)
-        except Exception:
-            pass
     return "\n".join(parts)
 
 
