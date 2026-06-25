@@ -1,3 +1,13 @@
+## [v0.6.0](https://github.com/docling-project/docling-agent/releases/tag/v0.6.0) - 2026-06-25
+
+### Feature
+
+* **rag:** Expose reasoning trace via public run_with_trace() ([#39](https://github.com/docling-project/docling-agent/issues/39)) ([`9075749`](https://github.com/docling-project/docling-agent/commit/9075749064eb369e0e72d7cd218598d6e4ad2381))
+
+### Fix
+
+* **enrich:** Propagate task to enricher and enforce label whitelist ([#31](https://github.com/docling-project/docling-agent/issues/31)) ([`33cd343`](https://github.com/docling-project/docling-agent/commit/33cd3436f995f38cf90e6453aa854012bdf08f78))
+
 ## [v0.5.0](https://github.com/docling-project/docling-agent/releases/tag/v0.5.0) - 2026-05-29
 
 ### Feature
