@@ -36,3 +36,11 @@ class RAGResult(BaseModel):
     answer: Annotated[str, Field(description="The final answer to the query")]
     iterations: Annotated[list[RAGIteration], Field(description="List of all RAG iterations performed")]
     converged: Annotated[bool, Field(description="True if can_answer was reached; False if max_iterations hit")]
+
+
+class RAGTrace(BaseModel):
+    """Full reasoning trace of a RAG run across one or more documents."""
+
+    query: Annotated[str, Field(description="The original query answered by this run")]
+    per_document: Annotated[list[RAGResult], Field(description="One entry per source DoclingDocument, in input order")]
+    final_answer: Annotated[str, Field(description="Merged answer that run() wraps into a DoclingDocument")]

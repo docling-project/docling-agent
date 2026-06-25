@@ -35,6 +35,7 @@ from docling_agent.agent.rag_models import (
     AnswerAttempt,
     RAGIteration,
     RAGResult,
+    RAGTrace,
     SectionSelection,
 )
 from docling_agent.agent_models import view_linear_context
@@ -120,6 +121,26 @@ class DoclingRAGAgent(BaseDoclingAgent):
         sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> DoclingDocument:
+        trace = self.run_with_trace(task, document=document, sources=sources, **kwargs)
+
+        answer_doc = DoclingDocument(name="rag_answer")
+        answer_doc.add_title(text="Answer", parent=answer_doc.body)
+        answer_doc.add_text(label=DocItemLabel.TEXT, text=trace.final_answer, parent=answer_doc.body)
+        return answer_doc
+
+    def run_with_trace(
+        self,
+        task: str,
+        document: DoclingDocument | None = None,
+        sources: list[DoclingDocument | Path] = [],
+        **kwargs,
+    ) -> RAGTrace:
+        """Run the RAG loop and return the full reasoning trace.
+
+        Same orchestration as run(), but returns a typed RAGTrace exposing the
+        per-document RAGResult (selections, reasons, convergence) and the merged
+        final_answer. run() is a thin wrapper around this method.
+        """
         docs = [s for s in sources if isinstance(s, DoclingDocument)]
         if not docs and document is not None:
             docs = [document]
@@ -151,24 +172,20 @@ class DoclingRAGAgent(BaseDoclingAgent):
                 )
             )
 
-        per_doc_answers: list[str] = []
-        all_iterations: list[RAGIteration] = []
-
+        per_document: list[RAGResult] = []
         for doc in docs:
             result = self._rag_loop(query=task, doc=doc)
-            per_doc_answers.append(result.answer)
-            all_iterations.extend(result.iterations)
+            per_document.append(result)
             log_info(f"RAG loop finished: converged={result.converged}, iterations={len(result.iterations)}")
 
         if len(docs) > 1:
             self._rprint(Rule(f"[bold cyan]Merging answers from {len(docs)} documents[/bold cyan]"))
 
-        final_answer = self._merge_answers(query=task, answers=per_doc_answers)
-
-        answer_doc = DoclingDocument(name="rag_answer")
-        answer_doc.add_title(text="Answer", parent=answer_doc.body)
-        answer_doc.add_text(label=DocItemLabel.TEXT, text=final_answer, parent=answer_doc.body)
-        return answer_doc
+        final_answer = self._merge_answers(
+            query=task,
+            answers=[r.answer for r in per_document],
+        )
+        return RAGTrace(query=task, per_document=per_document, final_answer=final_answer)
 
     # ------------------------------------------------------------------
     # RAG loop
