@@ -151,6 +151,10 @@ class LoggingConfig(BaseModel):
         Path | None,
         Field(description="Optional file path to append linearized chat contexts during a run."),
     ] = None
+    trace_path: Annotated[
+        Path | None,
+        Field(description="Optional file path to export the agent trace tree (steps + sub-agent traces) as JSON."),
+    ] = None
 
 
 class AgentTask(BaseModel):
