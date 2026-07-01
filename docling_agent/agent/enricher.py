@@ -455,28 +455,32 @@ Return no extra commentary. Include all operations that are materially requested
         self,
         *,
         document: DoclingDocument,
+        style: Literal["sentences", "keyphrases"] = "sentences",
         loop_budget: int = 5,
         save_callback: Callable[[DoclingDocument, int], None] | None = None,
         document_summary_pages: int = 3,
     ) -> DoclingDocument:
         """Summarize each page of the document independently.
 
-        Creates one summary per page by serializing page content and generating
-        a summary with no conversation history between pages. This is particularly
-        useful for RAG applications where page-level summaries serve as retrieval units.
+        Creates one summary (or keyphrase list) per page by serializing page content
+        and generating output with no conversation history between pages. This is
+        particularly useful for RAG applications where page-level enrichment serves
+        as the retrieval unit.
 
-        After page-level summarization, generates a document-level summary from the
-        first N pages' actual content.
+        After page-level enrichment, generates a document-level summary from the
+        first N pages' actual content (only when style="sentences").
 
         Args:
             document: Document to enrich with page summaries
+            style: "sentences" stores results in meta.summary (SummaryMetaField);
+                   "keyphrases" stores results in meta.keywords (KeywordsMetaField)
             loop_budget: Retry budget for each summary generation
             save_callback: Optional callback(document, page_no) called after each page for fault tolerance
             document_summary_pages: Number of initial pages to use for document summary (default: 3)
 
         Returns:
-            Document with page-level summaries added to first item of each page,
-            and a document-level summary added to the body element
+            Document with page-level enrichment added to first item of each page,
+            and (for "sentences") a document-level summary added to the body element
         """
 
         if not document.pages:
@@ -508,9 +512,12 @@ Return no extra commentary. Include all operations that are materially requested
                     log_warning(f"Page {page_no} has no NodeItem, skipping")
                     continue
 
-                # Skip if already has summary
-                if first_item.meta and first_item.meta.summary:
+                # Skip if already enriched for the chosen style
+                if style == "sentences" and first_item.meta and first_item.meta.summary:
                     log_info(f"Page {page_no} already has summary, skipping")
+                    continue
+                if style == "keyphrases" and first_item.meta and first_item.meta.keywords:
+                    log_info(f"Page {page_no} already has keywords, skipping")
                     continue
 
                 page_text = serializer.serialize(pages={page_no}).text
@@ -518,37 +525,51 @@ Return no extra commentary. Include all operations that are materially requested
                 # Create fresh session for this page (no conversation history)
                 m = self._create_extraction_session()
 
-                summary = self._generate_summary(
-                    m=m,
-                    text=page_text,
+                if style == "keyphrases":
+                    keywords = self._generate_keywords(
+                        m=m,
+                        text=page_text,
+                        loop_budget=loop_budget,
+                    )
+                    if keywords:
+                        if not first_item.meta:
+                            first_item.meta = BaseMeta()
+                        first_item.meta.keywords = KeywordsMetaField(values=keywords)
+                        log_info(f"Added keywords to page {page_no}")
+                        if save_callback:
+                            save_callback(document, page_no)
+                    else:
+                        log_warning(f"Failed to generate keywords for page {page_no}")
+                else:
+                    summary = self._generate_summary(
+                        m=m,
+                        text=page_text,
+                        loop_budget=loop_budget,
+                    )
+                    if summary:
+                        if not first_item.meta:
+                            first_item.meta = BaseMeta()
+                        first_item.meta.summary = SummaryMetaField(text=summary)
+                        log_info(f"Added summary to page {page_no}")
+                        if save_callback:
+                            save_callback(document, page_no)
+                    else:
+                        log_warning(f"Failed to generate summary for page {page_no}")
+
+        # Generate document-level summary from first N pages (sentences style only)
+        if style == "sentences":
+            with self._timed_stage("generate document-level summary"):
+                doc_summary = self._generate_document_level_summary(
+                    document=document,
+                    serializer=serializer,
+                    num_pages=document_summary_pages,
                     loop_budget=loop_budget,
                 )
-
-                if summary:
-                    if not first_item.meta:
-                        first_item.meta = BaseMeta()
-                    first_item.meta.summary = SummaryMetaField(text=summary)
-                    log_info(f"Added summary to page {page_no}")
-
-                    # Call save callback if provided (for fault tolerance)
-                    if save_callback:
-                        save_callback(document, page_no)
-                else:
-                    log_warning(f"Failed to generate summary for page {page_no}")
-
-        # Generate document-level summary from first N pages
-        with self._timed_stage("generate document-level summary"):
-            doc_summary = self._generate_document_level_summary(
-                document=document,
-                serializer=serializer,
-                num_pages=document_summary_pages,
-                loop_budget=loop_budget,
-            )
-            if doc_summary:
-                if not document.body.meta:
-                    document.body.meta = BaseMeta()
-                document.body.meta.summary = SummaryMetaField(text=doc_summary)
-                log_info("Added document-level summary to body element")
+                if doc_summary:
+                    if not document.body.meta:
+                        document.body.meta = BaseMeta()
+                    document.body.meta.summary = SummaryMetaField(text=doc_summary)
+                    log_info("Added document-level summary to body element")
 
         return document
 
