@@ -1,8 +1,10 @@
 """Chunkless RAG agent using DoclingDocument tree structure and per-node summaries."""
 
+import json
+import re
 import time
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, Literal, cast
 
 from docling_core.experimental.serializer.outline import (
     OutlineFormat,
@@ -15,6 +17,7 @@ from docling_core.types.doc import (
     DoclingDocument,
     ImageRefMode,
     NodeItem,
+    RefItem,
     SectionHeaderItem,
     TitleItem,
 )
@@ -40,6 +43,7 @@ from docling_agent.agent.rag_models import (
     SectionSelection,
 )
 from docling_agent.agent_models import view_linear_context
+from docling_agent.backends.base import BaseBackend
 from docling_agent.logging import log_debug, log_info, log_warning
 
 
@@ -719,3 +723,902 @@ Only include documents that are actually relevant to the query.
             log_warning(f"Error selecting documents: {e}")
             # Fallback to all documents
             return list(documents.keys())
+
+
+# ---------------------------------------------------------------------------
+# Page-level selectors for RAG evaluation
+# ---------------------------------------------------------------------------
+
+
+class ReasoningBasedPageSelector:
+    """Selects top-K pages using a reasoning model and per-page enrichment metadata.
+
+    Implements an iterative batch-based approach: pages are evaluated in sliding
+    windows with current candidates re-scored in each new batch so that all scores
+    are comparable.  Works with both page-level and element-level step-3 enrichment.
+
+    Args:
+        backend: LLM backend for reasoning calls.
+        k: Maximum number of pages to return.
+        batch_size: Pages evaluated per reasoning iteration (candidates + new pages).
+        early_stopping_threshold: Reserved for future use.
+        summarization_style: ``"sentences"`` reads ``meta.summary``;
+            ``"keyphrases"`` reads ``meta.keywords``.
+    """
+
+    def __init__(
+        self,
+        backend: BaseBackend,
+        k: int = 10,
+        batch_size: int = 30,
+        early_stopping_threshold: float = 0.95,
+        summarization_style: Literal["sentences", "keyphrases"] = "sentences",
+    ) -> None:
+        self.backend = backend
+        self.k = k
+        self.batch_size = batch_size
+        self.early_stopping_threshold = early_stopping_threshold
+        self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def select_relevant_documents(
+        self,
+        query: str,
+        documents: dict[str, DoclingDocument],
+        doc_summaries: dict[str, str],
+    ) -> list[str]:
+        """Select which documents are relevant for answering the query.
+
+        The model decides based on document-level summaries without peeking at
+        ground-truth labels (no evaluation bias).
+
+        Args:
+            query: The query to answer.
+            documents: Mapping of doc_id → DoclingDocument.
+            doc_summaries: Mapping of doc_id → document context string.
+
+        Returns:
+            List of relevant doc_ids.
+        """
+        log_info(f"[ReasoningBased] Selecting relevant documents from {len(documents)} candidates")
+
+        doc_list = "\n".join(f"Document '{doc_id}':\n{summary}" for doc_id, summary in doc_summaries.items())
+
+        prompt = f"""You are analyzing a collection of documents to find which ones are relevant for answering a query.
+
+QUERY:
+{query}
+
+AVAILABLE DOCUMENTS:
+{doc_list}
+
+TASK:
+Identify the MOST relevant document(s) for answering the query. Be selective and precise.
+
+IMPORTANT GUIDELINES:
+- Prefer selecting 1-2 documents that are highly relevant
+- Only select additional documents if they provide essential complementary information
+- Do NOT select documents just because they might be tangentially related
+- Quality over quantity: it's better to select fewer, highly relevant documents than many loosely related ones
+- If the query is specific to one company/topic, typically only 1 document is needed
+- If the query compares multiple entities, select only the documents for those specific entities
+
+Format your response as:
+Document 'doc_id': [reason]
+
+Only include documents that are actually relevant to the query.
+"""
+        try:
+            model_name = self.backend.config.models.reasoning if self.backend.config.models else "default"
+            session = self.backend.create_session(model=model_name)
+            response = session.instruct(prompt=prompt)
+
+            selected_docs = []
+            for doc_id in documents:
+                if f"'{doc_id}'" in response or f'"{doc_id}"' in response or doc_id in response:
+                    selected_docs.append(doc_id)
+
+            if not selected_docs:
+                log_warning("[ReasoningBased] No documents selected by model, using all as fallback")
+                selected_docs = list(documents.keys())
+
+            log_info(f"[ReasoningBased] Selected {len(selected_docs)} document(s): {selected_docs}")
+            return selected_docs
+
+        except Exception as e:
+            log_warning(f"[ReasoningBased] Error selecting documents: {e}")
+            return list(documents.keys())
+
+    def select_pages(
+        self,
+        query: str,
+        document: DoclingDocument,
+        doc_summary: str,
+    ) -> list[tuple[int, float]]:
+        """Iteratively select top-K pages using the reasoning model.
+
+        Pages are evaluated in batches; the current candidate set is re-evaluated
+        together with each new batch so all scores remain comparable.
+
+        Args:
+            query: The query to answer.
+            document: The enriched DoclingDocument.
+            doc_summary: Document-level context string.
+
+        Returns:
+            List of ``(page_number, relevance_score)`` tuples (1-indexed),
+            sorted by descending relevance.
+        """
+        page_enrichment = self._extract_page_enrichment(document)
+
+        if not page_enrichment:
+            log_warning("[ReasoningBased] No page enrichment data found in document")
+            return []
+
+        log_info(f"[ReasoningBased] Selecting top {self.k} pages from {len(page_enrichment)} pages")
+
+        remaining_pages = list(page_enrichment.keys())
+        candidate_pages: dict[int, float] = {}
+        batch_num = 0
+
+        while remaining_pages:
+            batch_num += 1
+            available_slots = self.batch_size - len(candidate_pages)
+
+            if available_slots <= 0:
+                log_info(f"[ReasoningBased] Reached {len(candidate_pages)} candidates, finalizing")
+                break
+
+            new_pages = remaining_pages[:available_slots]
+            remaining_pages = remaining_pages[available_slots:]
+            batch_pages = list(candidate_pages.keys()) + new_pages
+
+            log_info(
+                f"[ReasoningBased] Batch {batch_num}: {len(candidate_pages)} candidates + "
+                f"{len(new_pages)} new = {len(batch_pages)} total"
+            )
+
+            selected = self._evaluate_batch(
+                query=query,
+                doc_summary=doc_summary,
+                batch_pages=batch_pages,
+                page_summaries=page_enrichment,
+                current_candidates=candidate_pages,
+            )
+
+            candidate_pages = dict(selected)
+
+            if len(candidate_pages) > self.k:
+                sorted_candidates = sorted(candidate_pages.items(), key=lambda x: x[1], reverse=True)
+                candidate_pages = dict(sorted_candidates[: self.k])
+
+            log_info(
+                f"[ReasoningBased] Top candidates: "
+                f"{sorted(candidate_pages.items(), key=lambda x: x[1], reverse=True)[:5]}"
+            )
+
+        sorted_pages = sorted(candidate_pages.items(), key=lambda x: x[1], reverse=True)[: self.k]
+        log_info(f"[ReasoningBased] Final selection: {len(sorted_pages)} pages")
+        return sorted_pages
+
+    def rerank_across_documents(
+        self,
+        query: str,
+        all_selected_pages: dict[str, list[tuple[int, float]]],
+        doc_summaries: dict[str, str],
+        page_summaries_by_doc: dict[str, dict[int, str]],
+    ) -> list[tuple[str, int, float]]:
+        """Re-rank top pages from multiple documents in a single shared context.
+
+        Page scores from different documents are not directly comparable because
+        they were evaluated in separate contexts.  This method issues one joint
+        re-ranking request so all scores become comparable.
+
+        Args:
+            query: The query to answer.
+            all_selected_pages: Mapping doc_id → ``[(page_num, score), …]``.
+            doc_summaries: Mapping doc_id → document context string.
+            page_summaries_by_doc: Mapping doc_id → ``{page_num: enrichment_text}``.
+
+        Returns:
+            List of ``(doc_id, page_num, score)`` tuples sorted by descending score.
+        """
+        if len(all_selected_pages) <= 1:
+            result = [
+                (doc_id, page_num, score) for doc_id, pages in all_selected_pages.items() for page_num, score in pages
+            ]
+            return sorted(result, key=lambda x: x[2], reverse=True)[: self.k]
+
+        log_info(f"[ReasoningBased] Re-ranking pages across {len(all_selected_pages)} documents")
+
+        if self.summarization_style == "keyphrases":
+            context_label = "PAGE KEYWORDS"
+            no_data_placeholder = "No keywords available"
+            task_hint = (
+                "Each page is described by a set of keyphrases. "
+                "Use these keyphrases to judge how well the page content matches the query."
+            )
+        else:
+            context_label = "PAGE SUMMARIES"
+            no_data_placeholder = "No summary available"
+            task_hint = (
+                "Each page is described by a short prose summary. "
+                "Use these summaries to judge how well the page content matches the query."
+            )
+
+        pages_by_doc = []
+        for doc_id in sorted(all_selected_pages.keys()):
+            pages = all_selected_pages[doc_id]
+            page_enrichment = page_summaries_by_doc[doc_id]
+            doc_summary = doc_summaries[doc_id]
+            doc_pages_text = f"\nDOCUMENT: {doc_id}\nDOCUMENT CONTEXT: {doc_summary}\n{context_label}:\n"
+            for page_num, _ in pages:
+                entry = page_enrichment.get(page_num, no_data_placeholder)
+                doc_pages_text += f"  Page {page_num}: {entry}\n"
+            pages_by_doc.append(doc_pages_text)
+
+        prompt = f"""You are analyzing pages from multiple documents to find the most relevant pages for answering a query.
+
+{task_hint}
+
+QUERY:
+{query}
+
+CANDIDATE PAGES FROM MULTIPLE DOCUMENTS:
+{"".join(pages_by_doc)}
+
+TASK:
+Re-evaluate ALL pages listed above and select the top {self.k} most relevant pages for answering the query.
+Compare pages across ALL documents to determine which are most relevant.
+
+For each relevant page, provide:
+1. Document ID
+2. Page number
+3. Relevance score (0.0 to 1.0, where 1.0 is highly relevant)
+4. Brief reason
+
+IMPORTANT:
+- Evaluate pages from all documents in the same context
+- Ensure scores are comparable across documents
+- Only return pages that are actually relevant to the query
+- You may return fewer than {self.k} pages if not enough are relevant
+
+Format your response as:
+Document [doc_id], Page X: [score] - [reason]
+
+If no pages are relevant, respond with "No relevant pages."
+"""
+        try:
+            model_name = self.backend.config.models.reasoning if self.backend.config.models else "default"
+            session = self.backend.create_session(model=model_name)
+            response = session.instruct(prompt=prompt)
+
+            pattern = r"Document\s+([^,]+),\s*Page\s+(\d+):\s*\[?([0-9.]+)\]?"
+            matches = re.findall(pattern, response, re.IGNORECASE)
+
+            reranked_pages = []
+            for doc_id_raw, page_str, score_str in matches:
+                try:
+                    doc_id = doc_id_raw.strip()
+                    page_num = int(page_str)
+                    score = float(score_str)
+                    if doc_id in all_selected_pages:
+                        original_pages = [p[0] for p in all_selected_pages[doc_id]]
+                        if page_num in original_pages:
+                            score = max(0.0, min(1.0, score))
+                            reranked_pages.append((doc_id, page_num, score))
+                            log_debug(f"[ReasoningBased] Re-ranked: {doc_id}, Page {page_num} score={score}")
+                except (ValueError, TypeError):
+                    continue
+
+            if not reranked_pages:
+                log_warning("[ReasoningBased] No pages parsed from re-ranking response, using original scores")
+                result = [
+                    (doc_id, page_num, score)
+                    for doc_id, pages in all_selected_pages.items()
+                    for page_num, score in pages
+                ]
+                return sorted(result, key=lambda x: x[2], reverse=True)[: self.k]
+
+            reranked_pages = sorted(reranked_pages, key=lambda x: x[2], reverse=True)[: self.k]
+            log_info(f"[ReasoningBased] Re-ranked {len(reranked_pages)} pages across documents")
+            return reranked_pages
+
+        except Exception as e:
+            log_warning(f"[ReasoningBased] Error re-ranking pages: {e}")
+            result = [
+                (doc_id, page_num, score) for doc_id, pages in all_selected_pages.items() for page_num, score in pages
+            ]
+            return sorted(result, key=lambda x: x[2], reverse=True)[: self.k]
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _extract_page_enrichment(self, document: DoclingDocument) -> dict[int, str]:
+        """Extract per-page enrichment text from an enriched document.
+
+        Reads ``meta.summary`` (style ``"sentences"``) or ``meta.keywords``
+        (style ``"keyphrases"``) from the first matching item found on each page.
+        Works for both page-level and element-level step-3 enrichment.
+
+        Args:
+            document: The enriched DoclingDocument.
+
+        Returns:
+            Mapping page_number (1-indexed) → enrichment string.
+        """
+        page_data: dict[int, str] = {}
+
+        for item, _ in document.iterate_items():
+            if not (hasattr(item, "prov") and item.prov):
+                continue
+            page_no = item.prov[0].page_no
+            if page_no in page_data:
+                continue
+            if not (hasattr(item, "meta") and item.meta):
+                continue
+
+            text: str | None = None
+
+            if self.summarization_style == "keyphrases":
+                if isinstance(item.meta, dict):
+                    kw_data = item.meta.get("keywords", {})
+                    if isinstance(kw_data, dict):
+                        values = kw_data.get("values", [])
+                        if values:
+                            text = "; ".join(str(v) for v in values)
+                elif hasattr(item.meta, "keywords") and item.meta.keywords:
+                    kw_values = item.meta.keywords.values
+                    if kw_values:
+                        text = "; ".join(str(v) for v in kw_values)
+            else:
+                if isinstance(item.meta, dict):
+                    summary_data = item.meta.get("summary", {})
+                    if isinstance(summary_data, dict):
+                        text = summary_data.get("text") or None
+                elif hasattr(item.meta, "summary") and item.meta.summary:
+                    summary_obj = item.meta.summary
+                    if hasattr(summary_obj, "text"):
+                        text = summary_obj.text or None
+
+            if text:
+                page_data[page_no] = text
+
+        return page_data
+
+    def _evaluate_batch(
+        self,
+        query: str,
+        doc_summary: str,
+        batch_pages: list[int],
+        page_summaries: dict[int, str],
+        current_candidates: dict[int, float],
+    ) -> list[tuple[int, float]]:
+        """Call the reasoning model to score a batch of pages.
+
+        Args:
+            query: The query to answer.
+            doc_summary: Document-level context string.
+            batch_pages: Page numbers in this batch (candidates + new pages).
+            page_summaries: All per-page enrichment strings.
+            current_candidates: Current top-candidate scores (unused by model, kept for future).
+
+        Returns:
+            List of ``(page_number, score)`` tuples for relevant pages.
+        """
+        prompt = self._build_evaluation_prompt(
+            query=query,
+            doc_summary=doc_summary,
+            batch_pages=batch_pages,
+            page_summaries=page_summaries,
+            k=self.k,
+        )
+        try:
+            model_name = self.backend.config.models.reasoning if self.backend.config.models else "default"
+            session = self.backend.create_session(model=model_name)
+            response = session.instruct(prompt=prompt)
+            return self._parse_model_response(response, batch_pages)
+        except Exception as e:
+            log_warning(f"[ReasoningBased] Error evaluating batch: {e}")
+            return []
+
+    def _build_evaluation_prompt(
+        self,
+        query: str,
+        doc_summary: str,
+        batch_pages: list[int],
+        page_summaries: dict[int, str],
+        k: int,
+    ) -> str:
+        """Build the per-batch evaluation prompt.
+
+        The prompt is adapted to the enrichment style: ``"keyphrases"`` shows
+        keyword lists; ``"sentences"`` shows prose summaries.
+        """
+        if self.summarization_style == "keyphrases":
+            section_label = "PAGE KEYWORDS"
+            task_hint = (
+                "Each page is described by a set of keyphrases extracted from its content. "
+                "Use these keyphrases to judge how well the page content matches the query."
+            )
+        else:
+            section_label = "PAGE SUMMARIES"
+            task_hint = (
+                "Each page is described by a short prose summary of its content. "
+                "Use these summaries to judge how well the page content matches the query."
+            )
+
+        page_entries = "\n".join(f"Page {p}: {page_summaries[p]}" for p in batch_pages)
+
+        return f"""You are analyzing a document to find the most relevant pages for answering a query.
+
+{task_hint}
+
+DOCUMENT CONTEXT:
+{doc_summary}
+
+QUERY:
+{query}
+
+{section_label}:
+{page_entries}
+
+TASK:
+Evaluate ALL pages listed above and identify the top {k} most relevant pages for answering the query.
+Compare all pages against each other to determine relative relevance.
+
+For each relevant page, provide:
+1. Page number
+2. Relevance score (0.0 to 1.0, where 1.0 is highly relevant)
+3. Brief reason
+
+IMPORTANT:
+- Evaluate all pages in the same context to ensure comparable scores
+- Only return pages that are actually relevant to the query
+- Rank pages by relevance, with higher scores for more relevant pages
+- You may return fewer than {k} pages if not enough are relevant
+
+Format your response as:
+Page X: [score] - [reason]
+
+If no pages are relevant, respond with "No relevant pages."
+"""
+
+    def _parse_model_response(
+        self,
+        response: str,
+        batch_pages: list[int],
+    ) -> list[tuple[int, float]]:
+        """Parse ``Page X: [score]`` entries from the model response.
+
+        Args:
+            response: Raw model response text.
+            batch_pages: Valid page numbers for this batch (others are discarded).
+
+        Returns:
+            List of ``(page_number, score)`` tuples.
+        """
+        selected_pages: list[tuple[int, float]] = []
+        pattern = r"Page\s+(\d+):\s*\[?([0-9.]+)\]?"
+        for page_str, score_str in re.findall(pattern, response, re.IGNORECASE):
+            try:
+                page_num = int(page_str)
+                score = float(score_str)
+                if page_num in batch_pages:
+                    selected_pages.append((page_num, max(0.0, min(1.0, score))))
+                    log_debug(f"[ReasoningBased] Parsed: Page {page_num} score={score}")
+            except (ValueError, TypeError):
+                continue
+        if not selected_pages:
+            log_debug(f"[ReasoningBased] No pages parsed. Response preview: {response[:200]}")
+        return selected_pages
+
+
+class TreeGuidedPageSelector:
+    """Selects top-K pages by tree-guided traversal of the document heading structure.
+
+    Unlike :class:`ReasoningBasedPageSelector` which evaluates pages in flat batches,
+    this selector navigates the document's hierarchical heading tree:
+
+    1. **Document selection** — the model picks relevant document(s) from the corpus.
+    2. **Top-level scan** — the model sees L1 section headings with their enrichment
+       text and selects the most promising subset.
+    3. **Drill-down loop** — for each selected heading the model decides:
+
+       - ``"stop"``     → the heading contains enough evidence.
+       - ``"drill"``    → explore the children of the selected headings.
+       - ``"siblings"`` → explore neighbouring headings at the same level.
+
+    4. **Convergence** — the loop ends when the model is confident or the iteration
+       budget is exhausted.
+    5. **Page extraction** — page numbers of all visited nodes are collected and
+       returned as up to K ``(page, score)`` tuples.
+
+    Requires that step 3 was run with **element-level** enrichment so that each
+    :class:`~docling_core.types.doc.SectionHeaderItem` (and
+    :class:`~docling_core.types.doc.TitleItem`) has ``meta.summary`` or
+    ``meta.keywords`` populated.
+
+    Args:
+        backend: LLM backend for reasoning calls.
+        k: Maximum number of pages to return.
+        max_iterations: Maximum drill-down iterations per document.
+        summarization_style: ``"sentences"`` reads ``meta.summary``;
+            ``"keyphrases"`` reads ``meta.keywords``.
+    """
+
+    _MAX_NODES_PER_PROMPT: int = 40
+
+    def __init__(
+        self,
+        backend: BaseBackend,
+        k: int = 10,
+        max_iterations: int = 8,
+        summarization_style: Literal["sentences", "keyphrases"] = "sentences",
+    ) -> None:
+        self.backend = backend
+        self.k = k
+        self.max_iterations = max_iterations
+        self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
+
+    # ------------------------------------------------------------------
+    # Public interface (mirrors ReasoningBasedPageSelector)
+    # ------------------------------------------------------------------
+
+    def select_relevant_documents(
+        self,
+        query: str,
+        documents: dict[str, DoclingDocument],
+        doc_summaries: dict[str, str],
+    ) -> list[str]:
+        """Select relevant documents — same logic as :class:`ReasoningBasedPageSelector`."""
+        log_info(f"[TreeGuided] Selecting relevant documents from {len(documents)} candidates")
+
+        doc_list = "\n".join(f"Document '{doc_id}':\n{summary}" for doc_id, summary in doc_summaries.items())
+        prompt = f"""You are analyzing a collection of documents to find which ones are relevant for answering a query.
+
+QUERY:
+{query}
+
+AVAILABLE DOCUMENTS:
+{doc_list}
+
+TASK:
+Identify the MOST relevant document(s) for answering the query. Be selective and precise.
+
+IMPORTANT GUIDELINES:
+- Prefer selecting 1-2 documents that are highly relevant
+- Only select additional documents if they provide essential complementary information
+- Do NOT select documents just because they might be tangentially related
+- If the query is specific to one company/topic, typically only 1 document is needed
+- If the query compares multiple entities, select only the documents for those specific entities
+
+Format your response as:
+Document 'doc_id': [reason]
+
+Only include documents that are actually relevant to the query.
+"""
+        try:
+            model_name = self.backend.config.models.reasoning if self.backend.config.models else "default"
+            session = self.backend.create_session(model=model_name)
+            response = session.instruct(prompt=prompt)
+            selected_docs = [doc_id for doc_id in documents if f"'{doc_id}'" in response or doc_id in response]
+            if not selected_docs:
+                log_warning("[TreeGuided] No documents selected by model, using all as fallback")
+                selected_docs = list(documents.keys())
+            log_info(f"[TreeGuided] Selected {len(selected_docs)} document(s): {selected_docs}")
+            return selected_docs
+        except Exception as e:
+            log_warning(f"[TreeGuided] Error selecting documents: {e}")
+            return list(documents.keys())
+
+    def select_pages(
+        self,
+        query: str,
+        document: DoclingDocument,
+        doc_summary: str,
+    ) -> list[tuple[int, float]]:
+        """Run tree-guided traversal and return up to K ``(page_number, score)`` tuples.
+
+        Args:
+            query: The query to answer.
+            document: The enriched DoclingDocument (element-level enrichment expected).
+            doc_summary: Document-level context string.
+
+        Returns:
+            List of ``(page_number, score)`` tuples sorted by descending score, 1-indexed.
+        """
+        l1_nodes = self._get_heading_nodes(document, parent_ref=None)
+        if not l1_nodes:
+            log_warning("[TreeGuided] No heading nodes with enrichment found")
+            return []
+
+        log_info(f"[TreeGuided] Starting tree traversal: {len(l1_nodes)} top-level headings")
+
+        visited_refs: dict[str, tuple[int, float]] = {}
+        frontier = l1_nodes[: self._MAX_NODES_PER_PROMPT]
+
+        for iteration in range(self.max_iterations):
+            if not frontier:
+                log_info("[TreeGuided] Empty frontier, stopping")
+                break
+
+            log_info(f"[TreeGuided] Iteration {iteration + 1}: frontier size={len(frontier)}")
+
+            decision = self._ask_model(
+                query=query,
+                doc_summary=doc_summary,
+                frontier=frontier,
+                visited_refs=set(visited_refs.keys()),
+                iteration=iteration,
+            )
+
+            if decision is None:
+                log_warning("[TreeGuided] Model returned unparseable decision, stopping")
+                break
+
+            selected_refs: list[str] = decision.get("selected_refs", [])
+            action: str = decision.get("action", "stop")
+            confident: bool = decision.get("confident", False)
+
+            frontier_refs = {n["ref"] for n in frontier}
+            selected_refs = [r for r in selected_refs if r in frontier_refs]
+
+            if not selected_refs:
+                log_info("[TreeGuided] Model selected no refs from frontier, stopping")
+                break
+
+            base_score = 1.0 - (iteration * 0.05)
+            for rank, ref in enumerate(selected_refs):
+                if ref not in visited_refs:
+                    node = next((n for n in frontier if n["ref"] == ref), None)
+                    page = node["page"] if node else None
+                    if page is not None:
+                        score = max(0.1, base_score - rank * 0.03)
+                        visited_refs[ref] = (page, score)
+
+            log_info(
+                f"[TreeGuided] Selected {len(selected_refs)} ref(s): {selected_refs[:5]} | "
+                f"action={action!r} confident={confident}"
+            )
+
+            if confident or action == "stop":
+                log_info("[TreeGuided] Model is confident, stopping traversal")
+                break
+
+            if action == "drill":
+                new_frontier: list[dict] = []
+                for ref in selected_refs:
+                    children = self._get_heading_nodes(document, parent_ref=ref)
+                    if children:
+                        new_frontier.extend(children)
+                if not new_frontier:
+                    action = "siblings"
+                else:
+                    frontier = new_frontier[: self._MAX_NODES_PER_PROMPT]
+                    continue
+
+            if action == "siblings":
+                new_frontier = []
+                for ref in selected_refs:
+                    siblings = self._get_sibling_nodes(document, ref, l1_nodes)
+                    new_frontier.extend(s for s in siblings if s["ref"] not in visited_refs)
+                seen: set[str] = set()
+                deduped: list[dict] = []
+                for n in new_frontier:
+                    if n["ref"] not in seen:
+                        seen.add(n["ref"])
+                        deduped.append(n)
+                frontier = deduped[: self._MAX_NODES_PER_PROMPT]
+                if not frontier:
+                    log_info("[TreeGuided] No unvisited siblings found, stopping")
+                    break
+                continue
+
+            break  # action == "stop" or unknown
+
+        page_scores: dict[int, float] = {}
+        for _ref, (page, score) in visited_refs.items():
+            if page not in page_scores or score > page_scores[page]:
+                page_scores[page] = score
+
+        result = sorted(page_scores.items(), key=lambda x: x[1], reverse=True)[: self.k]
+        log_info(f"[TreeGuided] Final pages: {result}")
+        return result
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_enrichment_text(self, item: NodeItem) -> str | None:
+        """Return the enrichment string for a heading item, or ``None`` if absent."""
+        if not (hasattr(item, "meta") and item.meta):
+            return None
+        if self.summarization_style == "keyphrases":
+            if isinstance(item.meta, dict):
+                kw_data = item.meta.get("keywords", {})
+                if isinstance(kw_data, dict):
+                    values = kw_data.get("values", [])
+                    if values:
+                        return "; ".join(str(v) for v in values)
+            elif hasattr(item.meta, "keywords") and item.meta.keywords:
+                kw_values = item.meta.keywords.values
+                if kw_values:
+                    return "; ".join(str(v) for v in kw_values)
+        else:
+            if isinstance(item.meta, dict):
+                summary_data = item.meta.get("summary", {})
+                if isinstance(summary_data, dict):
+                    return summary_data.get("text") or None
+            elif hasattr(item.meta, "summary") and item.meta.summary:
+                text = getattr(item.meta.summary, "text", None)
+                if text:
+                    return text
+        return None
+
+    def _get_heading_nodes(
+        self,
+        document: DoclingDocument,
+        parent_ref: str | None,
+    ) -> list[dict]:
+        """Return enriched heading nodes that are direct children of *parent_ref*.
+
+        If *parent_ref* is ``None``, the direct children of ``document.body`` are
+        used (i.e. the L1 headings).
+
+        Each returned dict has the keys: ``ref``, ``text``, ``page``,
+        ``enrichment``, ``n_children``.  Headings without enrichment data are
+        excluded.
+        """
+        if parent_ref is None:
+            parent_node: NodeItem = document.body
+        else:
+            try:
+                parent_node = RefItem(cref=parent_ref).resolve(document)
+            except Exception:
+                return []
+
+        nodes: list[dict] = []
+        for child_ref in parent_node.children or []:
+            try:
+                child = child_ref.resolve(document)
+            except Exception:
+                continue
+            if not isinstance(child, (SectionHeaderItem, TitleItem)):
+                continue
+
+            enrichment = self._get_enrichment_text(child)
+            if not enrichment:
+                continue
+
+            page = child.prov[0].page_no if hasattr(child, "prov") and child.prov else None
+            if page is None:
+                continue
+
+            nodes.append(
+                {
+                    "ref": child.self_ref,
+                    "text": child.text if hasattr(child, "text") and child.text else "(untitled)",
+                    "page": page,
+                    "enrichment": enrichment,
+                    "n_children": len(child.children or []),
+                }
+            )
+        return nodes
+
+    def _get_sibling_nodes(
+        self,
+        document: DoclingDocument,
+        ref: str,
+        l1_nodes: list[dict],
+    ) -> list[dict]:
+        """Return siblings of *ref* (other nodes at the same level under the same parent).
+
+        For L1 headings the siblings are all other entries in *l1_nodes*.
+        For deeper nodes the parent is located by scanning body children.
+        """
+        if any(n["ref"] == ref for n in l1_nodes):
+            return [n for n in l1_nodes if n["ref"] != ref]
+
+        for candidate_ref_item in document.body.children or []:
+            try:
+                candidate = candidate_ref_item.resolve(document)
+            except Exception:
+                continue
+            if not isinstance(candidate, (SectionHeaderItem, TitleItem)):
+                continue
+            child_refs = [cr.cref for cr in (candidate.children or [])]
+            if ref in child_refs:
+                return self._get_heading_nodes(document, parent_ref=candidate.self_ref)
+
+        return []
+
+    def _ask_model(
+        self,
+        *,
+        query: str,
+        doc_summary: str,
+        frontier: list[dict],
+        visited_refs: set[str],
+        iteration: int,
+    ) -> dict | None:
+        """Ask the reasoning model to select nodes from *frontier* and decide the next action.
+
+        Returns a dict with:
+
+        * ``selected_refs`` — list of ref strings chosen from the frontier.
+        * ``action`` — one of ``"drill"``, ``"siblings"``, ``"stop"``.
+        * ``confident`` — ``True`` if the model believes it found the answer.
+
+        Returns ``None`` if the response cannot be parsed.
+        """
+        enrich_label = "KEYPHRASES" if self.summarization_style == "keyphrases" else "SUMMARY"
+        enrich_hint = (
+            "keyphrases extracted from their content"
+            if self.summarization_style == "keyphrases"
+            else "short prose summaries of their content"
+        )
+
+        frontier_lines = "\n".join(
+            f"  ref={n['ref']!r}  page={n['page']}  children={n['n_children']}  "
+            f"heading={n['text'][:60]!r}  {enrich_label}={n['enrichment'][:120]!r}"
+            for n in frontier
+        )
+        visited_note = (
+            f"\nAlready-visited refs (do not select these again): {sorted(visited_refs)}" if visited_refs else ""
+        )
+
+        prompt = f"""You are performing a tree-guided search through a document to find pages that answer a query.
+
+DOCUMENT CONTEXT:
+{doc_summary}
+
+QUERY:
+{query}
+
+CURRENT CANDIDATE HEADINGS (each shown with {enrich_hint}):
+{frontier_lines}{visited_note}
+
+TASK (iteration {iteration + 1}):
+1. Select the heading refs from the list above that are MOST LIKELY to contain information relevant to the query.
+   You may select multiple refs if several are relevant.
+2. Decide what to do next:
+   - "drill"    → you want to explore the children of the selected headings for more detail
+   - "siblings" → the selected headings are not quite right; explore their neighbours instead
+   - "stop"     → the selected headings contain enough evidence to answer the query
+3. Set "confident" to true if you believe the selected headings are sufficient to answer the query.
+
+Return ONLY a JSON object in a ```json``` block with these keys:
+  "selected_refs": list of ref strings chosen from the frontier above (must be exact matches)
+  "action": one of "drill", "siblings", "stop"
+  "confident": true or false
+  "reason": brief explanation of your choice (string)
+"""
+        try:
+            model_name = self.backend.config.models.reasoning if self.backend.config.models else "default"
+            session = self.backend.create_session(model=model_name)
+            response = session.instruct(prompt=prompt)
+
+            match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+            if not match:
+                match = re.search(r"\{.*\}", response, re.DOTALL)
+            if not match:
+                log_warning("[TreeGuided] No JSON found in model response")
+                return None
+
+            data = json.loads(match.group(1) if "```" in response else match.group(0))
+
+            if not isinstance(data.get("selected_refs"), list):
+                data["selected_refs"] = []
+            if data.get("action") not in ("drill", "siblings", "stop"):
+                data["action"] = "stop"
+            data["confident"] = bool(data.get("confident", False))
+            return data
+
+        except Exception as e:
+            log_warning(f"[TreeGuided] Error calling model: {e}")
+            return None
