@@ -1,8 +1,17 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from docling_agent.task_model import AddTask, AgentTask, ClearTask, ListTask, ViewTask, load_task
+from docling_agent.task_model import (
+    AddTask,
+    AgentTask,
+    BackendConfig,
+    ClearTask,
+    ListTask,
+    ViewTask,
+    load_task,
+)
 
 
 def test_load_task_with_top_level_backend_block(tmp_path: Path):
@@ -123,3 +132,45 @@ all_projects: false
     assert isinstance(task, ClearTask)
     assert task.project_id == "alpha"
     assert task.all_projects is False
+
+
+def test_load_task_normalizes_yaml_query_param_scalars(tmp_path: Path):
+    task_path = tmp_path / "task.yaml"
+    task_path.write_text(
+        """
+query: "Summarize this document"
+backend:
+  type: litellm
+  query_params:
+    api-version: 2024-02-01
+    generated-at: 2024-02-01T12:30:00Z
+    enabled: true
+    disabled: false
+    retries: 3
+    temperature: 0.25
+    optional:
+""".strip(),
+        encoding="utf-8",
+    )
+
+    task = load_task(task_path)
+
+    assert task.backend.query_params == {
+        "api-version": "2024-02-01",
+        "generated-at": "2024-02-01T12:30:00+00:00",
+        "enabled": "true",
+        "disabled": "false",
+        "retries": "3",
+        "temperature": "0.25",
+        "optional": "",
+    }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [["value"], {"nested": "value"}, object()],
+    ids=["list", "mapping", "object"],
+)
+def test_backend_config_rejects_non_scalar_query_param_values(value: object):
+    with pytest.raises(ValidationError):
+        BackendConfig.model_validate({"query_params": {"key": value}})

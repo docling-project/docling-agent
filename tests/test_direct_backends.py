@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 
 from docling_agent.backends.litellm_backend import LiteLLMBackend
@@ -91,7 +92,13 @@ def test_lmstudio_session_tracks_history(monkeypatch: pytest.MonkeyPatch):
         {"choices": [{"message": {"content": "Second completion"}}]},
     ]
 
-    def _fake_client_factory(*, base_url: str, timeout: float, headers: dict[str, str] | None = None):
+    def _fake_client_factory(
+        *,
+        base_url: str,
+        timeout: float,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+    ):
         return _FakeClient(base_url=base_url, timeout=timeout, headers=headers, responses=responses, sink=sink)
 
     monkeypatch.setattr("docling_agent.backends.openai_compatible.httpx.Client", _fake_client_factory)
@@ -131,7 +138,13 @@ def test_llama_server_session_tracks_history(monkeypatch: pytest.MonkeyPatch):
         {"choices": [{"message": {"content": "Second completion"}}]},
     ]
 
-    def _fake_client_factory(*, base_url: str, timeout: float, headers: dict[str, str] | None = None):
+    def _fake_client_factory(
+        *,
+        base_url: str,
+        timeout: float,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+    ):
         return _FakeClient(base_url=base_url, timeout=timeout, headers=headers, responses=responses, sink=sink)
 
     monkeypatch.setattr("docling_agent.backends.openai_compatible.httpx.Client", _fake_client_factory)
@@ -169,7 +182,13 @@ def test_litellm_session_uses_api_key_env(monkeypatch: pytest.MonkeyPatch):
     responses = [{"choices": [{"message": {"content": "LiteLLM answer"}}]}]
     monkeypatch.setenv("LITELLM_API_KEY", "secret-token")
 
-    def _fake_client_factory(*, base_url: str, timeout: float, headers: dict[str, str] | None = None):
+    def _fake_client_factory(
+        *,
+        base_url: str,
+        timeout: float,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+    ):
         return _FakeClient(base_url=base_url, timeout=timeout, headers=headers, responses=responses, sink=sink)
 
     monkeypatch.setattr("docling_agent.backends.openai_compatible.httpx.Client", _fake_client_factory)
@@ -189,3 +208,43 @@ def test_litellm_session_uses_api_key_env(monkeypatch: pytest.MonkeyPatch):
 
     assert session.instruct("hello") == "LiteLLM answer"
     assert sink[0]["headers"]["Authorization"] == "Bearer secret-token"
+
+
+def test_litellm_session_appends_query_params_to_request_url(monkeypatch: pytest.MonkeyPatch):
+    requested_urls: list[httpx.URL] = []
+    httpx_client = httpx.Client
+
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(request.url)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "Azure answer"}}]})
+
+    def client_factory(
+        *,
+        base_url: str,
+        timeout: float,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+    ):
+        return httpx_client(
+            base_url=base_url,
+            timeout=timeout,
+            headers=headers,
+            params=params,
+            transport=httpx.MockTransport(handle_request),
+        )
+
+    monkeypatch.setattr("docling_agent.backends.openai_compatible.httpx.Client", client_factory)
+
+    backend = LiteLLMBackend(
+        config=BackendConfig(
+            type="litellm",
+            base_url="https://azure.example/openai/deployments/gpt-4o",
+            query_params={"api-version": "2024-02-01"},
+        )
+    )
+    session = backend.create_session(model="azure/gpt-4o")
+
+    assert session.instruct("hello") == "Azure answer"
+    assert requested_urls == [
+        httpx.URL("https://azure.example/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-01")
+    ]

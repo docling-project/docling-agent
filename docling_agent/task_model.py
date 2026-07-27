@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -96,6 +97,10 @@ class BackendConfig(BaseModel):
             description="Environment variable name containing the API key. Hidden from repr for security.",
         ),
     ] = None
+    query_params: Annotated[
+        dict[str, str],
+        Field(description="Query parameters appended to every OpenAI-compatible backend request URL."),
+    ] = {}
     options: Annotated[
         dict[str, Any],
         Field(description="Backend-specific options passed through to the provider."),
@@ -104,6 +109,28 @@ class BackendConfig(BaseModel):
         ModelConfig,
         Field(description="Model identifiers for different agent roles."),
     ] = ModelConfig()
+
+    @field_validator("query_params", mode="before")
+    @classmethod
+    def normalize_query_param_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        normalized = {}
+        for key, item in value.items():
+            if isinstance(item, (date, datetime)):
+                normalized[key] = item.isoformat()
+            elif item is True:
+                normalized[key] = "true"
+            elif item is False:
+                normalized[key] = "false"
+            elif item is None:
+                normalized[key] = ""
+            elif isinstance(item, (int, float)):
+                normalized[key] = str(item)
+            else:
+                normalized[key] = item
+        return normalized
 
 
 class LoggingConfig(BaseModel):
