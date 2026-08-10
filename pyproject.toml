@@ -99,6 +99,7 @@ include = ["docling_agent"]
 target-version = "py310"
 line-length = 120
 respect-gitignore = true
+include = ["*.py", "*.ipynb"]
 exclude = [
     "tests/data/**",
     "_reference/**",
