@@ -1,7 +1,14 @@
 """Tests for the DoclingEditingAgent."""
 
 import pytest
-from docling_core.types.doc.document import DocItemLabel, DoclingDocument, SectionHeaderItem, TextItem, TitleItem
+from docling_core.types.doc.document import (
+    ContentLayer,
+    DocItemLabel,
+    DoclingDocument,
+    SectionHeaderItem,
+    TextItem,
+    TitleItem,
+)
 from pydantic import ValidationError
 
 from docling_agent.agent.editor import (
@@ -12,6 +19,8 @@ from docling_agent.agent.editor import (
     UpdateContentOperation,
     UpdateSectionHeadingLevelOperation,
 )
+
+from .test_utils import MockBackend, MockSession
 
 
 class TestUpdateContentOperation:
@@ -54,6 +63,137 @@ class TestRewriteContentOperation:
             RewriteContentOperation(operation="rewrite_content", refs=["#/texts/1", "invalid-ref"])
         # Pydantic's built-in pattern validation error message
         assert "String should match pattern" in str(exc_info.value)
+
+
+class TestRewriteContent:
+    @staticmethod
+    def _rewrite(monkeypatch, document, refs):
+        updated_document = DoclingDocument(name="updated")
+        updated_document.add_text(label=DocItemLabel.PARAGRAPH, text="rewritten", parent=updated_document.body)
+
+        monkeypatch.setattr(
+            "docling_agent.agent.editor.convert_markdown_to_docling_document",
+            lambda text: updated_document,
+        )
+
+        agent = DoclingEditingAgent(backend=MockBackend(), tools=[])
+        agent._rewrite_content(
+            task="rewrite",
+            document=document,
+            refs=refs,
+        )
+
+    @pytest.mark.parametrize("selected_indices", [(0,), (0, 1, 2)])
+    def test_replaces_all_selected_items(self, monkeypatch, selected_indices):
+        document = DoclingDocument(name="source")
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="prefix", parent=document.body)
+        selected_items = [
+            document.add_text(label=DocItemLabel.PARAGRAPH, text=f"selected {index}", parent=document.body)
+            for index in range(max(selected_indices) + 1)
+        ]
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="suffix", parent=document.body)
+
+        self._rewrite(
+            monkeypatch,
+            document,
+            [selected_items[index].self_ref for index in selected_indices],
+        )
+
+        text_items = [item.text for item, _ in document.iterate_items(with_groups=True) if isinstance(item, TextItem)]
+        assert text_items == ["prefix", "rewritten", "suffix"]
+        assert {item.text for item in document.texts} == {"prefix", "rewritten", "suffix"}
+
+        reloaded = DoclingDocument.model_validate_json(document.model_dump_json())
+        for item, _ in reloaded.iterate_items(with_groups=True):
+            for child in item.children:
+                assert child.resolve(reloaded).parent == item.get_ref()
+
+    def test_preserves_ref_order_for_prompt_and_replacement_anchor(self, monkeypatch):
+        document = DoclingDocument(name="source")
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="prefix", parent=document.body)
+        earlier = document.add_text(label=DocItemLabel.PARAGRAPH, text="selected earlier", parent=document.body)
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="middle", parent=document.body)
+        later = document.add_text(label=DocItemLabel.PARAGRAPH, text="selected later", parent=document.body)
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="suffix", parent=document.body)
+        prompts = []
+
+        def record_prompt(self, prompt, *, requirements=None, retry_budget=1):
+            prompts.append(prompt)
+            return "mock response"
+
+        monkeypatch.setattr(MockSession, "instruct", record_prompt)
+
+        self._rewrite(monkeypatch, document, [later.self_ref, earlier.self_ref])
+
+        assert prompts[0].index("selected later") < prompts[0].index("selected earlier")
+        text_items = [item.text for item, _ in document.iterate_items(with_groups=True) if isinstance(item, TextItem)]
+        assert text_items == ["prefix", "middle", "rewritten", "suffix"]
+
+    @pytest.mark.parametrize(
+        ("selected_indices", "expected_texts"),
+        [
+            ((0, 0), ["prefix", "rewritten", "selected 1", "suffix"]),
+            ((0, 1, 1), ["prefix", "rewritten", "suffix"]),
+        ],
+    )
+    def test_deduplicates_refs_in_caller_order(self, monkeypatch, selected_indices, expected_texts):
+        document = DoclingDocument(name="source")
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="prefix", parent=document.body)
+        selected_items = [
+            document.add_text(label=DocItemLabel.PARAGRAPH, text=f"selected {index}", parent=document.body)
+            for index in range(2)
+        ]
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="suffix", parent=document.body)
+        prompts = []
+
+        def record_prompt(self, prompt, *, requirements=None, retry_budget=1):
+            prompts.append(prompt)
+            return "mock response"
+
+        monkeypatch.setattr(MockSession, "instruct", record_prompt)
+
+        self._rewrite(
+            monkeypatch,
+            document,
+            [selected_items[index].self_ref for index in selected_indices],
+        )
+
+        for index in set(selected_indices):
+            assert prompts[0].count(f"selected {index}") == 1
+        text_items = [item.text for item, _ in document.iterate_items(with_groups=True) if isinstance(item, TextItem)]
+        assert text_items == expected_texts
+
+    @pytest.mark.parametrize("content_layer", [ContentLayer.BODY, ContentLayer.FURNITURE])
+    @pytest.mark.parametrize(
+        ("parent_first", "expected_texts"),
+        [
+            (True, ["rewritten", "suffix"]),
+            (False, ["heading", "rewritten", "suffix"]),
+        ],
+    )
+    def test_preserves_rewrite_for_overlapping_parent_and_child(
+        self,
+        monkeypatch,
+        content_layer,
+        parent_first,
+        expected_texts,
+    ):
+        document = DoclingDocument(name="source")
+        heading = document.add_heading(text="heading", level=1, parent=document.body)
+        child = document.add_text(
+            label=DocItemLabel.PARAGRAPH,
+            text="child",
+            parent=heading,
+            content_layer=content_layer,
+        )
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="suffix", parent=document.body)
+
+        refs = [heading.self_ref, child.self_ref] if parent_first else [child.self_ref, heading.self_ref]
+        self._rewrite(monkeypatch, document, refs)
+
+        reloaded = DoclingDocument.model_validate_json(document.model_dump_json())
+        text_items = [item.text for item, _ in reloaded.iterate_items(with_groups=True) if isinstance(item, TextItem)]
+        assert text_items == expected_texts
 
 
 class TestUpdateSectionHeadingLevelOperation:

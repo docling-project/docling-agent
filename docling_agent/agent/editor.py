@@ -5,6 +5,7 @@ from typing import Annotated, ClassVar, Literal
 from docling_core.experimental.serializer.outline import OutlineFormat
 from docling_core.types.base import _JSON_POINTER_REGEX
 from docling_core.types.doc.document import (
+    ContentLayer,
     DocItemLabel,
     DoclingDocument,
     RefItem,
@@ -554,11 +555,16 @@ Execute the following task: {task}
     ):
         log_info("_update_content_of_text")
 
+        selected_items = []
+        selected_item_ids = set()
         texts = []
         for sref in refs:
             ref = RefItem(cref=sref)
             item = ref.resolve(document)
-
+            if id(item) in selected_item_ids:
+                continue
+            selected_item_ids.add(id(item))
+            selected_items.append(item)
             texts.append(serialize_item_to_markdown(item=item, doc=document))
 
         text = "\n\n".join(texts)
@@ -586,7 +592,31 @@ Execute the following task: {task}
             log_warning("No valid document produced for rewrite.")
             return
 
-        ref = RefItem(cref=refs[0])
-        item = ref.resolve(document)
+        anchor_item = selected_items[0]
+        anchor_subtree_ids = {
+            id(item)
+            for item, _ in document.iterate_items(
+                root=anchor_item,
+                with_groups=True,
+                traverse_pictures=True,
+                included_content_layers=set(ContentLayer),
+            )
+        }
 
-        document = insert_document(item=item, doc=document, updated_doc=updated_doc)
+        def _is_ancestor(ancestor, descendant):
+            parent_ref = descendant.parent
+            while parent_ref is not None:
+                parent_item = parent_ref.resolve(document)
+                if id(parent_item) == id(ancestor):
+                    return True
+                parent_ref = parent_item.parent
+            return False
+
+        items_to_delete = []
+        for item in selected_items[1:]:
+            if id(item) in anchor_subtree_ids or _is_ancestor(item, anchor_item):
+                continue
+            items_to_delete.append(item)
+
+        document = insert_document(item=anchor_item, doc=document, updated_doc=updated_doc)
+        document.delete_items(node_items=items_to_delete)
