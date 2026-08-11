@@ -602,20 +602,19 @@ Execute the following task: {task}
                 included_content_layers=set(ContentLayer),
             )
         }
+
+        def _is_ancestor(ancestor, descendant):
+            parent_ref = descendant.parent
+            while parent_ref is not None:
+                parent_item = parent_ref.resolve(document)
+                if id(parent_item) == id(ancestor):
+                    return True
+                parent_ref = parent_item.parent
+            return False
+
         items_to_delete = []
         for item in selected_items[1:]:
-            if id(item) in anchor_subtree_ids:
-                continue
-            item_subtree_ids = {
-                id(subtree_item)
-                for subtree_item, _ in document.iterate_items(
-                    root=item,
-                    with_groups=True,
-                    traverse_pictures=True,
-                    included_content_layers=set(ContentLayer),
-                )
-            }
-            if id(anchor_item) in item_subtree_ids:
+            if id(item) in anchor_subtree_ids or _is_ancestor(item, anchor_item):
                 continue
             items_to_delete.append(item)
 
