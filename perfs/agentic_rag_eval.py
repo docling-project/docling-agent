@@ -22,7 +22,6 @@ Usage:
 import argparse
 import json
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Final, Literal
@@ -77,13 +76,6 @@ MD_PARAMS: Final = MarkdownParams(
 )
 
 
-def _count_sentences(text: str) -> int:
-    """Count sentences in text, handling abbreviations properly."""
-    # Protects: w.w. patterns (U.S., 3.14) and Title. abbreviations (Dr., Mr.)
-    parts = re.split(r"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s", text.strip())
-    return len([s for s in parts if s.strip()])
-
-
 # ReasoningBasedPageSelector and TreeGuidedPageSelector are imported from
 # docling_agent.agents (defined in docling_agent/agent/rag.py).
 
@@ -103,7 +95,7 @@ class AgenticRAGEvaluator:
         eval_batch_size: int = 30,
         eval_early_stopping: float = 0.95,
         eval_max_iterations: int = 8,
-    ):
+    ) -> None:
         """Initialize the evaluator.
 
         Args:
@@ -372,8 +364,8 @@ class AgenticRAGEvaluator:
                 start_time = time.time()
 
                 # Use agent's page summarization with save callback for fault tolerance
-                def save_after_page(doc: DoclingDocument, page_no: int) -> None:
-                    doc.save_as_json(output_path)
+                def save_after_page(doc: DoclingDocument, page_no: int, _path: Path = output_path) -> None:
+                    doc.save_as_json(_path)
                     logger.debug(f"  Saved after page {page_no}")
 
                 document = agent._summarize_pages(

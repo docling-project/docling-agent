@@ -729,6 +729,78 @@ Only include documents that are actually relevant to the query.
 # ---------------------------------------------------------------------------
 
 
+def _select_relevant_documents(
+    *,
+    backend: "BaseBackend",
+    query: str,
+    documents: dict[str, DoclingDocument],
+    doc_summaries: dict[str, str],
+    log_prefix: str,
+) -> list[str]:
+    """Select relevant documents from a corpus using an LLM reasoning call.
+
+    Shared implementation used by both :class:`ReasoningBasedPageSelector` and
+    :class:`TreeGuidedPageSelector`.  The model sees only document-level summaries
+    so there is no evaluation bias from peeking at ground-truth labels.
+
+    Args:
+        backend: LLM backend for the reasoning call.
+        query: The query to answer.
+        documents: Mapping of doc_id → DoclingDocument.
+        doc_summaries: Mapping of doc_id → document context string.
+        log_prefix: Short tag prepended to log messages (e.g. ``"[ReasoningBased]"``).
+
+    Returns:
+        List of relevant doc_ids.  Falls back to all doc_ids on error or if the
+        model returns no matches.
+    """
+    log_info(f"{log_prefix} Selecting relevant documents from {len(documents)} candidates")
+
+    doc_list = "\n".join(f"Document '{doc_id}':\n{summary}" for doc_id, summary in doc_summaries.items())
+
+    prompt = f"""You are analyzing a collection of documents to find which ones are relevant for answering a query.
+
+QUERY:
+{query}
+
+AVAILABLE DOCUMENTS:
+{doc_list}
+
+TASK:
+Identify the MOST relevant document(s) for answering the query. Be selective and precise.
+
+IMPORTANT GUIDELINES:
+- Prefer selecting 1-2 documents that are highly relevant
+- Only select additional documents if they provide essential complementary information
+- Do NOT select documents just because they might be tangentially related
+- Quality over quantity: it's better to select fewer, highly relevant documents than many loosely related ones
+- If the query is specific to one company/topic, typically only 1 document is needed
+- If the query compares multiple entities, select only the documents for those specific entities
+
+Format your response as:
+Document 'doc_id': [reason]
+
+Only include documents that are actually relevant to the query.
+"""
+    try:
+        model_name = backend.config.models.reasoning if backend.config.models else "default"
+        session = backend.create_session(model=model_name)
+        response = session.instruct(prompt=prompt)
+
+        selected_docs = [doc_id for doc_id in documents if re.search(rf"(?<!\w){re.escape(doc_id)}(?!\w)", response)]
+
+        if not selected_docs:
+            log_warning(f"{log_prefix} No documents selected by model, using all as fallback")
+            selected_docs = list(documents.keys())
+
+        log_info(f"{log_prefix} Selected {len(selected_docs)} document(s): {selected_docs}")
+        return selected_docs
+
+    except Exception as e:
+        log_warning(f"{log_prefix} Error selecting documents: {e}")
+        return list(documents.keys())
+
+
 class ReasoningBasedPageSelector:
     """Selects top-K pages using a reasoning model and per-page enrichment metadata.
 
@@ -750,13 +822,13 @@ class ReasoningBasedPageSelector:
         backend: BaseBackend,
         k: int = 10,
         batch_size: int = 30,
-        early_stopping_threshold: float = 0.95,
+        early_stopping_threshold: float = 0.95,  # reserved for future use; not active yet
         summarization_style: Literal["sentences", "keyphrases"] = "sentences",
     ) -> None:
         self.backend = backend
         self.k = k
         self.batch_size = batch_size
-        self.early_stopping_threshold = early_stopping_threshold
+        self.early_stopping_threshold = early_stopping_threshold  # reserved for future use
         self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
 
     # ------------------------------------------------------------------
@@ -782,53 +854,13 @@ class ReasoningBasedPageSelector:
         Returns:
             List of relevant doc_ids.
         """
-        log_info(f"[ReasoningBased] Selecting relevant documents from {len(documents)} candidates")
-
-        doc_list = "\n".join(f"Document '{doc_id}':\n{summary}" for doc_id, summary in doc_summaries.items())
-
-        prompt = f"""You are analyzing a collection of documents to find which ones are relevant for answering a query.
-
-QUERY:
-{query}
-
-AVAILABLE DOCUMENTS:
-{doc_list}
-
-TASK:
-Identify the MOST relevant document(s) for answering the query. Be selective and precise.
-
-IMPORTANT GUIDELINES:
-- Prefer selecting 1-2 documents that are highly relevant
-- Only select additional documents if they provide essential complementary information
-- Do NOT select documents just because they might be tangentially related
-- Quality over quantity: it's better to select fewer, highly relevant documents than many loosely related ones
-- If the query is specific to one company/topic, typically only 1 document is needed
-- If the query compares multiple entities, select only the documents for those specific entities
-
-Format your response as:
-Document 'doc_id': [reason]
-
-Only include documents that are actually relevant to the query.
-"""
-        try:
-            model_name = self.backend.config.models.reasoning if self.backend.config.models else "default"
-            session = self.backend.create_session(model=model_name)
-            response = session.instruct(prompt=prompt)
-
-            selected_docs = [
-                doc_id for doc_id in documents if re.search(rf"(?<!\w){re.escape(doc_id)}(?!\w)", response)
-            ]
-
-            if not selected_docs:
-                log_warning("[ReasoningBased] No documents selected by model, using all as fallback")
-                selected_docs = list(documents.keys())
-
-            log_info(f"[ReasoningBased] Selected {len(selected_docs)} document(s): {selected_docs}")
-            return selected_docs
-
-        except Exception as e:
-            log_warning(f"[ReasoningBased] Error selecting documents: {e}")
-            return list(documents.keys())
+        return _select_relevant_documents(
+            backend=self.backend,
+            query=query,
+            documents=documents,
+            doc_summaries=doc_summaries,
+            log_prefix="[ReasoningBased]",
+        )
 
     def select_pages(
         self,
@@ -1273,48 +1305,14 @@ class TreeGuidedPageSelector:
         documents: dict[str, DoclingDocument],
         doc_summaries: dict[str, str],
     ) -> list[str]:
-        """Select relevant documents — same logic as :class:`ReasoningBasedPageSelector`."""
-        log_info(f"[TreeGuided] Selecting relevant documents from {len(documents)} candidates")
-
-        doc_list = "\n".join(f"Document '{doc_id}':\n{summary}" for doc_id, summary in doc_summaries.items())
-        prompt = f"""You are analyzing a collection of documents to find which ones are relevant for answering a query.
-
-QUERY:
-{query}
-
-AVAILABLE DOCUMENTS:
-{doc_list}
-
-TASK:
-Identify the MOST relevant document(s) for answering the query. Be selective and precise.
-
-IMPORTANT GUIDELINES:
-- Prefer selecting 1-2 documents that are highly relevant
-- Only select additional documents if they provide essential complementary information
-- Do NOT select documents just because they might be tangentially related
-- If the query is specific to one company/topic, typically only 1 document is needed
-- If the query compares multiple entities, select only the documents for those specific entities
-
-Format your response as:
-Document 'doc_id': [reason]
-
-Only include documents that are actually relevant to the query.
-"""
-        try:
-            model_name = self.backend.config.models.reasoning if self.backend.config.models else "default"
-            session = self.backend.create_session(model=model_name)
-            response = session.instruct(prompt=prompt)
-            selected_docs = [
-                doc_id for doc_id in documents if re.search(rf"(?<!\w){re.escape(doc_id)}(?!\w)", response)
-            ]
-            if not selected_docs:
-                log_warning("[TreeGuided] No documents selected by model, using all as fallback")
-                selected_docs = list(documents.keys())
-            log_info(f"[TreeGuided] Selected {len(selected_docs)} document(s): {selected_docs}")
-            return selected_docs
-        except Exception as e:
-            log_warning(f"[TreeGuided] Error selecting documents: {e}")
-            return list(documents.keys())
+        """Select relevant documents — delegates to :func:`_select_relevant_documents`."""
+        return _select_relevant_documents(
+            backend=self.backend,
+            query=query,
+            documents=documents,
+            doc_summaries=doc_summaries,
+            log_prefix="[TreeGuided]",
+        )
 
     def select_pages(
         self,
@@ -1519,7 +1517,14 @@ Only include documents that are actually relevant to the query.
         """Return siblings of *ref* (other nodes at the same level under the same parent).
 
         For L1 headings the siblings are all other entries in *l1_nodes*.
-        For deeper nodes the parent is located by scanning body children.
+        For L2 headings the parent L1 node is located by scanning direct children of
+        ``document.body``.
+
+        Note:
+            This method only resolves siblings up to depth 2 (L2 headings).  For
+            headings nested three or more levels deep, the parent cannot be found and
+            an empty list is returned, causing the traversal to stop rather than
+            explore neighbours.
         """
         if any(n["ref"] == ref for n in l1_nodes):
             return [n for n in l1_nodes if n["ref"] != ref]
