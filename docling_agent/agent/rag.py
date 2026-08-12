@@ -705,12 +705,11 @@ Only include documents that are actually relevant to the query.
 
             view_linear_context(m)
 
-            # Parse response to extract doc_ids
-            selected_docs = []
-            for doc_id in documents.keys():
-                # Look for the doc_id in the response
-                if f"'{doc_id}'" in response or f'"{doc_id}"' in response or doc_id in response:
-                    selected_docs.append(doc_id)
+            # Parse response to extract doc_ids. Use word-boundary matching so that
+            # a short id is not spuriously matched inside a longer one.
+            selected_docs = [
+                doc_id for doc_id in documents.keys() if re.search(rf"(?<!\w){re.escape(doc_id)}(?!\w)", response)
+            ]
 
             if not selected_docs:
                 log_warning("No documents selected by model, using all documents as fallback")
@@ -816,10 +815,9 @@ Only include documents that are actually relevant to the query.
             session = self.backend.create_session(model=model_name)
             response = session.instruct(prompt=prompt)
 
-            selected_docs = []
-            for doc_id in documents:
-                if f"'{doc_id}'" in response or f'"{doc_id}"' in response or doc_id in response:
-                    selected_docs.append(doc_id)
+            selected_docs = [
+                doc_id for doc_id in documents if re.search(rf"(?<!\w){re.escape(doc_id)}(?!\w)", response)
+            ]
 
             if not selected_docs:
                 log_warning("[ReasoningBased] No documents selected by model, using all as fallback")
@@ -1306,7 +1304,9 @@ Only include documents that are actually relevant to the query.
             model_name = self.backend.config.models.reasoning if self.backend.config.models else "default"
             session = self.backend.create_session(model=model_name)
             response = session.instruct(prompt=prompt)
-            selected_docs = [doc_id for doc_id in documents if f"'{doc_id}'" in response or doc_id in response]
+            selected_docs = [
+                doc_id for doc_id in documents if re.search(rf"(?<!\w){re.escape(doc_id)}(?!\w)", response)
+            ]
             if not selected_docs:
                 log_warning("[TreeGuided] No documents selected by model, using all as fallback")
                 selected_docs = list(documents.keys())
