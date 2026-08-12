@@ -58,6 +58,9 @@ evaluation = [
 ]
 
 [dependency-groups]
+constraints = [
+    "numpy<2.5.0",  # numpy 2.5.0+ stubs use PEP 695 syntax, incompatible with mypy python_version < 3.12
+]
 dev = [
     "coverage>=7.8.0",
     "mypy~=2.1.0",
@@ -181,7 +184,7 @@ module = [
     "pandas.*",
     "msgpack.*",
     "mlx_vlm.*",
-    "googleapiclient.*", 
+    "googleapiclient.*",
     "google_auth_oauthlib.*",
     "mellea.*",
 ]
