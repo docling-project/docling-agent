@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal, cast
 
@@ -44,6 +45,22 @@ from docling_agent.task_model import (
 
 # Internal type alias: a resolved document paired with its library id.
 _SourcePair = tuple[DoclingDocument, str]
+
+# Sub-agent traces collected during a traced run. Held in a module-local context
+# variable rather than on the orchestrator instance: it is scoped to the execution
+# context, so concurrent runs (threads, asyncio tasks) never share a collector and the
+# dispatch call stack needs no extra parameter. ``None`` means tracing is off (no overhead).
+# Note the contract this implies for future fan-out *inside* a run: a context variable is
+# not inherited by a thread you spawn, so work dispatched to a worker must be submitted
+# through ``contextvars.copy_context().run(...)`` or its child traces are dropped.
+_COLLECTOR: ContextVar[list[AgentTrace] | None] = ContextVar("_COLLECTOR", default=None)
+
+
+def _record_child(trace: AgentTrace) -> None:
+    """Record a sub-agent trace into the collector of the current run, if tracing is active."""
+    collector = _COLLECTOR.get()
+    if collector is not None:
+        collector.append(trace)
 
 
 class _SourcePairs(list):
@@ -96,14 +113,6 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             tools=tools,
         )
         self.library_path: Path = library_path or (Path.home() / ".docling_agent" / "library")
-        # When set (by run_task_with_trace), sub-agent traces are collected into this list
-        # to compose the orchestrator trace tree. None means tracing is off (no overhead).
-        self._child_traces: list[AgentTrace] | None = None
-
-    def _record_child(self, trace: AgentTrace) -> None:
-        """Record a sub-agent trace into the current tree, if tracing is active."""
-        if self._child_traces is not None:
-            self._child_traces.append(trace)
 
     # BaseDoclingAgent abstract method — not used directly
     @override
@@ -129,19 +138,21 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     def run_task_with_trace(self, task: AgentTask) -> AgentTrace:
         """Run the task and return the orchestrator trace tree.
 
-        The returned :class:`AgentTrace` nests one child trace per sub-agent the
+        The returned ``AgentTrace`` nests one child trace per sub-agent the
         orchestrator dispatched to (RAG, enricher, writer ...), so the whole session
         is a single tree that can be exported to a file. ``run_task()`` is unchanged
         and incurs no tracing overhead when called directly.
+
+        Returns:
+            The trace of this run, with the sub-agent traces under ``children``.
         """
-        previous = self._child_traces
-        self._child_traces = []
+        children: list[AgentTrace] = []
+        token = _COLLECTOR.set(children)
         start = time.perf_counter()
         try:
             doc = self.run_task(task)
-            children = self._child_traces
         finally:
-            self._child_traces = previous
+            _COLLECTOR.reset(token)
         duration_ms = int((time.perf_counter() - start) * 1000)
         return AgentTrace(
             agent_type=str(self.agent_type),
@@ -323,7 +334,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             if needed:
                 log_info(f"Enriching {doc.name!r} with operations={needed}")
                 etrace = enricher.run_with_trace(task=task, document=doc, operations=needed)
-                self._record_child(etrace)
+                _record_child(etrace)
                 enriched_doc = cast(DoclingDocument, etrace.output)
                 # Persist enriched document back to library
                 library.store(enriched_doc, entry.source_path if entry else "in-memory")
@@ -435,7 +446,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             max_iterations=task.max_iterations,
         )
         trace = rag_agent.run_with_trace(task=task.query, sources=docs)
-        self._record_child(trace)
+        _record_child(trace)
         return cast(DoclingDocument, trace.output)
 
     def _run_extract(
@@ -454,7 +465,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         raw_paths = self._expand_paths(task)
         sources: list[DoclingDocument | Path] = cast(list[DoclingDocument | Path], raw_paths)
         trace = extractor.run_with_trace(task=task.query, sources=sources)
-        self._record_child(trace)
+        _record_child(trace)
         return cast(DoclingDocument, trace.output)
 
     def _run_write(
@@ -471,7 +482,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         )
         sources: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
         trace = writer.run_with_trace(task=task.query, sources=sources)
-        self._record_child(trace)
+        _record_child(trace)
         doc = cast(DoclingDocument, trace.output)
         entry = library.store_in_memory(doc, project_id=task.project_id, document_origin="written")
         log_info(f"Stored written document in library: {doc.name!r} → {entry.doc_id}")
@@ -492,7 +503,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             raise ValueError("Edit tasks require at least one source document")
         document = source_pairs[0][0]
         trace = editor.run_with_trace(task=task.query, document=document)
-        self._record_child(trace)
+        _record_child(trace)
         return cast(DoclingDocument, trace.output)
 
     def _run_enrich(
@@ -509,7 +520,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 enricher = DoclingEnrichingAgent(backend=self.backend, tools=[])
                 log_info(f"Enriching {doc.name!r} by inferred operations from query")
                 etrace = enricher.run_with_trace(task=task.query, document=doc)
-                self._record_child(etrace)
+                _record_child(etrace)
                 enriched_doc = cast(DoclingDocument, etrace.output)
                 entry = library.get_entry(doc_id)
                 library.store(enriched_doc, entry.source_path if entry else "in-memory")

@@ -43,7 +43,7 @@ class RAGResult(BaseModel):
 class RAGTrace(AgentTrace):
     """Full reasoning trace of a RAG run across one or more documents.
 
-    A specialization of :class:`AgentTrace`: it carries the RAG-specific
+    A specialization of ``AgentTrace``: it carries the RAG-specific
     ``per_document`` results and merged ``final_answer`` on top of the generic
     trace fields (``agent_type``, ``task``, ``steps``, ``children`` ...), so a RAG
     run nests naturally into an orchestrator trace tree.

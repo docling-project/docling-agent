@@ -2,11 +2,14 @@
 
 ``AgentStep`` and ``AgentTrace`` lift the pattern introduced for RAG
 (``RAGIteration`` / ``RAGResult`` / ``RAGTrace``) to every agent: a run produces an
-``AgentTrace`` made of ordered ``AgentStep`` entries, and the orchestrator nests the
-traces of the sub-agents it dispatched to under ``children`` — forming a tree that can
-be exported to a single file for debugging.
+``AgentTrace`` carrying its timing, model and result, and the orchestrator nests the
+traces of the sub-agents it dispatched to under ``children``, forming a tree that can
+be exported to a single file for debugging. ``steps`` is the extension point for
+per-step detail; no agent populates it yet (RAG carries its own in ``per_document``).
 
-The trace is a value object: it is built and returned, never stored in global state.
+The trace is a value object: it is built and returned, never stored on the agent. The
+orchestrator collects its children in a context-scoped variable local to its own module
+(``orchestrator._COLLECTOR``), not in shared global state.
 ``RAGTrace`` is a subclass of ``AgentTrace`` (see ``rag_models``), so the existing
 ``DoclingRAGAgent.run_with_trace()`` is just the richest specialization of the same
 contract.
@@ -14,7 +17,6 @@ contract.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +32,10 @@ class AgentStep(BaseModel):
     output: str = Field(default="", description="Short textual result/outcome of the step.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the step in milliseconds.")
     model_id: str = Field(default="", description="Model that produced this step, if any.")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Extra structured detail for the step.")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra structured detail for the step. Values must be JSON-serializable.",
+    )
 
 
 class AgentTrace(BaseModel):
@@ -55,7 +60,7 @@ class AgentTrace(BaseModel):
     result_name: str | None = Field(default=None, description="Name of the produced DoclingDocument, if any.")
     attachments: dict[str, Any] = Field(
         default_factory=dict,
-        description="Domain-specific structured payloads attached to the run.",
+        description="Domain-specific structured payloads attached to the run. Values must be JSON-serializable.",
     )
     output: DoclingDocument | None = Field(
         default=None,
@@ -65,7 +70,7 @@ class AgentTrace(BaseModel):
 
     def to_json(self, *, indent: int = 2) -> str:
         """Serialize the trace tree to JSON (the ``output`` document is excluded)."""
-        return json.dumps(self.model_dump(), indent=indent, ensure_ascii=False, default=str)
+        return self.model_dump_json(indent=indent)
 
     def save(self, path: str | Path) -> Path:
         """Write the trace tree as JSON to ``path``, creating parent directories. Returns the path."""

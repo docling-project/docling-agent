@@ -1,12 +1,15 @@
 """Tests for the generic AgentTrace: base default, RAG specialization, orchestrator tree, export."""
 
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 from docling_core.types.doc.document import DoclingDocument
 
 from docling_agent import AgentStep, AgentTrace
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
-from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
+from docling_agent.agent.orchestrator import _COLLECTOR, DoclingOrchestratorAgent, _record_child
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.rag_models import RAGIteration, RAGResult, RAGTrace
 from docling_agent.task_model import AgentTask
@@ -22,7 +25,7 @@ def _make_doc(name: str) -> DoclingDocument:
 
 
 class _DummyAgent(BaseDoclingAgent):
-    """Minimal concrete agent that returns a fixed document — exercises the base default."""
+    """Minimal concrete agent that returns a fixed document, exercising the base default."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -96,6 +99,21 @@ def test_rag_trace_is_agent_trace(monkeypatch):
     assert agent.run("what is X?", sources=[doc]).name == "rag_answer"
 
 
+def test_rag_trace_reports_its_duration(monkeypatch):
+    """RAGTrace times its own run, so the rag node of a tree is not a flat 0 ms."""
+
+    def slow_loop(self, *, query, doc):
+        time.sleep(0.002)
+        return _make_result("answer")
+
+    monkeypatch.setattr(DoclingRAGAgent, "_rag_loop", slow_loop)
+    agent = DoclingRAGAgent(backend=MockBackend(), tools=[])
+
+    trace = agent.run_with_trace("what is X?", sources=[_make_doc("doc_a")])
+
+    assert trace.duration_ms >= 1
+
+
 def test_output_excluded_from_serialization():
     """The produced document lives on `output` but is never serialized; result_name is."""
     trace = AgentTrace(agent_type="writer", task="t", result_name="r", output=_make_doc("r"))
@@ -148,8 +166,8 @@ def test_orchestrator_builds_tree(monkeypatch):
 
     def fake_run_task(task):
         # Simulate dispatch recording two sub-agent traces.
-        orch._record_child(AgentTrace(agent_type="enricher", task=task.query))
-        orch._record_child(AgentTrace(agent_type="rag", task=task.query))
+        _record_child(AgentTrace(agent_type="enricher", task=task.query))
+        _record_child(AgentTrace(agent_type="rag", task=task.query))
         return produced
 
     monkeypatch.setattr(orch, "run_task", fake_run_task)
@@ -163,9 +181,44 @@ def test_orchestrator_builds_tree(monkeypatch):
     assert tree.result_name == "final"
 
 
-def test_record_child_noop_without_active_tree():
+def test_record_child_noop_without_active_tree(monkeypatch):
     """Outside run_task_with_trace, recording a child is a no-op (run_task unaffected)."""
     orch = DoclingOrchestratorAgent(backend=MockBackend(), tools=[])
-    assert orch._child_traces is None
-    orch._record_child(AgentTrace(agent_type="rag", task="q"))  # must not raise
-    assert orch._child_traces is None
+    monkeypatch.setattr(orch, "run_task", lambda task: _make_doc("final"))
+
+    # Assert the collector itself, not a symptom: run_task_with_trace always installs a
+    # fresh list, so a leak is only observable on _COLLECTOR.
+    assert _COLLECTOR.get() is None
+    _record_child(AgentTrace(agent_type="rag", task="q"))  # must not raise
+    assert _COLLECTOR.get() is None
+
+    assert orch.run_task_with_trace(AgentTask(query="q")).children == []
+    assert _COLLECTOR.get() is None  # the run reset it on the way out
+
+
+def test_concurrent_traced_runs_do_not_share_children(monkeypatch):
+    """Two concurrent runs on the same orchestrator collect into separate trees.
+
+    The collector is scoped to the execution context (contextvars), not to the
+    orchestrator instance, so overlapping runs never cross-contaminate.
+
+    Both barriers matter: the runs must be open *before* either records, otherwise a
+    single shared collector saved and restored around each run unwinds LIFO and passes
+    this test by accident.
+    """
+    orch = DoclingOrchestratorAgent(backend=MockBackend(), tools=[])
+    both_open = threading.Barrier(2, timeout=10)
+    both_recorded = threading.Barrier(2, timeout=10)
+
+    def fake_run_task(task):
+        both_open.wait()  # both traced runs have installed their collector
+        _record_child(AgentTrace(agent_type=task.query, task=task.query))
+        both_recorded.wait()  # keep both open until each has recorded into its own
+        return _make_doc(task.query)
+
+    monkeypatch.setattr(orch, "run_task", fake_run_task)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        trees = list(pool.map(lambda q: orch.run_task_with_trace(AgentTask(query=q)), ["a", "b"]))
+
+    assert [[child.agent_type for child in tree.children] for tree in trees] == [["a"], ["b"]]

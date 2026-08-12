@@ -1,5 +1,6 @@
 """Chunkless RAG agent using DoclingDocument tree structure and per-node summaries."""
 
+import time
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -138,6 +139,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         per-document RAGResult (selections, reasons, convergence) and the merged
         final_answer. run() is a thin wrapper around this method.
         """
+        start = time.perf_counter()
         docs = [s for s in sources if isinstance(s, DoclingDocument)]
         if not docs and document is not None:
             docs = [document]
@@ -190,6 +192,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         return RAGTrace(
             agent_type=str(self.agent_type),
             task=task,
+            duration_ms=int((time.perf_counter() - start) * 1000),
             model_id=self.get_reasoning_model_id(),
             result_name=answer_doc.name,
             output=answer_doc,

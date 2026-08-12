@@ -160,15 +160,25 @@ class BaseDoclingAgent(ABC):
         sources: list[DoclingDocument | Path] = [],
         **kwargs,
     ) -> AgentTrace:
-        """Execute the agent and return a generic :class:`AgentTrace`.
+        """Execute the agent and return a generic ``AgentTrace``.
 
         Default implementation: time ``run()`` and wrap its result into a single
         opaque trace, so every agent exposes a trace without bespoke code. Agents
-        with internal structure (e.g. ``DoclingRAGAgent``) override this to record
-        per-step detail and return a richer :class:`AgentTrace` subclass.
+        with internal structure override this to return a richer ``AgentTrace``
+        subclass: ``DoclingRAGAgent`` returns a ``RAGTrace`` carrying its
+        per-document iterations.
 
         ``run()`` remains the source of truth for the produced document; the document
         is carried on ``AgentTrace.output`` (excluded from serialization).
+
+        Args:
+            task: The natural language task to execute.
+            document: Optional document the task operates on.
+            sources: Optional source documents or paths for the task.
+            **kwargs: Additional agent-specific arguments forwarded to ``run()``.
+
+        Returns:
+            The trace of the run, carrying the produced document on ``output``.
         """
         start = time.perf_counter()
         result = self.run(task, document=document, sources=sources, **kwargs)
