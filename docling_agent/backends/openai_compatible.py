@@ -30,6 +30,7 @@ class OpenAICompatibleSession(BaseSession):
         timeout: float,
         api_key_env: str | None = None,
         options: dict[str, Any] | None = None,
+        query_params: dict[str, str] | None = None,
     ) -> None:
         """Initialize an OpenAI-compatible session.
 
@@ -41,6 +42,7 @@ class OpenAICompatibleSession(BaseSession):
             timeout: Request timeout in seconds.
             api_key_env: Environment variable name containing the API key.
             options: Additional API options (temperature, max_tokens, etc.).
+            query_params: Query parameters appended to every request URL.
         """
         self.backend_type = backend_type
         self.model = model
@@ -50,7 +52,12 @@ class OpenAICompatibleSession(BaseSession):
             api_key = os.getenv(api_key_env)
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
-        self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, headers=headers)
+        self._client = httpx.Client(
+            base_url=base_url.rstrip("/"),
+            timeout=timeout,
+            headers=headers,
+            params=query_params or {},
+        )
         self._messages: list[dict[str, str]] = []
         if system_prompt:
             self._messages.append({"role": "system", "content": system_prompt})
@@ -207,7 +214,8 @@ class OpenAICompatibleBackend(BaseBackend):
         self.base_url = config.base_url or "http://localhost:4000/v1"
         self.timeout = config.timeout or 120
         self.api_key_env = config.api_key_env
-        self.options = config.options or {}
+        self.options = config.options
+        self.query_params = config.query_params
 
     @classmethod
     def from_config(cls, config: BackendConfig) -> Self:
@@ -244,4 +252,5 @@ class OpenAICompatibleBackend(BaseBackend):
             timeout=float(self.timeout),
             api_key_env=self.api_key_env,
             options=self.options,
+            query_params=self.query_params,
         )
