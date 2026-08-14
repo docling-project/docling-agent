@@ -1,4 +1,5 @@
 from docling_agent.agents import (
+    AddTask,
     AgentTask,
     BackendConfig,
     BaseBackend,
@@ -10,6 +11,7 @@ from docling_agent.agents import (
     DoclingWritingAgent,
     EnrichTask,
     ExtractTask,
+    ListTask,
     LiteLLMBackend,
     LMStudioBackend,
     MelleaBackend,
@@ -20,6 +22,7 @@ from docling_agent.agents import (
     RAGResult,
     RAGTask,
     RAGTrace,
+    ViewTask,
     WriteTask,
     create_backend,
     load_task,
@@ -27,6 +30,7 @@ from docling_agent.agents import (
 )
 
 __all__ = [
+    "AddTask",
     "AgentTask",
     "BackendConfig",
     "BaseBackend",
@@ -39,6 +43,7 @@ __all__ = [
     "EnrichTask",
     "ExtractTask",
     "LMStudioBackend",
+    "ListTask",
     "LiteLLMBackend",
     "MelleaBackend",
     "ModelConfig",
@@ -48,6 +53,7 @@ __all__ = [
     "RAGResult",
     "RAGTask",
     "RAGTrace",
+    "ViewTask",
     "WriteTask",
     "create_backend",
     "load_task",

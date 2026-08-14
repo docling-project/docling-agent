@@ -26,3 +26,9 @@ def test_document() -> DoclingDocument:
     with open(json_path) as f:
         doc_dict = json.load(f)
     return DoclingDocument.model_validate(doc_dict)
+
+
+@pytest.fixture(autouse=True)
+def isolate_library_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests on the filesystem-backed library unless they opt into Postgres explicitly."""
+    monkeypatch.delenv("DOCLING_AGENT_LIBRARY_DATABASE_URL", raising=False)
