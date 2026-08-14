@@ -1,4 +1,5 @@
 fail_fast: true
+exclude: '(^|/)_.*(/|$)'
 repos:
   - repo: local
     hooks:

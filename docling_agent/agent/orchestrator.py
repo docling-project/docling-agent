@@ -717,6 +717,8 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         converter = DocumentConverter()
         for format_option in converter.format_to_options.values():
             pipeline_options = format_option.pipeline_options
+            if pipeline_options is None:
+                continue
             if hasattr(pipeline_options, "do_ocr"):
                 pipeline_options.do_ocr = conversion != "fast"
             if hasattr(pipeline_options, "do_table_structure"):

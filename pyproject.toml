@@ -108,7 +108,7 @@ respect-gitignore = true
 include = ["*.py", "*.ipynb"]
 exclude = [
     "tests/data/**",
-    "_reference/**",
+    "_*/**",
 ]
 
 [tool.ruff.format]
