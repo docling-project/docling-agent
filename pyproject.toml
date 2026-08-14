@@ -40,12 +40,14 @@ dependencies = [
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
     "typer>=0.12.5",
+    "tabulate>=0.10",
     "pyyaml>=6.0",
     "boto3~=1.35",
     "pandas~=2.2",
     "pyarrow>=19.0",
     "httpx~=0.28",
     "mellea>=0.3",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
@@ -74,6 +76,10 @@ dev = [
 
 [project.scripts]
 docling-agent = "docling_agent.cli:app"
+add-sources = "docling_agent.cli:add_sources_cli"
+list-sources = "docling_agent.cli:list_sources_cli"
+view-sources = "docling_agent.cli:view_sources_cli"
+clear-sources = "docling_agent.cli:clear_sources_cli"
 
 [project.urls]
 homepage = "https://github.com/docling-project"

@@ -141,7 +141,11 @@ class AgentTask(BaseModel):
         None,
         description="Task mode. None means auto-plan; subclasses override with a Literal.",
     )
-    query: str = Field(..., description="The natural-language query or instruction.")
+    query: str = Field(default="", description="The natural-language query or instruction.")
+    project_id: str = Field(
+        default="default",
+        description="Project identifier assigned to library documents.",
+    )
     sources: list[str] = Field(
         default_factory=list,
         description="Paths to documents or directories.",
@@ -270,9 +274,75 @@ class EnrichTask(AgentTask):
         return self
 
 
+class AddTask(AgentTask):
+    """Library ingestion task.
+
+    Converts source documents and stores them in the document library.
+    """
+
+    mode: Literal["add"] = "add"
+    glob: Annotated[
+        str | None,
+        Field(description="Glob pattern applied when sources contain directories."),
+    ] = None
+    conversion: Annotated[
+        Literal["fast", "standard", "expensive"],
+        Field(description="Named Docling conversion preset used for source ingestion."),
+    ] = "standard"
+
+    @model_validator(mode="after")
+    def sources_required(self) -> Self:
+        """Validate that at least one source document is provided."""
+        if not self.sources:
+            raise ValueError("'sources' must not be empty for add tasks")
+        return self
+
+
+class ListTask(AgentTask):
+    """Library listing task.
+
+    Lists all documents or filters them with a PostgreSQL WHERE predicate.
+    """
+
+    mode: Literal["list"] = "list"
+    postgres_filter: Annotated[
+        str | None,
+        Field(description="Optional PostgreSQL WHERE predicate applied to the library entries table."),
+    ] = None
+    limit: Annotated[int, Field(ge=1, description="Maximum number of entries to return.")] = 100
+
+
+class ViewTask(AgentTask):
+    """Detailed library state view task."""
+
+    mode: Literal["view"] = "view"
+    postgres_filter: Annotated[
+        str,
+        Field(description="Required PostgreSQL WHERE predicate applied to the library entries table."),
+    ]
+    limit: Annotated[int, Field(ge=1, description="Maximum number of entries to return.")] = 100
+
+    @model_validator(mode="after")
+    def postgres_filter_required(self) -> Self:
+        """Validate that a PostgreSQL predicate is provided."""
+        if not self.postgres_filter.strip():
+            raise ValueError("'postgres_filter' must not be empty for view tasks")
+        return self
+
+
+class ClearTask(AgentTask):
+    """Library clearing task."""
+
+    mode: Literal["clear"] = "clear"
+    all_projects: Annotated[
+        bool,
+        Field(description="Clear the entire library instead of only project_id."),
+    ] = False
+
+
 # Discriminated union — Pydantic selects the right subclass via the ``mode`` field.
 AnyTask = Annotated[
-    RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask,
+    RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | AddTask | ListTask | ViewTask | ClearTask,
     Field(discriminator="mode"),
 ]
 
@@ -281,7 +351,9 @@ _task_adapter: TypeAdapter[AnyTask] = TypeAdapter(AnyTask)
 
 def load_task(
     path: Path,
-) -> RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | AgentTask:
+) -> (
+    RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | AddTask | ListTask | ViewTask | ClearTask | AgentTask
+):
     """Load and validate a task from a YAML file.
 
     The ``mode`` key selects the task subclass. If ``mode`` is omitted or

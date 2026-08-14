@@ -11,7 +11,7 @@ from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent_models import configure_linear_chat_logging, configure_llm_logging
 from docling_agent.backends import create_backend
 from docling_agent.logging import logger
-from docling_agent.task_model import AgentTask, load_task
+from docling_agent.task_model import AddTask, AgentTask, ClearTask, ListTask, ViewTask, load_task
 
 app = typer.Typer(name="docling-agent", add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -23,13 +23,33 @@ _TASK_TEMPLATE = """\
 # Required: the natural-language query or instruction.
 query: "Your query here"
 
+# Optional: document library project id. Defaults to "default".
+project_id: default
+
 # Required for rag / extract / enrich: paths to documents or directories.
 sources:
   - path/to/document.pdf
   # - path/to/directory/
 
-# Task mode: rag | extract | write | edit | enrich  (omit to auto-plan)
+# Task mode: add | list | view | clear | rag | extract | write | edit | enrich  (omit to auto-plan)
 # mode: rag
+
+# --- Library options (mode: add | list | view | clear) ------------------------
+# mode: add
+# sources: [path/to/document.pdf]
+# conversion: standard  # fast | standard | expensive
+#
+# mode: list
+# postgres_filter: "project_id = 'default'"  # optional; omit to list all projects
+# limit: 100
+#
+# mode: view
+# postgres_filter: "project_id = 'default'"  # required
+# limit: 100
+#
+# mode: clear
+# project_id: default  # clear this project
+# all_projects: false  # set true to clear every project
 
 # --- RAG options (mode: rag) -------------------------------------------------
 # max_iterations: 5       # maximum section-selection iterations
@@ -179,3 +199,116 @@ def _path_for_format(base_path: Path, fmt: str) -> Path:
     if base_path.suffix:
         return base_path.with_suffix(suffix)
     return base_path.parent / f"{base_path.name}{suffix}"
+
+
+def _print_doc(doc) -> None:
+    typer.echo(MarkdownDocSerializer(doc=doc).serialize().text)
+
+
+def _run_shortcut_task(task: AgentTask, *, library_path: Path | None = None) -> None:
+    orchestrator = DoclingOrchestratorAgent(
+        backend=create_backend(task.backend),
+        tools=[],
+        library_path=library_path,
+    )
+    _print_doc(orchestrator.run_task(task))
+
+
+def _add_sources(
+    sources: list[Path] = typer.Argument(..., help="Source files or directories to add to the library."),
+    project_id: str = typer.Option("default", "--project-id", "-p", help="Project id for the added documents."),
+    glob: str | None = typer.Option(None, "--glob", "-g", help="Glob used when a source is a directory."),
+    conversion: str = typer.Option(
+        "standard",
+        "--conversion",
+        "-c",
+        help="Conversion preset: fast, standard, or expensive.",
+    ),
+    library_path: Path | None = typer.Option(None, "--library-path", help="Override the document library path."),
+) -> None:
+    _run_shortcut_task(
+        AddTask(
+            project_id=project_id,
+            sources=[str(source) for source in sources],
+            glob=glob,
+            conversion=conversion,
+        ),
+        library_path=library_path,
+    )
+
+
+def _list_sources(
+    postgres_filter: str | None = typer.Option(
+        None,
+        "--postgres-filter",
+        "-f",
+        help="Optional PostgreSQL WHERE predicate for docling_library_entries.",
+    ),
+    limit: int = typer.Option(100, "--limit", "-n", min=1, help="Maximum number of entries to list."),
+    project_id: str = typer.Option("default", "--project-id", "-p", help="Default project context."),
+    library_path: Path | None = typer.Option(None, "--library-path", help="Override the document library path."),
+) -> None:
+    _run_shortcut_task(
+        ListTask(
+            project_id=project_id,
+            postgres_filter=postgres_filter,
+            limit=limit,
+        ),
+        library_path=library_path,
+    )
+
+
+def _view_sources(
+    postgres_filter: str = typer.Option(
+        ...,
+        "--postgres-filter",
+        "-f",
+        help="Required PostgreSQL WHERE predicate for docling_library_entries.",
+    ),
+    limit: int = typer.Option(100, "--limit", "-n", min=1, help="Maximum number of entries to view."),
+    project_id: str = typer.Option("default", "--project-id", "-p", help="Default project context."),
+    library_path: Path | None = typer.Option(None, "--library-path", help="Override the document library path."),
+) -> None:
+    _run_shortcut_task(
+        ViewTask(
+            project_id=project_id,
+            postgres_filter=postgres_filter,
+            limit=limit,
+        ),
+        library_path=library_path,
+    )
+
+
+def _clear_sources(
+    project_id: str = typer.Option("default", "--project-id", "-p", help="Project id to clear."),
+    all_projects: bool = typer.Option(False, "--all", help="Clear all projects in the library."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm destructive library clearing."),
+    library_path: Path | None = typer.Option(None, "--library-path", help="Override the document library path."),
+) -> None:
+    if not yes:
+        scope = "all projects" if all_projects else f"project {project_id!r}"
+        typer.echo(f"Refusing to clear {scope} without --yes.", err=True)
+        raise typer.Exit(code=1)
+    _run_shortcut_task(
+        ClearTask(
+            project_id=project_id,
+            all_projects=all_projects,
+        ),
+        library_path=library_path,
+    )
+
+
+def add_sources_cli() -> None:
+    typer.run(_add_sources)
+
+
+def list_sources_cli() -> None:
+    typer.run(_list_sources)
+
+
+def view_sources_cli() -> None:
+    typer.run(_view_sources)
+
+
+def clear_sources_cli() -> None:
+    typer.run(_clear_sources)

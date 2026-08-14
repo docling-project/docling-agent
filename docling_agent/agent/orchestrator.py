@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
-from docling.datamodel.base_models import ConversionStatus
+from docling.datamodel.base_models import ConversionStatus, FormatToMimeType, InputFormat
 from docling.document_converter import DocumentConverter
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
 from docling_core.types.doc.document import (
@@ -15,6 +15,7 @@ from docling_core.types.doc.document import (
     TitleItem,
 )
 from mellea.stdlib.requirements import Requirement, simple_validate
+from tabulate import tabulate
 from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
@@ -22,16 +23,20 @@ from docling_agent.agent.base_functions import find_json_dicts
 from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.extractor import DoclingExtractingAgent
-from docling_agent.agent.library import DoclingLibrary
+from docling_agent.agent.library import DocLibraryEntry, DoclingLibrary
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
 from docling_agent.logging import log_error, log_info, log_warning
 from docling_agent.task_model import (
+    AddTask,
     AgentTask,
+    ClearTask,
     EditingTask,
     EnrichTask,
     ExtractTask,
+    ListTask,
     RAGTask,
+    ViewTask,
     WriteTask,
 )
 
@@ -109,7 +114,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     def run_task(self, task: AgentTask) -> DoclingDocument:
         """Convert sources, enrich lazily, and dispatch to the right sub-agent."""
         log_info(f"DoclingOrchestratorAgent.run_task: mode={task.mode!r}")
-        return self._dispatch(task, DoclingLibrary(path=self.library_path))
+        return self._dispatch(task, DoclingLibrary(path=self.library_path, project_id=task.project_id))
 
     def _dispatch(self, task: AgentTask, library: DoclingLibrary) -> DoclingDocument:
         log_info(f"_dispatch: mode={task.mode!r}")
@@ -119,12 +124,20 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
         if task.mode is None:
             return self._run_plan(task=task, source_pairs=source_pairs, library=library)
+        elif isinstance(task, AddTask):
+            return self._run_add(task=task, source_pairs=source_pairs, library=library)
+        elif isinstance(task, ListTask):
+            return self._run_list(task=task, library=library)
+        elif isinstance(task, ViewTask):
+            return self._run_view(task=task, library=library)
+        elif isinstance(task, ClearTask):
+            return self._run_clear(task=task, library=library)
         elif isinstance(task, RAGTask):
             return self._run_rag(task=task, source_pairs=source_pairs, library=library)
         elif isinstance(task, ExtractTask):
             return self._run_extract(task=task, source_pairs=source_pairs)
         elif isinstance(task, WriteTask):
-            return self._run_write(task=task, source_pairs=source_pairs)
+            return self._run_write(task=task, source_pairs=source_pairs, library=library)
         elif isinstance(task, EditingTask):
             return self._run_edit(task=task, source_pairs=source_pairs)
         elif isinstance(task, EnrichTask):
@@ -140,6 +153,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         """Expand paths/globs, load from library cache or convert, return (doc, doc_id) pairs."""
         log_info(f"_resolve_sources: sources={task.sources}")
         raw_paths = self._expand_paths(task)
+        conversion = self._source_conversion_preset(task)
         if not raw_paths and not task.sources:
             return []
 
@@ -155,10 +169,21 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     doc = DoclingDocument.model_validate_json(p.read_text(encoding="utf-8"))
                     entry = library.lookup_by_source(source_key)
                     if entry is None:
-                        entry = library.store(doc, source_key)
+                        entry = library.store(
+                            doc,
+                            source_key,
+                            project_id=task.project_id,
+                            original_mimetype="application/json",
+                            conversion_pipeline="preconverted-json",
+                        )
                     else:
                         # Refresh stored document in case file changed
-                        library.store(doc, source_key)
+                        library.store(
+                            doc,
+                            source_key,
+                            project_id=task.project_id,
+                            original_mimetype=entry.original_mimetype,
+                        )
                     results.append((doc, entry.doc_id))
                     log_info(f"Loaded pre-converted document: {p.name}")
                     continue
@@ -168,7 +193,11 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             # Check library cache for already-converted files
             entry = library.lookup_by_source(source_key)
             if entry is not None:
-                cached_doc: DoclingDocument | None = library.load_doc(entry.doc_id)
+                cached_doc: DoclingDocument | None = (
+                    library.load_doc(entry.doc_id)
+                    if self._cache_entry_matches_conversion(entry, conversion=conversion)
+                    else None
+                )
                 if cached_doc is not None:
                     log_info(f"Library cache hit: {p.name} → {entry.doc_id}")
                     results.append((cached_doc, entry.doc_id))
@@ -179,14 +208,24 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
         # Batch-convert all uncached files
         if raw_to_convert:
-            converter = DocumentConverter()
+            converter = self._build_source_converter(conversion)
             for p in raw_to_convert:
                 source_key = str(p.resolve())
                 try:
                     conv = converter.convert(p)
                     if conv.status == ConversionStatus.SUCCESS:
                         doc = conv.document
-                        entry = library.store(doc, source_key)
+                        entry = library.store(
+                            doc,
+                            source_key,
+                            project_id=task.project_id,
+                            original_mimetype=self._mimetype_for_input_format(conv.input.format),
+                            conversion_pipeline=self._pipeline_name_for_input_format(
+                                converter=converter,
+                                input_format=conv.input.format,
+                                conversion=conversion,
+                            ),
+                        )
                         results.append((doc, entry.doc_id))
                         log_info(f"Converted and cached: {p.name} → {entry.doc_id}")
                     else:
@@ -257,6 +296,11 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 if "keywords" in needed:
                     status_updates["has_keywords"] = True
                 library.update_status(doc_id, **status_updates)
+                library.record_enrichments(
+                    doc_id,
+                    self._normalize_enrichment_operations(needed),
+                    task=task or None,
+                )
                 # Extract top-level summary and keywords for the library index
                 self._update_library_meta(doc_id, enriched_doc, library)
                 updated.append((enriched_doc, doc_id))
@@ -285,6 +329,54 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     # ------------------------------------------------------------------
     # Mode handlers
     # ------------------------------------------------------------------
+
+    def _run_add(
+        self,
+        *,
+        task: AddTask,
+        source_pairs: list[_SourcePair],
+        library: DoclingLibrary,
+    ) -> DoclingDocument:
+        log_info(f"_run_add: docs={len(source_pairs)}")
+        entries = [library.get_entry(doc_id) for _, doc_id in source_pairs]
+        return self._entries_to_doc(
+            name="library_add_result",
+            title=f"Added {len(source_pairs)} document(s)",
+            entries=[entry for entry in entries if entry is not None],
+            detailed=False,
+        )
+
+    def _run_list(self, *, task: ListTask, library: DoclingLibrary) -> DoclingDocument:
+        log_info(f"_run_list: postgres_filter={task.postgres_filter!r}")
+        if task.postgres_filter:
+            entries = library.query_entries_by_postgres_filter(task.postgres_filter, limit=task.limit)
+        else:
+            entries = sorted(library.all_entries(), key=lambda entry: entry.updated_at, reverse=True)[: task.limit]
+        return self._entries_to_doc(
+            name="library_list",
+            title=f"Library documents ({len(entries)})",
+            entries=entries,
+            detailed=False,
+        )
+
+    def _run_view(self, *, task: ViewTask, library: DoclingLibrary) -> DoclingDocument:
+        log_info(f"_run_view: postgres_filter={task.postgres_filter!r}")
+        entries = library.query_entries_by_postgres_filter(task.postgres_filter, limit=task.limit)
+        return self._entries_to_doc(
+            name="library_view",
+            title=f"Library document state ({len(entries)})",
+            entries=entries,
+            detailed=True,
+        )
+
+    def _run_clear(self, *, task: ClearTask, library: DoclingLibrary) -> DoclingDocument:
+        log_info(f"_run_clear: project_id={task.project_id!r}, all_projects={task.all_projects}")
+        removed = library.clear(project_id=task.project_id, all_projects=task.all_projects)
+        scope = "all projects" if task.all_projects else f"project {task.project_id!r}"
+        doc = DoclingDocument(name="library_clear_result")
+        doc.add_heading(text="Library cleared", level=1, parent=doc.body)
+        doc.add_text(label=DocItemLabel.TEXT, text=f"Removed {removed} document(s) from {scope}.", parent=doc.body)
+        return doc
 
     def _run_rag(
         self,
@@ -327,6 +419,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         *,
         task: WriteTask,
         source_pairs: list[_SourcePair],
+        library: DoclingLibrary,
     ) -> DoclingDocument:
         log_info(f"_run_write: query={task.query!r}, docs={len(source_pairs)}")
         writer = DoclingWritingAgent(
@@ -334,7 +427,10 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             tools=[],
         )
         sources: list[DoclingDocument | Path] = [doc for doc, _ in source_pairs]
-        return writer.run(task=task.query, sources=sources)
+        doc = writer.run(task=task.query, sources=sources)
+        entry = library.store_in_memory(doc, project_id=task.project_id, document_origin="written")
+        log_info(f"Stored written document in library: {doc.name!r} → {entry.doc_id}")
+        return doc
 
     def _run_edit(
         self,
@@ -377,6 +473,11 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     status_updates["has_keywords"] = True
                 if status_updates:
                     library.update_status(doc_id, **status_updates)
+                library.record_enrichments(
+                    doc_id,
+                    self._normalize_enrichment_operations(inferred_ops),
+                    task=task.query or None,
+                )
                 self._update_library_meta(doc_id, enriched_doc, library)
                 enriched_pairs.append((enriched_doc, doc_id))
         else:
@@ -405,6 +506,10 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         "Given a user query and an optional list of available documents, decide "
         "which agent mode(s) best handle the request and formulate concrete sub-tasks.\n\n"
         "Available modes:\n"
+        "  add      - add new source documents to the document library\n"
+        "  list     - list documents in the document library\n"
+        "  view     - view detailed document library state\n"
+        "  clear    - clear documents from a project or the entire library\n"
         "  rag      - answer questions by querying document content\n"
         "  extract  - extract structured data from documents\n"
         "  write    - write or generate a new document\n"
@@ -468,11 +573,44 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
             log_info(f"  sub-task: mode={mode!r}, query={query!r}")
 
-            if mode == "rag":
+            if mode == "add":
+                results.append(
+                    self._run_add(
+                        task=AddTask(
+                            query=query,
+                            project_id=task.project_id,
+                            sources=task.sources,
+                            backend=task.backend,
+                            logging=task.logging,
+                        ),
+                        source_pairs=resolved,
+                        library=library,
+                    )
+                )
+            elif mode == "list":
+                results.append(
+                    self._run_list(
+                        task=ListTask(
+                            query=query,
+                            project_id=task.project_id,
+                            backend=task.backend,
+                            logging=task.logging,
+                        ),
+                        library=library,
+                    )
+                )
+            elif mode == "view":
+                log_warning("Planner produced mode 'view' without a PostgreSQL filter, skipping")
+            elif mode == "clear":
+                log_warning(
+                    "Planner produced mode 'clear', skipping because clearing requires explicit CLI confirmation"
+                )
+            elif mode == "rag":
                 results.append(
                     self._run_rag(
                         task=RAGTask(
                             query=query,
+                            project_id=task.project_id,
                             sources=task.sources,
                             backend=task.backend,
                             logging=task.logging,
@@ -486,6 +624,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     self._run_extract(
                         task=ExtractTask(
                             query=query,
+                            project_id=task.project_id,
                             sources=task.sources,
                             backend=task.backend,
                             logging=task.logging,
@@ -498,11 +637,13 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     self._run_write(
                         task=WriteTask(
                             query=query,
+                            project_id=task.project_id,
                             sources=task.sources,
                             backend=task.backend,
                             logging=task.logging,
                         ),
                         source_pairs=resolved,
+                        library=library,
                     )
                 )
             elif mode == "edit":
@@ -510,6 +651,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     self._run_edit(
                         task=EditingTask(
                             query=query,
+                            project_id=task.project_id,
                             sources=task.sources,
                             backend=task.backend,
                             logging=task.logging,
@@ -522,6 +664,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                     self._run_enrich(
                         task=EnrichTask(
                             query=query,
+                            project_id=task.project_id,
                             sources=task.sources,
                             backend=task.backend,
                             logging=task.logging,
@@ -548,3 +691,157 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _mimetype_for_input_format(self, input_format: InputFormat) -> str | None:
+        mimetypes = FormatToMimeType.get(input_format, [])
+        return mimetypes[0] if mimetypes else None
+
+    def _pipeline_name_for_input_format(
+        self,
+        *,
+        converter: DocumentConverter,
+        input_format: InputFormat,
+        conversion: Literal["fast", "standard", "expensive"],
+    ) -> str:
+        format_option = converter.format_to_options.get(input_format)
+        if format_option is None:
+            return f"unknown:{conversion}"
+        return f"{format_option.pipeline_cls.__name__}:{conversion}"
+
+    def _source_conversion_preset(self, task: AgentTask) -> Literal["fast", "standard", "expensive"]:
+        if isinstance(task, AddTask):
+            return task.conversion
+        return "standard"
+
+    def _build_source_converter(self, conversion: Literal["fast", "standard", "expensive"]) -> DocumentConverter:
+        converter = DocumentConverter()
+        for format_option in converter.format_to_options.values():
+            pipeline_options = format_option.pipeline_options
+            if hasattr(pipeline_options, "do_ocr"):
+                pipeline_options.do_ocr = conversion != "fast"
+            if hasattr(pipeline_options, "do_table_structure"):
+                pipeline_options.do_table_structure = conversion != "fast"
+            if hasattr(pipeline_options, "do_picture_classification"):
+                pipeline_options.do_picture_classification = True
+            if hasattr(pipeline_options, "do_chart_extraction"):
+                pipeline_options.do_chart_extraction = conversion == "expensive"
+            if hasattr(pipeline_options, "generate_page_images"):
+                pipeline_options.generate_page_images = True
+        return converter
+
+    def _cache_entry_matches_conversion(
+        self,
+        entry: DocLibraryEntry,
+        *,
+        conversion: Literal["fast", "standard", "expensive"],
+    ) -> bool:
+        for run in entry.status.pipelines:
+            if run.name.endswith(f":{conversion}"):
+                return True
+            if conversion == "standard" and run.name.rsplit(":", 1)[-1] not in {"fast", "standard", "expensive"}:
+                return True
+        return False
+
+    def _normalize_enrichment_operations(self, operations: list[str]) -> list[str]:
+        aliases = {
+            "summarize_items": "summarize",
+            "find_search_keywords": "keywords",
+            "extract_entities": "entities",
+            "classify_pictures": "classify",
+        }
+        normalized = [aliases.get(operation, operation) for operation in operations]
+        return list(dict.fromkeys(normalized))
+
+    def _entries_to_doc(
+        self,
+        *,
+        name: str,
+        title: str,
+        entries: list[DocLibraryEntry],
+        detailed: bool,
+    ) -> DoclingDocument:
+        doc = DoclingDocument(name=name)
+        doc.add_heading(text=title, level=1, parent=doc.body)
+        if not entries:
+            doc.add_text(label=DocItemLabel.TEXT, text="No documents matched.", parent=doc.body)
+            return doc
+
+        if detailed:
+            for entry in entries:
+                doc.add_heading(text=f"{entry.name} ({entry.doc_id})", level=2, parent=doc.body)
+                doc.add_text(label=DocItemLabel.TEXT, text=self._format_entry_detail(entry), parent=doc.body)
+            return doc
+
+        rows = [
+            [
+                entry.doc_id,
+                entry.project_id,
+                entry.document_origin,
+                entry.name,
+                entry.original_mimetype or "",
+                "" if entry.stats.page_count is None else entry.stats.page_count,
+                entry.stats.table_count,
+                entry.stats.picture_count,
+                entry.stats.text_count,
+                entry.stats.xml_char_count,
+                entry.updated_at,
+                entry.source_path,
+            ]
+            for entry in entries
+        ]
+        table = tabulate(
+            rows,
+            headers=[
+                "doc_id",
+                "project",
+                "origin",
+                "name",
+                "mimetype",
+                "pages",
+                "tables",
+                "pictures",
+                "texts",
+                "xml_chars",
+                "updated_at",
+                "source",
+            ],
+            tablefmt="plain",
+        )
+        doc.add_code(text=table, parent=doc.body)
+        return doc
+
+    def _format_entry_detail(self, entry: DocLibraryEntry) -> str:
+        pipelines = ", ".join(f"{run.name} @ {run.ran_at}" for run in entry.status.pipelines) or "(none)"
+        enrichments = (
+            ", ".join(
+                f"{run.name} @ {run.ran_at}" + (f" ({run.task})" if run.task else "")
+                for run in entry.status.enrichments
+            )
+            or "(none)"
+        )
+        keywords = ", ".join(entry.keywords) or "(none)"
+        return "\n".join(
+            [
+                f"- doc_id: {entry.doc_id}",
+                f"- project_id: {entry.project_id}",
+                f"- source_path: {entry.source_path}",
+                f"- document_origin: {entry.document_origin}",
+                f"- original_mimetype: {entry.original_mimetype or ''}",
+                f"- doc_path: {entry.doc_path}",
+                f"- doc_format: {entry.doc_format}",
+                f"- created_at: {entry.created_at}",
+                f"- updated_at: {entry.updated_at}",
+                f"- is_hierarchical: {entry.status.is_hierarchical}",
+                f"- has_summaries: {entry.status.has_summaries}",
+                f"- has_keywords: {entry.status.has_keywords}",
+                f"- page_count: {entry.stats.page_count}",
+                f"- table_count: {entry.stats.table_count}",
+                f"- picture_count: {entry.stats.picture_count}",
+                f"- text_count: {entry.stats.text_count}",
+                f"- xml_char_count: {entry.stats.xml_char_count}",
+                f"- pipelines: {pipelines}",
+                f"- enrichments: {enrichments}",
+                f"- summary: {entry.summary or ''}",
+                f"- keywords: {keywords}",
+            ]
+        )

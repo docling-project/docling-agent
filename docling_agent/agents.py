@@ -16,18 +16,22 @@ from docling_agent.backends import (
 )
 from docling_agent.logging import logger
 from docling_agent.task_model import (
+    AddTask,
     AgentTask,
     BackendConfig,
     EnrichTask,
     ExtractTask,
+    ListTask,
     ModelConfig,
     OutputConfig,
     RAGTask,
+    ViewTask,
     WriteTask,
     load_task,
 )
 
 __all__ = [
+    "AddTask",
     "AgentTask",
     "BackendConfig",
     "BaseBackend",
@@ -40,6 +44,7 @@ __all__ = [
     "EnrichTask",
     "ExtractTask",
     "LMStudioBackend",
+    "ListTask",
     "LiteLLMBackend",
     "MelleaBackend",
     "ModelConfig",
@@ -49,6 +54,7 @@ __all__ = [
     "RAGResult",
     "RAGTask",
     "RAGTrace",
+    "ViewTask",
     "WriteTask",
     "create_backend",
     "load_task",
