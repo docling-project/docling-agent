@@ -1,4 +1,5 @@
 # Public re-exports for convenience imports in examples
+from docling_agent.agent.compiler import DoclingCompilerAgent
 from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.extractor import DoclingExtractingAgent
@@ -19,6 +20,7 @@ from docling_agent.task_model import (
     AddTask,
     AgentTask,
     BackendConfig,
+    CompileTask,
     EnrichTask,
     ExtractTask,
     ListTask,
@@ -35,6 +37,8 @@ __all__ = [
     "AgentTask",
     "BackendConfig",
     "BaseBackend",
+    "CompileTask",
+    "DoclingCompilerAgent",
     "DoclingEditingAgent",
     "DoclingEnrichingAgent",
     "DoclingExtractingAgent",

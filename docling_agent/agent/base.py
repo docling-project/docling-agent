@@ -25,6 +25,7 @@ class DoclingAgentType(Enum):
     DOCLING_DOCUMENT_EDITOR = "editor"
     DOCLING_DOCUMENT_EXTRACTOR = "extractor"
     DOCLING_DOCUMENT_ENRICHER = "enricher"
+    DOCLING_DOCUMENT_COMPILER = "compiler"
     DOCLING_DOCUMENT_RAG = "rag"
     DOCLING_DOCUMENT_ORCHESTRATOR = "orchestrator"
 
@@ -83,7 +84,7 @@ class BaseDoclingAgent(ABC):
     @staticmethod
     def default_backend() -> BaseBackend:
         """Build the default backend used by existing agent constructors."""
-        return create_backend(BackendConfig(type="mellea"))
+        return create_backend(BackendConfig())
 
     def get_reasoning_model_id(self) -> str:
         """Return the backend-scoped reasoning model id."""

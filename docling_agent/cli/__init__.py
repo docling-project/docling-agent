@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Literal, cast
 
 import typer
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
@@ -11,7 +12,7 @@ from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent_models import configure_linear_chat_logging, configure_llm_logging
 from docling_agent.backends import create_backend
 from docling_agent.logging import logger
-from docling_agent.task_model import AddTask, AgentTask, ClearTask, ListTask, ViewTask, load_task
+from docling_agent.task_model import AddTask, AgentTask, ClearTask, CompileTask, ListTask, ViewTask, load_task
 
 app = typer.Typer(name="docling-agent", add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -26,12 +27,12 @@ query: "Your query here"
 # Optional: document library project id. Defaults to "default".
 project_id: default
 
-# Required for rag / extract / enrich: paths to documents or directories.
+# Required for rag / extract / enrich / compile: paths to documents or directories.
 sources:
   - path/to/document.pdf
   # - path/to/directory/
 
-# Task mode: add | list | view | clear | rag | extract | write | edit | enrich  (omit to auto-plan)
+# Task mode: add | list | view | clear | rag | extract | write | edit | enrich | compile  (omit to auto-plan)
 # mode: rag
 
 # --- Library options (mode: add | list | view | clear) ------------------------
@@ -65,6 +66,19 @@ sources:
 #   - keywords    # extract keywords per item
 #   - entities    # detect key entities per item
 #   - classify    # classify pictures and attach chart/code metadata when possible
+
+# --- Compile options (mode: compile) -----------------------------------------
+# glob: "*.pdf"             # glob pattern applied when sources contain directories
+# subtasks:
+#   - summarize             # create a source-level document summary
+#   - outline               # create a source-level outline
+#   - topics                # identify main topics and concepts
+#   - entities              # write entities.csv and relations.csv per source
+# nlp_provider: deepsearch-glm
+# nlp_models: "language;term"
+# force: false              # recompute even if compile artifacts already exist
+# llm_review_terms: false   # use extraction LLM to filter/categorize candidate terms
+# llm_review_batch_size: 80 # max unique terms per LLM review prompt
 
 # Output configuration --------------------------------------------------------
 # output:
@@ -298,17 +312,80 @@ def _clear_sources(
     )
 
 
+def _compile_sources(
+    task: Path | None = typer.Option(None, "--task", "-t", help="Path to a compile task YAML file."),
+    sources: list[Path] | None = typer.Argument(None, help="Optional source files or directories to compile."),
+    project_id: str = typer.Option("default", "--project-id", "-p", help="Project id for library selection."),
+    postgres_filter: str | None = typer.Option(
+        None,
+        "--postgres-filter",
+        "-f",
+        help="Optional PostgreSQL WHERE predicate selecting library entries to compile.",
+    ),
+    limit: int = typer.Option(100, "--limit", "-n", min=1, help="Maximum number of library entries to compile."),
+    subtask: list[str] = typer.Option(
+        ["summarize", "outline", "topics", "entities"],
+        "--subtask",
+        "-s",
+        help="Compile subtask to run. Repeat for multiple subtasks.",
+    ),
+    nlp_models: str = typer.Option("language;term", "--nlp-models", help="deepsearch-glm model selector."),
+    force: bool = typer.Option(False, "--force", help="Recompute even if compile artifacts already exist."),
+    library_path: Path | None = typer.Option(None, "--library-path", help="Override the document library path."),
+) -> None:
+    if task is not None:
+        loaded_task = load_task(task)
+        if not isinstance(loaded_task, CompileTask):
+            typer.echo(f"Task file must have mode: compile, got {loaded_task.mode!r}.", err=True)
+            raise typer.Exit(code=1)
+        _run_shortcut_task(loaded_task, library_path=library_path)
+        return
+
+    allowed = {"summarize", "outline", "topics", "entities"}
+    invalid = [name for name in subtask if name not in allowed]
+    if invalid:
+        typer.echo(f"Invalid compile subtask(s): {', '.join(invalid)}", err=True)
+        raise typer.Exit(code=1)
+
+    _run_shortcut_task(
+        CompileTask(
+            project_id=project_id,
+            sources=[str(source) for source in sources or []],
+            postgres_filter=postgres_filter,
+            limit=limit,
+            subtasks=cast(list[Literal["summarize", "outline", "topics", "entities"]], subtask),
+            nlp_models=nlp_models,
+            force=force,
+        ),
+        library_path=library_path,
+    )
+
+
+def _run_shortcut_command(function) -> None:
+    shortcut_app = typer.Typer(
+        add_completion=False,
+        context_settings={"help_option_names": ["-h", "--help"]},
+        pretty_exceptions_show_locals=False,
+    )
+    shortcut_app.command()(function)
+    shortcut_app()
+
+
 def add_sources_cli() -> None:
-    typer.run(_add_sources)
+    _run_shortcut_command(_add_sources)
 
 
 def list_sources_cli() -> None:
-    typer.run(_list_sources)
+    _run_shortcut_command(_list_sources)
 
 
 def view_sources_cli() -> None:
-    typer.run(_view_sources)
+    _run_shortcut_command(_view_sources)
 
 
 def clear_sources_cli() -> None:
-    typer.run(_clear_sources)
+    _run_shortcut_command(_clear_sources)
+
+
+def compile_sources_cli() -> None:
+    _run_shortcut_command(_compile_sources)

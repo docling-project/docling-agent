@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from docling_agent.task_model import AddTask, AgentTask, ClearTask, ListTask, ViewTask, load_task
+from docling_agent.task_model import AddTask, AgentTask, BackendConfig, ClearTask, ListTask, ViewTask, load_task
+
+
+def test_backend_config_defaults_to_ollama():
+    assert BackendConfig().type == "ollama"
 
 
 def test_load_task_with_top_level_backend_block(tmp_path: Path):

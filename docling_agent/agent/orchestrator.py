@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, cast
 
@@ -20,10 +21,11 @@ from typing_extensions import override
 
 from docling_agent.agent.base import BaseDoclingAgent, DoclingAgentType
 from docling_agent.agent.base_functions import find_json_dicts
+from docling_agent.agent.compiler import CompileContext, DoclingCompilerAgent
 from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.extractor import DoclingExtractingAgent
-from docling_agent.agent.library import DocLibraryEntry, DoclingLibrary
+from docling_agent.agent.library import DocCompileArtifact, DocCompileRun, DocLibraryEntry, DoclingLibrary
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
 from docling_agent.logging import log_error, log_info, log_warning
@@ -31,6 +33,7 @@ from docling_agent.task_model import (
     AddTask,
     AgentTask,
     ClearTask,
+    CompileTask,
     EditingTask,
     EnrichTask,
     ExtractTask,
@@ -142,6 +145,8 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
             return self._run_edit(task=task, source_pairs=source_pairs)
         elif isinstance(task, EnrichTask):
             return self._run_enrich(task=task, source_pairs=source_pairs, library=library)
+        elif isinstance(task, CompileTask):
+            return self._run_compile(task=task, source_pairs=source_pairs, library=library)
         else:
             raise ValueError(f"Unknown task mode: {task.mode!r}")
 
@@ -501,6 +506,81 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                 )
         return result_doc
 
+    def _run_compile(
+        self,
+        *,
+        task: CompileTask,
+        source_pairs: list[_SourcePair],
+        library: DoclingLibrary,
+    ) -> DoclingDocument:
+        if not source_pairs:
+            source_pairs = self._select_compile_source_pairs(task=task, library=library)
+        log_info(f"_run_compile: docs={len(source_pairs)}, subtasks={task.subtasks}")
+        compiler = DoclingCompilerAgent(
+            backend=self.backend,
+            tools=[],
+            nlp_model_names=task.nlp_models,
+        )
+        results: list[tuple[DocLibraryEntry, DocCompileArtifact, bool]] = []
+
+        total = len(source_pairs)
+        for index, (doc, doc_id) in enumerate(source_pairs, start=1):
+            entry = library.get_entry(doc_id)
+            if entry is None:
+                log_warning(f"Skipping compile for unknown library doc_id={doc_id!r}")
+                continue
+            log_info(f"Compile progress {index}/{total}: {entry.name} ({doc_id})")
+
+            existing_artifact = entry.compile.artifact
+            if not task.force and self._compile_artifact_satisfies(existing_artifact, task.subtasks):
+                log_info(f"Skipping compile for {doc.name!r} (already compiled)")
+                assert existing_artifact is not None
+                results.append((entry, existing_artifact, True))
+                continue
+
+            artifact = compiler.compile_document(
+                document=doc,
+                context=CompileContext(doc_id=doc_id, project_id=task.project_id),
+                subtasks=task.subtasks,
+                llm_review_terms=task.llm_review_terms,
+                llm_review_batch_size=task.llm_review_batch_size,
+            )
+            library.store_compile_result(
+                doc_id,
+                artifact=artifact,
+                run=DocCompileRun(
+                    name="compile",
+                    provider=task.nlp_provider,
+                    model_names=task.nlp_models,
+                ),
+            )
+            updated_entry = library.get_entry(doc_id) or entry
+            results.append((updated_entry, artifact, False))
+            log_info(
+                "Compiled "
+                f"{entry.name}: entities={len(artifact.entities)}, "
+                f"relations={len(artifact.relations)}, concepts={len(artifact.concepts)}"
+            )
+
+        library.store_project_compile_result(task.project_id, results=results)
+        return self._compile_results_to_doc(results)
+
+    def _select_compile_source_pairs(self, *, task: CompileTask, library: DoclingLibrary) -> list[_SourcePair]:
+        """Load library documents selected by project or PostgreSQL filter for compile mode."""
+        if task.postgres_filter:
+            entries = library.query_entries_by_postgres_filter(task.postgres_filter, limit=task.limit)
+        else:
+            entries = library.query_entries(project_id=task.project_id, limit=task.limit)
+
+        source_pairs: list[_SourcePair] = []
+        for entry in entries:
+            doc = library.load_doc(entry.doc_id, extract_archive=False)
+            if doc is None:
+                log_warning(f"Skipping compile for {entry.doc_id!r}; stored document could not be loaded")
+                continue
+            source_pairs.append((doc, entry.doc_id))
+        return source_pairs
+
     _PLANNER_SYSTEM_PROMPT: str = (
         "You are a task planning agent for a document intelligence system. "
         "Given a user query and an optional list of available documents, decide "
@@ -514,7 +594,8 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         "  extract  - extract structured data from documents\n"
         "  write    - write or generate a new document\n"
         "  edit     - edit an existing document\n"
-        "  enrich   - summarize and annotate document content\n\n"
+        "  enrich   - summarize and annotate document content\n"
+        "  compile  - compile source-level summaries, outlines, entities, and relations\n\n"
         'Output ONLY a JSON object in a markdown code block with key "tasks" '
         'containing a list of task objects. Each task must have: "mode" (required), '
         '"query" (specific instruction for that sub-task), and "sources" '
@@ -673,6 +754,20 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
                         library=library,
                     )
                 )
+            elif mode == "compile":
+                results.append(
+                    self._run_compile(
+                        task=CompileTask(
+                            query=query,
+                            project_id=task.project_id,
+                            sources=task.sources,
+                            backend=task.backend,
+                            logging=task.logging,
+                        ),
+                        source_pairs=resolved,
+                        library=library,
+                    )
+                )
             else:
                 log_warning(f"Planner produced unknown mode {mode!r}, skipping")
 
@@ -709,7 +804,7 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         return f"{format_option.pipeline_cls.__name__}:{conversion}"
 
     def _source_conversion_preset(self, task: AgentTask) -> Literal["fast", "standard", "expensive"]:
-        if isinstance(task, AddTask):
+        if isinstance(task, AddTask | CompileTask):
             return task.conversion
         return "standard"
 
@@ -753,6 +848,60 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         }
         normalized = [aliases.get(operation, operation) for operation in operations]
         return list(dict.fromkeys(normalized))
+
+    def _compile_artifact_satisfies(
+        self,
+        artifact: DocCompileArtifact | None,
+        subtasks: Sequence[str],
+    ) -> bool:
+        if artifact is None:
+            return False
+        for subtask in subtasks:
+            if subtask == "summarize" and not artifact.summary:
+                return False
+            if subtask == "outline" and not artifact.outline:
+                return False
+            if subtask == "topics" and not artifact.topics:
+                return False
+            if subtask == "entities" and not artifact.entities:
+                return False
+        return True
+
+    def _compile_results_to_doc(
+        self,
+        results: list[tuple[DocLibraryEntry, DocCompileArtifact, bool]],
+    ) -> DoclingDocument:
+        doc = DoclingDocument(name="compile_collection")
+        doc.add_heading(text=f"Compiled {len(results)} document(s)", level=1, parent=doc.body)
+        if not results:
+            doc.add_text(label=DocItemLabel.TEXT, text="No documents were compiled.", parent=doc.body)
+            return doc
+
+        for entry, artifact, skipped in results:
+            suffix = " (cached)" if skipped else ""
+            doc.add_heading(text=f"{entry.name} ({entry.doc_id}){suffix}", level=2, parent=doc.body)
+            doc.add_text(
+                label=DocItemLabel.TEXT,
+                text="\n".join(
+                    [
+                        f"entities: {len(artifact.entities)}",
+                        f"relations: {len(artifact.relations)}",
+                        f"entities_csv: {entry.compile.entities_path or ''}",
+                        f"relations_csv: {entry.compile.relations_path or ''}",
+                    ]
+                ),
+                parent=doc.body,
+            )
+            if artifact.summary:
+                doc.add_heading(text="Summary", level=3, parent=doc.body)
+                doc.add_text(label=DocItemLabel.TEXT, text=artifact.summary, parent=doc.body)
+            if artifact.topics:
+                doc.add_heading(text="Topics", level=3, parent=doc.body)
+                doc.add_text(label=DocItemLabel.TEXT, text=", ".join(artifact.topics), parent=doc.body)
+            if artifact.outline:
+                doc.add_heading(text="Outline", level=3, parent=doc.body)
+                doc.add_code(text=artifact.outline, parent=doc.body)
+        return doc
 
     def _entries_to_doc(
         self,

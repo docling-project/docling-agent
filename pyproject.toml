@@ -53,6 +53,9 @@ dependencies = [
 vlm = [
     "docling[vlm]~=2.53",
 ]
+compile = [
+    "deepsearch-glm>=0.0.1",
+]
 evaluation = [
     "ranx>=0.3.21",
 ]
@@ -79,6 +82,7 @@ add-sources = "docling_agent.cli:add_sources_cli"
 list-sources = "docling_agent.cli:list_sources_cli"
 view-sources = "docling_agent.cli:view_sources_cli"
 clear-sources = "docling_agent.cli:clear_sources_cli"
+compile-sources = "docling_agent.cli:compile_sources_cli"
 
 [project.urls]
 homepage = "https://github.com/docling-project"

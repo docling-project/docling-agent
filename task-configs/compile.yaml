@@ -1,0 +1,40 @@
+# docling-agent compile task
+# Run with: uv run docling-agent --task task-configs/compile.yaml
+
+query: "Compile source-level summaries, outlines, topics, entities, and term relations."
+mode: compile
+project_id: hubbard
+
+# Compile explicit files, or point to a directory and use glob.
+sources:
+  - ./_hubbard
+glob: "*.pdf"
+
+subtasks:
+  - entities
+  # - summarize
+  # - outline
+  # - topics
+
+# Fast NLP pass used to propose candidate terms/entities.
+nlp_provider: deepsearch-glm
+nlp_models: "language;term"
+force: true
+
+# Optional LLM review pass. It filters bad candidate terms, canonicalizes aliases,
+# and categorizes terms before canonical term rows and relations are persisted.
+llm_review_terms: true
+llm_review_batch_size: 80
+
+backend:
+  type: ollama
+  timeout: 1200
+  models:
+    reasoning: qwen3.8:27b-mlx
+    writing: qwen3.8:27b-mlx
+    extraction: qwen3.8:27b-mlx
+
+logging:
+  level: INFO
+  log_llm_io: true
+  linear_chat_log_path: ./outputs/linear_chats.log

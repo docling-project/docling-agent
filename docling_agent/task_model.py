@@ -80,7 +80,7 @@ class BackendConfig(BaseModel):
     type: Annotated[
         Literal["ollama", "lmstudio", "litellm", "mellea", "llama-server"],
         Field(description="Backend type to use for LLM inference."),
-    ] = "mellea"
+    ] = "ollama"
     base_url: Annotated[
         str | None,
         Field(description="Custom base URL for the backend API. If None, uses backend default."),
@@ -274,6 +274,57 @@ class EnrichTask(AgentTask):
         return self
 
 
+class CompileTask(AgentTask):
+    """Source compilation task.
+
+    Runs fast document-level NLP and creates durable per-source artifacts such
+    as summaries, outlines, entity tables, and relation tables.
+    """
+
+    mode: Literal["compile"] = "compile"
+    subtasks: Annotated[
+        list[Literal["summarize", "outline", "topics", "entities"]],
+        Field(description="Compile subtasks to run for each source document."),
+    ] = ["summarize", "outline", "topics", "entities"]
+    glob: Annotated[
+        str | None,
+        Field(description="Glob pattern applied when sources contain directories."),
+    ] = None
+    postgres_filter: Annotated[
+        str | None,
+        Field(description="Optional PostgreSQL WHERE predicate selecting library entries to compile."),
+    ] = None
+    limit: Annotated[int, Field(ge=1, description="Maximum number of library entries to compile.")] = 100
+    nlp_provider: Annotated[
+        Literal["deepsearch-glm"],
+        Field(description="Fast NLP provider used for entity, topic, and concept extraction."),
+    ] = "deepsearch-glm"
+    nlp_models: Annotated[
+        str,
+        Field(description="Provider-specific NLP model selector."),
+    ] = "language;term"
+    conversion: Annotated[
+        Literal["fast", "standard", "expensive"],
+        Field(description="Named Docling conversion preset used if compile sources must be converted."),
+    ] = "standard"
+    force: Annotated[
+        bool,
+        Field(description="Recompute compile subtasks even when existing artifacts are present."),
+    ] = False
+    llm_review_terms: Annotated[
+        bool,
+        Field(
+            description=(
+                "Use the configured extraction LLM to review, filter, canonicalize, "
+                "and categorize candidate terms."
+            )
+        ),
+    ] = False
+    llm_review_batch_size: Annotated[
+        int,
+        Field(ge=1, description="Maximum number of unique candidate terms reviewed in one LLM prompt."),
+    ] = 80
+
 class AddTask(AgentTask):
     """Library ingestion task.
 
@@ -342,7 +393,7 @@ class ClearTask(AgentTask):
 
 # Discriminated union — Pydantic selects the right subclass via the ``mode`` field.
 AnyTask = Annotated[
-    RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | AddTask | ListTask | ViewTask | ClearTask,
+    RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | CompileTask | AddTask | ListTask | ViewTask | ClearTask,
     Field(discriminator="mode"),
 ]
 
@@ -352,7 +403,17 @@ _task_adapter: TypeAdapter[AnyTask] = TypeAdapter(AnyTask)
 def load_task(
     path: Path,
 ) -> (
-    RAGTask | ExtractTask | WriteTask | EditingTask | EnrichTask | AddTask | ListTask | ViewTask | ClearTask | AgentTask
+    RAGTask
+    | ExtractTask
+    | WriteTask
+    | EditingTask
+    | EnrichTask
+    | CompileTask
+    | AddTask
+    | ListTask
+    | ViewTask
+    | ClearTask
+    | AgentTask
 ):
     """Load and validate a task from a YAML file.
 

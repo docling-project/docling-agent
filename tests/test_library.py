@@ -1,9 +1,15 @@
+import csv
 from pathlib import Path
 
 import pytest
 from docling_core.types.doc.document import DocItemLabel, DoclingDocument, TableData
 
-from docling_agent.agent.library import DoclingLibrary
+from docling_agent.agent.library import (
+    DocCompileArtifact,
+    DocCompileEntityRow,
+    DocCompileRelationRow,
+    DoclingLibrary,
+)
 
 
 def test_store_uses_dclx_payload(tmp_path: Path) -> None:
@@ -35,6 +41,21 @@ def test_store_uses_dclx_payload(tmp_path: Path) -> None:
     loaded = library.load_doc(entry.doc_id)
     assert loaded is not None
     assert loaded.name == "sample"
+
+
+def test_load_doc_can_skip_archive_extraction(tmp_path: Path) -> None:
+    doc = DoclingDocument(name="sample")
+    doc.add_text(label=DocItemLabel.TEXT, text="hello", parent=doc.body)
+
+    library = DoclingLibrary(path=tmp_path)
+    entry = library.store(doc, "/tmp/sample.pdf")
+    artifacts_dir = Path(entry.doc_path).with_name(f"{Path(entry.doc_path).stem}_artifacts")
+
+    loaded = library.load_doc(entry.doc_id, extract_archive=False)
+
+    assert loaded is not None
+    assert loaded.name == "sample"
+    assert not artifacts_dir.exists()
 
 
 def test_store_records_document_stats(tmp_path: Path) -> None:
@@ -147,3 +168,157 @@ def test_postgres_filter_rejects_multi_statement_tokens(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="single WHERE predicate"):
         library._validate_postgres_filter("project_id = 'alpha'; DROP TABLE docling_library_entries")
+
+
+def test_project_concepts_csv_scores_terms_by_documents_mentions_and_children(tmp_path: Path) -> None:
+    library = DoclingLibrary(path=tmp_path, project_id="alpha")
+    model_doc1 = DocCompileEntityRow(
+        doc_id="doc1",
+        project_id="alpha",
+        entity_hash=1,
+        entity_text="model",
+        normalized_text="model",
+        kind="term",
+        count=2,
+    )
+    hubbard_doc1 = DocCompileEntityRow(
+        doc_id="doc1",
+        project_id="alpha",
+        entity_hash=2,
+        entity_text="Hubbard model",
+        normalized_text="Hubbard model",
+        kind="term",
+        count=5,
+    )
+    three_d_doc1 = DocCompileEntityRow(
+        doc_id="doc1",
+        project_id="alpha",
+        entity_hash=3,
+        entity_text="3D Hubbard model",
+        normalized_text="3D Hubbard model",
+        kind="term",
+        count=1,
+    )
+    model_doc2 = DocCompileEntityRow(
+        doc_id="doc2",
+        project_id="alpha",
+        entity_hash=4,
+        entity_text="model",
+        normalized_text="model",
+        kind="term",
+        count=3,
+    )
+    hubbard_doc2 = DocCompileEntityRow(
+        doc_id="doc2",
+        project_id="alpha",
+        entity_hash=5,
+        entity_text="Hubbard model",
+        normalized_text="Hubbard model",
+        kind="term",
+        count=4,
+    )
+    two_d_doc2 = DocCompileEntityRow(
+        doc_id="doc2",
+        project_id="alpha",
+        entity_hash=6,
+        entity_text="2D Hubbard model",
+        normalized_text="2D Hubbard model",
+        kind="term",
+        count=1,
+    )
+    path = tmp_path / "concepts.csv"
+
+    library._write_project_concepts_csv(
+        path,
+        project_id="alpha",
+        results=[
+            (
+                None,
+                DocCompileArtifact(
+                    entities=[model_doc1, hubbard_doc1, three_d_doc1],
+                    relations=[
+                        DocCompileRelationRow(
+                            doc_id="doc1",
+                            project_id="alpha",
+                            entity_hash_i=model_doc1.entity_hash,
+                            entity_hash_j=hubbard_doc1.entity_hash,
+                            relation_k="sub-term",
+                            count=1,
+                        ),
+                        DocCompileRelationRow(
+                            doc_id="doc1",
+                            project_id="alpha",
+                            entity_hash_i=hubbard_doc1.entity_hash,
+                            entity_hash_j=three_d_doc1.entity_hash,
+                            relation_k="sub-term",
+                            count=1,
+                        ),
+                    ],
+                ),
+                False,
+            ),
+            (
+                None,
+                DocCompileArtifact(
+                    entities=[model_doc2, hubbard_doc2, two_d_doc2],
+                    relations=[
+                        DocCompileRelationRow(
+                            doc_id="doc2",
+                            project_id="alpha",
+                            entity_hash_i=hubbard_doc2.entity_hash,
+                            entity_hash_j=model_doc2.entity_hash,
+                            relation_k="super-term",
+                            count=1,
+                        ),
+                        DocCompileRelationRow(
+                            doc_id="doc2",
+                            project_id="alpha",
+                            entity_hash_i=hubbard_doc2.entity_hash,
+                            entity_hash_j=two_d_doc2.entity_hash,
+                            relation_k="sub-term",
+                            count=1,
+                        )
+                    ],
+                ),
+                False,
+            ),
+        ],
+    )
+
+    rows = list(csv.DictReader(open(path, encoding="utf-8")))
+    assert rows[0] == {
+        "project_id": "alpha",
+        "concept": "Hubbard model",
+        "document_count": "2",
+        "total_mentions": "9",
+        "child_count": "2",
+        "score": "54",
+    }
+    assert rows[1]["concept"] == "model"
+    assert rows[1]["child_count"] == "1"
+
+
+def test_postgres_compile_entities_are_keyed_per_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executed: list[str] = []
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def execute(self, sql: str, params=None):
+            executed.append(sql)
+
+    library = DoclingLibrary(path=tmp_path)
+    library.database_url = "postgresql://example"
+    monkeypatch.setattr(library, "_connect_pg", lambda: FakeConnection())
+
+    library._ensure_pg_table()
+
+    sql = "\n".join(executed)
+    assert "PRIMARY KEY (doc_id, entity_hash)" in sql
+    assert "DROP CONSTRAINT IF EXISTS docling_compile_entities_pkey" in sql
