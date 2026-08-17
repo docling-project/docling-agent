@@ -1,4 +1,5 @@
 # Public re-exports for convenience imports in examples
+from docling_agent.agent.agent_trace import AgentStep, AgentTrace
 from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.extractor import DoclingExtractingAgent
@@ -32,7 +33,9 @@ from docling_agent.task_model import (
 
 __all__ = [
     "AddTask",
+    "AgentStep",
     "AgentTask",
+    "AgentTrace",
     "BackendConfig",
     "BaseBackend",
     "DoclingEditingAgent",

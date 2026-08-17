@@ -4,6 +4,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+from docling_agent.agent.agent_trace import AgentTrace
+
 
 class SectionSelection(BaseModel):
     """LLM output: which section to consult next."""
@@ -38,8 +40,14 @@ class RAGResult(BaseModel):
     converged: Annotated[bool, Field(description="True if can_answer was reached; False if max_iterations hit")]
 
 
-class RAGTrace(BaseModel):
-    """Full reasoning trace of a RAG run across one or more documents."""
+class RAGTrace(AgentTrace):
+    """Full reasoning trace of a RAG run across one or more documents.
+
+    A specialization of ``AgentTrace``: it carries the RAG-specific
+    ``per_document`` results and merged ``final_answer`` on top of the generic
+    trace fields (``agent_type``, ``task``, ``steps``, ``children`` ...), so a RAG
+    run nests naturally into an orchestrator trace tree.
+    """
 
     query: Annotated[str, Field(description="The original query answered by this run")]
     per_document: Annotated[list[RAGResult], Field(description="One entry per source DoclingDocument, in input order")]

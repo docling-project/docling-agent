@@ -3,9 +3,11 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import typer
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
+from docling_core.types.doc.document import DoclingDocument
 
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent_models import configure_linear_chat_logging, configure_llm_logging
@@ -145,7 +147,15 @@ def main(
         backend=create_backend(agent_task.backend),
         tools=[],
     )
-    result = orchestrator.run_task(agent_task)
+
+    trace_path = agent_task.logging.trace_path
+    if trace_path is not None:
+        trace = orchestrator.run_task_with_trace(agent_task)
+        trace.save(trace_path)
+        logger.info(f"Agent trace exported to {trace_path}")
+        result = cast(DoclingDocument, trace.output)
+    else:
+        result = orchestrator.run_task(agent_task)
 
     _write_output(result, agent_task, task)
 

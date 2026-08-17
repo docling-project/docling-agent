@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 # from smolagents import MCPClient, Tool, ToolCollection
+from docling_agent.agent.agent_trace import AgentTrace
+
 # from smolagents.models import ChatMessage, MessageRole, Model
 from docling_agent.backends import BaseBackend, create_backend
 from docling_agent.backends.base import BaseSession
@@ -149,3 +152,42 @@ class BaseDoclingAgent(ABC):
     ) -> DoclingDocument:
         """Execute the agent for a task and return a document."""
         raise NotImplementedError
+
+    def run_with_trace(
+        self,
+        task: str,
+        document: DoclingDocument | None = None,
+        sources: list[DoclingDocument | Path] = [],
+        **kwargs,
+    ) -> AgentTrace:
+        """Execute the agent and return a generic ``AgentTrace``.
+
+        Default implementation: time ``run()`` and wrap its result into a single
+        opaque trace, so every agent exposes a trace without bespoke code. Agents
+        with internal structure override this to return a richer ``AgentTrace``
+        subclass: ``DoclingRAGAgent`` returns a ``RAGTrace`` carrying its
+        per-document iterations.
+
+        ``run()`` remains the source of truth for the produced document; the document
+        is carried on ``AgentTrace.output`` (excluded from serialization).
+
+        Args:
+            task: The natural language task to execute.
+            document: Optional document the task operates on.
+            sources: Optional source documents or paths for the task.
+            **kwargs: Additional agent-specific arguments forwarded to ``run()``.
+
+        Returns:
+            The trace of the run, carrying the produced document on ``output``.
+        """
+        start = time.perf_counter()
+        result = self.run(task, document=document, sources=sources, **kwargs)
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        return AgentTrace(
+            agent_type=str(self.agent_type),
+            task=task,
+            duration_ms=duration_ms,
+            model_id=self.get_reasoning_model_id(),
+            result_name=getattr(result, "name", None),
+            output=result,
+        )

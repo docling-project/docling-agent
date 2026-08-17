@@ -1,7 +1,8 @@
 """Chunkless RAG agent using DoclingDocument tree structure and per-node summaries."""
 
+import time
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from docling_core.experimental.serializer.outline import (
     OutlineFormat,
@@ -122,11 +123,8 @@ class DoclingRAGAgent(BaseDoclingAgent):
         **kwargs,
     ) -> DoclingDocument:
         trace = self.run_with_trace(task, document=document, sources=sources, **kwargs)
-
-        answer_doc = DoclingDocument(name="rag_answer")
-        answer_doc.add_title(text="Answer", parent=answer_doc.body)
-        answer_doc.add_text(label=DocItemLabel.TEXT, text=trace.final_answer, parent=answer_doc.body)
-        return answer_doc
+        # run_with_trace always builds and attaches the answer document on `output`.
+        return cast(DoclingDocument, trace.output)
 
     def run_with_trace(
         self,
@@ -141,6 +139,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
         per-document RAGResult (selections, reasons, convergence) and the merged
         final_answer. run() is a thin wrapper around this method.
         """
+        start = time.perf_counter()
         docs = [s for s in sources if isinstance(s, DoclingDocument)]
         if not docs and document is not None:
             docs = [document]
@@ -185,7 +184,22 @@ class DoclingRAGAgent(BaseDoclingAgent):
             query=task,
             answers=[r.answer for r in per_document],
         )
-        return RAGTrace(query=task, per_document=per_document, final_answer=final_answer)
+
+        answer_doc = DoclingDocument(name="rag_answer")
+        answer_doc.add_title(text="Answer", parent=answer_doc.body)
+        answer_doc.add_text(label=DocItemLabel.TEXT, text=final_answer, parent=answer_doc.body)
+
+        return RAGTrace(
+            agent_type=str(self.agent_type),
+            task=task,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            model_id=self.get_reasoning_model_id(),
+            result_name=answer_doc.name,
+            output=answer_doc,
+            query=task,
+            per_document=per_document,
+            final_answer=final_answer,
+        )
 
     # ------------------------------------------------------------------
     # RAG loop

@@ -20,6 +20,7 @@ Docling-agent simplifies agentic operation on documents, such as writing, editin
 - [Document enrichment](examples/example_04_enrich_document.py): Enrich existing documents with summaries, search keywords, key entities, and item classifications (language/function).
 - Model-agnostic: Choose `mellea`, `ollama`, `lmstudio`, `litellm`, or `llama-server` through backend configuration.
 - Simple API surface: Use `agent.run(...)` with `DoclingDocument` in/out; save via `save_as_*` helpers.
+- [Run tracing](#trace-what-an-agent-did): Get timing, model and sub-agent traces for a run with `run_with_trace(...)`, and export a whole session to one JSON file.
 - Optional tools: Integrate external tools (e.g., MCP) when available.
 
 Quick start (writing):
@@ -130,6 +131,30 @@ backend = create_backend(
 agent = DoclingEnrichingAgent(backend=backend, tools=[])
 enriched = agent.run(task="Summarize each paragraph, table, and section header.", document=doc)
 enriched.save_as_html("./scratch/enriched_summaries.html")
+```
+
+### Trace what an agent did:
+
+Every agent has `run_with_trace()` next to `run()`. It returns an `AgentTrace` (timing, model and
+the produced document) instead of just the document. The orchestrator uses `run_task_with_trace()`,
+which nests the trace of each sub-agent it ran, so a whole session exports to one JSON file.
+
+```python
+from docling_agent.agents import BackendConfig, DoclingOrchestratorAgent, RAGTask, create_backend
+
+orchestrator = DoclingOrchestratorAgent(backend=create_backend(BackendConfig(type="mellea")), tools=[])
+trace = orchestrator.run_task_with_trace(RAGTask(query="What is the conclusion?", sources=["./report.pdf"]))
+
+print(trace.duration_ms, [c.agent_type for c in trace.children])  # 8421 ['enricher', 'rag']
+trace.save("./scratch/trace.json")
+answer = trace.output
+```
+
+To export from a task file instead, set `logging.trace_path`:
+
+```yaml
+logging:
+  trace_path: ./scratch/trace.json
 ```
 
 ## Backend Configuration

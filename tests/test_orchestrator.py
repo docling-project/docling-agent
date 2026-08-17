@@ -41,7 +41,7 @@ def test_ensure_enriched_task_propagation(
     """
     captured_task = []
 
-    def _fake_enricher_run(self, task, document, operations):
+    def _fake_enricher_run(self, task, document=None, sources=None, operations=None, **kwargs):
         captured_task.append(task)
         return document
 
@@ -72,7 +72,7 @@ def test_ensure_enriched_empty_task_default(
     """Test that _ensure_enriched uses empty string as default task."""
     captured_task = []
 
-    def _fake_enricher_run(self, task, document, operations):
+    def _fake_enricher_run(self, task, document=None, sources=None, operations=None, **kwargs):
         captured_task.append(task)
         return document
 
@@ -97,7 +97,7 @@ def test_ensure_enriched_multiple_operations(
     """Test that _ensure_enriched handles multiple operations correctly."""
     enricher_calls = []
 
-    def _fake_enricher_run(self, task, document, operations):
+    def _fake_enricher_run(self, task, document=None, sources=None, operations=None, **kwargs):
         enricher_calls.append((task, operations))
         return document
 
@@ -251,7 +251,7 @@ def test_write_mode_stores_written_document_in_project(
     library = DoclingLibrary(path=tmp_path, project_id="reports")
     written_doc = DoclingDocument(name="generated_report")
 
-    def _fake_writer_run(self, task, sources):
+    def _fake_writer_run(self, task, document=None, sources=None, **kwargs):
         return written_doc
 
     monkeypatch.setattr(DoclingWritingAgent, "run", _fake_writer_run)

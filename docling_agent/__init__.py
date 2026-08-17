@@ -1,6 +1,8 @@
 from docling_agent.agents import (
     AddTask,
+    AgentStep,
     AgentTask,
+    AgentTrace,
     BackendConfig,
     BaseBackend,
     DoclingEditingAgent,
@@ -31,7 +33,9 @@ from docling_agent.agents import (
 
 __all__ = [
     "AddTask",
+    "AgentStep",
     "AgentTask",
+    "AgentTrace",
     "BackendConfig",
     "BaseBackend",
     "DoclingEditingAgent",
