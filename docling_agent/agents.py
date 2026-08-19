@@ -4,7 +4,7 @@ from docling_agent.agent.editor import DoclingEditingAgent
 from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.extractor import DoclingExtractingAgent
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
-from docling_agent.agent.rag import DoclingRAGAgent
+from docling_agent.agent.rag import DoclingRAGAgent, ReasoningBasedPageSelector, TreeGuidedPageSelector
 from docling_agent.agent.rag_models import RAGIteration, RAGResult, RAGTrace
 from docling_agent.agent.writer import DoclingWritingAgent
 from docling_agent.backends import (
@@ -57,6 +57,8 @@ __all__ = [
     "RAGResult",
     "RAGTask",
     "RAGTrace",
+    "ReasoningBasedPageSelector",
+    "TreeGuidedPageSelector",
     "ViewTask",
     "WriteTask",
     "create_backend",

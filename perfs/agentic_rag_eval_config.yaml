@@ -1,0 +1,94 @@
+# Configuration for Agentic RAG Evaluation (perfs/agentic_rag_eval.py)
+# This file configures the backend, models, dataset paths, and evaluation settings
+
+# Path to ViDoRe V3 dataset directory
+# The dataset should contain: pdfs/, queries/, corpus/, and qrels/ subdirectories
+dataset: /path/to/vidore_v3_finance_en
+
+# Output directory for all pipeline steps
+output: ./scratch/agentic_rag_eval
+
+# Use page-level summarization instead of element-level (default: false)
+# - false: Summarize individual document elements (paragraphs, sections, tables)
+# - true: Summarize entire pages at once (faster but less granular)
+page_level: false
+
+# Summarization style for Step 3 (default: sentences)
+# - sentences: Full-sentence summaries stored in meta.summary (SummaryMetaField)
+# - keyphrases: Keyword/keyphrase lists stored in meta.keywords (KeywordsMetaField)
+summarization_style: sentences
+
+# Step 4 page selector algorithm (default: batch)
+# - batch: ReasoningBasedPageSelector — evaluates pages in flat batches (works with page-level or element-level step 3)
+# - tree: TreeGuidedPageSelector — navigates the heading hierarchy (requires element-level step 3 enrichment)
+selector_algorithm: batch
+
+# Evaluation parameters for Step 4
+evaluation:
+  # Maximum number of pages to retrieve per query (for NDCG@K metric)
+  top_k: 10
+
+  # Number of pages to evaluate per reasoning iteration
+  # Larger batches are faster but may exceed context window or dilute information
+  # Recommended: 20-50 pages depending on model context size
+  batch_size: 30
+
+  # Early stopping threshold (0.0-1.0)
+  # Stop iterating if top candidates have confidence above this threshold (batch selector)
+  early_stopping_threshold: 0.95
+
+  # Maximum drill-down iterations for tree selector (default: 8)
+  max_iterations: 8
+
+# Backend configuration for LLM inference
+backend:
+  type: lmstudio     # Options: mellea | ollama | lmstudio | litellm | llama-server
+  base_url: http://localhost:1234/v1
+  # If you get "Unexpected endpoint" errors, ensure:
+  #   1. LM Studio server is running
+  #   2. A model is loaded in LM Studio (e.g., "lms load qwen/qwen3.6-27b")
+  #   3. The model name below matches the loaded model
+  timeout: 300       # Request timeout in seconds
+
+  # Temperature settings for reproducibility
+  # Lower temperature (0.0-0.3) = more deterministic, consistent outputs
+  # Higher temperature (0.7-1.0) = more creative, varied outputs
+  temperature: 0.1   # Low temperature for consistent evaluation results
+
+  # Model configuration for different tasks
+  models:
+    # Model for reasoning tasks (planning, analysis, decision-making)
+    # Used by: DoclingEditingAgent, ReasoningBasedPageSelector
+    reasoning: qwen2.5-7b-instruct-gguf
+
+    # Model for writing tasks (content generation, summarization)
+    # Used by: DoclingEnrichingAgent for generating summaries
+    writing: granite-4.1-3b
+
+    # Model for extraction tasks (defaults to writing model if not specified)
+    # extraction: granite-4.1-8b
+
+# Alternative backend configurations (uncomment to use):
+
+# Mellea backend:
+# backend:
+#   type: mellea
+#   models:
+#     reasoning: OPENAI_GPT_OSS_20B
+#     writing: OPENAI_GPT_OSS_20B
+
+# Ollama backend:
+# backend:
+#   type: ollama
+#   base_url: http://localhost:11434
+#   models:
+#     reasoning: qwen2.5:14b
+#     writing: llama3.2:3b
+
+# LiteLLM backend (supports multiple providers):
+# backend:
+#   type: litellm
+#   base_url: http://localhost:4000
+#   models:
+#     reasoning: gpt-4
+#     writing: gpt-3.5-turbo
