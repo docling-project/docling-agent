@@ -477,11 +477,36 @@ class DoclingLibrary:
         status.enrichments.append(DocEnrichmentRun(name=enrichment, task=task))
 
     def _validate_postgres_filter(self, postgres_filter: str) -> None:
-        if not postgres_filter.strip():
+        """Validate a caller-supplied PostgreSQL WHERE predicate.
+
+        This method is a defence-in-depth guard for operator-controlled input
+        only (e.g. config files, CLI flags passed by a system administrator who
+        already has access to the database).  It is not safe to pass
+        arbitrary end-user input as a filter — use the structured
+        `query_entries` parameters for that.
+
+        The check rejects the most obvious multi-statement and comment injection
+        patterns.  It cannot guarantee that a crafted predicate is semantically
+        safe (e.g. `OR 1=1` or `UNION SELECT` are syntactically valid WHERE
+        clauses and will not be caught).
+
+        Args:
+            postgres_filter: A single SQL WHERE predicate (no leading `WHERE`
+                keyword).
+
+        Raises:
+            ValueError: If the filter is empty or contains tokens that indicate
+                a multi-statement or comment injection attempt.
+        """
+        stripped = postgres_filter.strip()
+        if not stripped:
             raise ValueError("PostgreSQL filter must not be empty.")
-        forbidden = (";", "--", "/*", "*/")
-        if any(token in postgres_filter for token in forbidden):
-            raise ValueError("PostgreSQL filter must be a single WHERE predicate.")
+        # Reject multi-statement separators and SQL comment syntax.
+        forbidden = (";", "--", "/*", "*/", "\\;")
+        if any(token in stripped for token in forbidden):
+            raise ValueError(
+                "PostgreSQL filter must be a single WHERE predicate (semicolons and comment tokens are not allowed)."
+            )
 
     def _connect_pg(self):
         try:
@@ -667,17 +692,20 @@ class DoclingLibrary:
         return [DocLibraryEntry.model_validate(row[0]) for row in rows]
 
     def _pg_query_entries_by_filter(self, *, postgres_filter: str, limit: int) -> list[DocLibraryEntry]:
+        from psycopg import sql
+
+        # Use psycopg.sql to compose the query so the filter fragment is handled
+        # by the driver's SQL-building API rather than a raw Python f-string.
+        # Note: sql.SQL() treats the filter as a literal SQL fragment — it is NOT
+        # parameterised, so _validate_postgres_filter() must be called first.
+        # This is intentional: the filter is an operator-controlled predicate
+        # (not user-supplied data) and cannot be expressed as a %s parameter.
+        query = sql.SQL("SELECT entry FROM {table} WHERE {filter} ORDER BY updated_at DESC LIMIT %s").format(
+            table=sql.Identifier(self.PG_TABLE),
+            filter=sql.SQL(postgres_filter),
+        )
         with self._connect_pg() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT entry
-                FROM {self.PG_TABLE}
-                WHERE {postgres_filter}
-                ORDER BY updated_at DESC
-                LIMIT %s
-                """,
-                (limit,),
-            ).fetchall()
+            rows = conn.execute(query, (limit,)).fetchall()
         return [DocLibraryEntry.model_validate(row[0]) for row in rows]
 
     def _pg_clear(self, *, project_id: str | None, all_projects: bool) -> None:
