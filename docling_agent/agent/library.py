@@ -142,7 +142,6 @@ class DoclingLibrary:
     """
 
     INDEX_FILE = "index.json"
-    LEGACY_DOC_FILE = "document.dclx"
     PG_TABLE = "docling_library_entries"
 
     def __init__(self, path: Path, *, project_id: str = "default", database_url: str | None = None) -> None:
