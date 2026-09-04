@@ -119,9 +119,9 @@ def test_ensure_enriched_multiple_operations(
         )
 
         # Enricher should be called once with both operations
-    assert len(enricher_calls) == 1
-    assert enricher_calls[0][0] == task_query
-    assert set(enricher_calls[0][1]) == {"summarize", "entities"}
+        assert len(enricher_calls) == 1
+        assert enricher_calls[0][0] == task_query
+        assert set(enricher_calls[0][1]) == {"summarize", "entities"}
 
 
 def test_add_mode_adds_sources_to_library(
