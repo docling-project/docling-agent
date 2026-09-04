@@ -317,7 +317,6 @@ class DoclingLibrary:
                 entry.stats = self._stats_for_doc(doc=doc, doc_path=doc_path)
                 entry.updated_at = _now_iso()
                 self._persist_entry(entry)
-            self.update_status(doc_id)  # just bump updated_at
 
     def all_entries(self) -> list[DocLibraryEntry]:
         if self.database_url:
