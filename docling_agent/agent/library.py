@@ -265,9 +265,7 @@ class DoclingLibrary:
 
     def update_status(self, doc_id: str, **flags: bool) -> None:
         """Set status flags on the entry (e.g. ``has_summaries=True``)."""
-        entry = self._index.entries.get(doc_id)
-        if self.database_url:
-            entry = self._pg_get_entry(doc_id)
+        entry = self.get_entry(doc_id)
         if entry is None:
             log_warning(f"Library: update_status called for unknown doc_id={doc_id!r}")
             return
