@@ -9,7 +9,7 @@ import shutil
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from docling_core.types.doc.document import DoclingDocument
 from pydantic import BaseModel, Field
@@ -17,70 +17,93 @@ from pydantic import BaseModel, Field
 from docling_agent.logging import log_debug, log_error, log_warning
 
 
+def _now_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
 class DocPipelineRun(BaseModel):
     """Pipeline execution recorded for a library document."""
 
-    name: str
-    ran_at: str = Field(default_factory=lambda: _now_iso())
+    name: Annotated[
+        str, Field(description="Pipeline name.", examples=["StandardPdfPipeline:standard", "SimplePipeline:fast"])
+    ]
+    ran_at: Annotated[str, Field(description="ISO-8601 UTC timestamp of the run.")] = _now_iso()
 
 
 class DocEnrichmentRun(BaseModel):
     """Enrichment execution recorded for a library document."""
 
-    name: str
-    ran_at: str = Field(default_factory=lambda: _now_iso())
-    task: str | None = None
+    name: Annotated[
+        str, Field(description="Normalized enrichment operation name.", examples=["summarize", "keywords", "entities"])
+    ]
+    ran_at: Annotated[str, Field(description="ISO-8601 UTC timestamp of the run.")] = _now_iso()
+    task: Annotated[str | None, Field(description="Task query that triggered this enrichment.")] = None
 
 
 class DocStatus(BaseModel):
     """Processing status for a library document."""
 
-    is_hierarchical: bool = False
-    has_summaries: bool = False
-    has_keywords: bool = False
-    pipelines: list[DocPipelineRun] = Field(default_factory=list)
-    enrichments: list[DocEnrichmentRun] = Field(default_factory=list)
+    is_hierarchical: Annotated[bool, Field(description="True after heading levels have been fixed.")] = False
+    has_summaries: Annotated[bool, Field(description="True after element-level summaries were generated.")] = False
+    has_keywords: Annotated[bool, Field(description="True after search keywords were extracted.")] = False
+    pipelines: Annotated[
+        list[DocPipelineRun], Field(description="Conversion pipeline runs recorded for this document.")
+    ] = []
+    enrichments: Annotated[
+        list[DocEnrichmentRun], Field(description="Enrichment runs recorded for this document.")
+    ] = []
 
 
 class DocStats(BaseModel):
     """Counts and archive-size metadata for a library document."""
 
-    page_count: int | None = None
-    table_count: int = 0
-    picture_count: int = 0
-    text_count: int = 0
-    xml_char_count: int = 0
+    page_count: Annotated[int | None, Field(description="Number of pages, or None for page-less documents.")] = None
+    table_count: Annotated[int, Field(description="Number of tables in the document.")] = 0
+    picture_count: Annotated[int, Field(description="Number of pictures in the document.")] = 0
+    text_count: Annotated[int, Field(description="Number of text items in the document.")] = 0
+    xml_char_count: Annotated[
+        int, Field(description="Character count of the DocLang XML payload inside the dclx archive.")
+    ] = 0
 
 
 class DocLibraryEntry(BaseModel):
     """Metadata record for one document in the library."""
 
-    doc_id: str
-    project_id: str = "default"
-    name: str
-    source_path: str  # canonical string path of the original file (or "in-memory")
-    document_origin: Literal["converted", "written", "in_memory"] = "converted"
-    original_mimetype: str | None = None
-    doc_path: str
-    doc_format: Literal["dclx"] = "dclx"
-    created_at: str  # ISO-8601 UTC
-    updated_at: str  # ISO-8601 UTC
-    status: DocStatus = Field(default_factory=DocStatus)
-    stats: DocStats = Field(default_factory=DocStats)
-    summary: str | None = None
-    keywords: list[str] = Field(default_factory=list)
-    topics: list[str] = Field(default_factory=list)
+    doc_id: Annotated[str, Field(description="Stable hex identifier derived from project_id and source_path.")]
+    project_id: Annotated[str, Field(description="Project this entry belongs to.")] = "default"
+    name: Annotated[str, Field(description="Human-readable document name.")]
+    source_path: Annotated[
+        str,
+        Field(description="Canonical path of the original source file, or a synthetic key for in-memory documents."),
+    ]
+    document_origin: Annotated[
+        Literal["converted", "written", "in_memory"], Field(description="How the document was produced.")
+    ] = "converted"
+    original_mimetype: Annotated[str | None, Field(description="MIME type of the original source file, if known.")] = (
+        None
+    )
+    doc_path: Annotated[str, Field(description="Absolute path to the stored dclx archive.")]
+    doc_format: Annotated[Literal["dclx"], Field(description="Archive format of the stored document payload.")] = "dclx"
+    created_at: Annotated[str, Field(description="ISO-8601 UTC timestamp when the entry was first created.")]
+    updated_at: Annotated[str, Field(description="ISO-8601 UTC timestamp of the last update.")]
+    status: Annotated[DocStatus, Field(description="Processing status flags and history.")] = DocStatus()
+    stats: Annotated[DocStats, Field(description="Document statistics computed at store time.")] = DocStats()
+    summary: Annotated[str | None, Field(description="Document-level prose summary extracted from enrichment.")] = None
+    keywords: Annotated[list[str], Field(description="Top-level keywords extracted from enrichment.")] = []
+    topics: Annotated[list[str], Field(description="Topic labels extracted from enrichment.")] = []
 
 
 class DocLibraryIndex(BaseModel):
-    """Top-level index persisted to ``index.json``."""
+    """Top-level index persisted to `index.json`."""
 
-    entries: dict[str, DocLibraryEntry] = Field(default_factory=dict)  # doc_id → entry
-    source_to_id: dict[str, str] = Field(default_factory=dict)  # project_id:source_path → doc_id
-
-
-def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
+    entries: Annotated[dict[str, DocLibraryEntry], Field(description="Mapping of doc_id to entry.")] = {}
+    source_to_id: Annotated[
+        dict[str, str],
+        Field(
+            description="Mapping of composite key to doc_id.",
+            examples=[{"default:/tmp/report.pdf": "a1b2c3d4e5f6a7b8"}],
+        ),
+    ] = {}
 
 
 def _doc_id_for_source(source_path: str, project_id: str) -> str:
@@ -146,6 +169,14 @@ class DoclingLibrary:
         return None
 
     def get_entry(self, doc_id: str) -> DocLibraryEntry | None:
+        """Return the entry for `doc_id`, or None if not found.
+
+        Args:
+            doc_id: The document identifier to look up.
+
+        Returns:
+            The matching `DocLibraryEntry`, or None.
+        """
         if self.database_url:
             return self._pg_get_entry(doc_id)
         return self._index.entries.get(doc_id)
@@ -161,11 +192,23 @@ class DoclingLibrary:
         conversion_pipeline: str | None = None,
         document_origin: Literal["converted", "written", "in_memory"] = "converted",
     ) -> DocLibraryEntry:
-        """Persist *doc* to the library and return its entry.
+        """Persist `doc` to the library and return its entry.
 
-        If an entry for *source_path* already exists, it is overwritten.
-        When *copy_source* is True and *source_path* points to a real file, a
-        copy of the file is placed next to the ``document_<doc_id>.dclx`` archive.
+        If an entry for `source_path` already exists it is overwritten.
+        When `copy_source` is True and `source_path` points to a real file, a
+        copy of the file is placed next to the `document_<doc_id>.dclx` archive.
+
+        Args:
+            doc: The document to store.
+            source_path: Canonical path of the original source file.
+            copy_source: If True, copy the source file into the document directory.
+            project_id: Project to assign; defaults to the library's `project_id`.
+            original_mimetype: MIME type of the source file; auto-detected if None.
+            conversion_pipeline: Pipeline name to record in the status history.
+            document_origin: How the document was produced.
+
+        Returns:
+            The created or updated `DocLibraryEntry`.
         """
         project_id = project_id or self.project_id
         doc_id = _doc_id_for_source(source_path, project_id)
@@ -223,7 +266,16 @@ class DoclingLibrary:
         project_id: str | None = None,
         document_origin: Literal["written", "in_memory"] = "in_memory",
     ) -> DocLibraryEntry:
-        """Store an in-memory document (no source file) and return its entry."""
+        """Store an in-memory document (no source file) and return its entry.
+
+        Args:
+            doc: The document to store.
+            project_id: Project to assign; defaults to the library's `project_id`.
+            document_origin: Either `"written"` (LLM-generated) or `"in_memory"`.
+
+        Returns:
+            The created `DocLibraryEntry`.
+        """
         project_id = project_id or self.project_id
         doc_id = _doc_id_for_name(doc.name, project_id)
         doc_dir = self.path / doc_id
@@ -264,7 +316,13 @@ class DoclingLibrary:
             return None
 
     def update_status(self, doc_id: str, **flags: bool) -> None:
-        """Set status flags on the entry (e.g. ``has_summaries=True``)."""
+        """Set one or more boolean status flags on an entry.
+
+        Args:
+            doc_id: The document identifier to update.
+            **flags: Keyword arguments mapping `DocStatus` field names to bool
+                values (e.g. `has_summaries=True`).
+        """
         entry = self.get_entry(doc_id)
         if entry is None:
             log_warning(f"Library: update_status called for unknown doc_id={doc_id!r}")
@@ -276,7 +334,15 @@ class DoclingLibrary:
         self._persist_entry(entry)
 
     def record_enrichments(self, doc_id: str, enrichments: list[str], *, task: str | None = None) -> None:
-        """Record enrichment operations that have been applied to the document."""
+        """Record enrichment operations that have been applied to the document.
+
+        Already-recorded operations (matched by name) are not duplicated.
+
+        Args:
+            doc_id: The document identifier to update.
+            enrichments: List of normalised operation names to record.
+            task: Optional task query string to attach to each enrichment run.
+        """
         entry = self.get_entry(doc_id)
         if entry is None:
             log_warning(f"Library: record_enrichments called for unknown doc_id={doc_id!r}")
@@ -294,7 +360,17 @@ class DoclingLibrary:
         keywords: list[str] | None = None,
         topics: list[str] | None = None,
     ) -> None:
-        """Update the document-level summary, keywords, and topics."""
+        """Update the document-level summary, keywords, and topics.
+
+        Only the arguments that are not None are applied; the rest are left
+        unchanged.
+
+        Args:
+            doc_id: The document identifier to update.
+            summary: Replacement prose summary, or None to leave unchanged.
+            keywords: Replacement keyword list, or None to leave unchanged.
+            topics: Replacement topic list, or None to leave unchanged.
+        """
         entry = self.get_entry(doc_id)
         if entry is None:
             return
@@ -308,7 +384,15 @@ class DoclingLibrary:
         self._persist_entry(entry)
 
     def resync(self, doc_id: str, doc: DoclingDocument) -> None:
-        """Overwrite the stored dclx archive (after in-place enrichment)."""
+        """Overwrite the stored dclx archive after in-place enrichment.
+
+        Recomputes document stats and persists the updated entry. Has no
+        effect if the archive file does not exist on disk.
+
+        Args:
+            doc_id: The document identifier to resync.
+            doc: The updated document whose content replaces the stored archive.
+        """
         entry = self.get_entry(doc_id)
         doc_path = Path(entry.doc_path) if entry else self._doc_path_for_id(doc_id)
         if doc_path.exists():
@@ -319,6 +403,12 @@ class DoclingLibrary:
                 self._persist_entry(entry)
 
     def all_entries(self) -> list[DocLibraryEntry]:
+        """Return all entries across every project in the library.
+
+        Returns:
+            List of all `DocLibraryEntry` objects, unfiltered and unordered.
+            Use `query_entries` to filter by project or other criteria.
+        """
         if self.database_url:
             return self._pg_all_entries()
         return list(self._index.entries.values())
@@ -336,7 +426,26 @@ class DoclingLibrary:
         text: str | None = None,
         limit: int = 50,
     ) -> list[DocLibraryEntry]:
-        """Query library entries, using PostgreSQL when configured."""
+        """Return entries matching the given filters, sorted by `updated_at` descending.
+
+        Filters are ANDed together. All parameters default to None (no filter).
+        Uses PostgreSQL when `database_url` is configured, otherwise filters
+        the in-memory index.
+
+        Args:
+            project_id: Restrict to this project; defaults to the library's `project_id`.
+            name: Case-insensitive substring match on the document name.
+            source_path: Exact match on the source path.
+            mimetype: Exact match on `original_mimetype`.
+            document_origin: Exact match on `document_origin`.
+            pipeline: Entry must have a pipeline run with this name.
+            enrichments: Entry must have all listed enrichment names recorded.
+            text: Case-insensitive substring search across name, summary, and keywords.
+            limit: Maximum number of entries to return.
+
+        Returns:
+            Filtered list of `DocLibraryEntry` objects.
+        """
         project_id = project_id or self.project_id
         if self.database_url:
             return self._pg_query_entries(
@@ -378,16 +487,40 @@ class DoclingLibrary:
         return entries[:limit]
 
     def query_entries_by_postgres_filter(self, postgres_filter: str, *, limit: int = 100) -> list[DocLibraryEntry]:
-        """Query entries with a raw PostgreSQL WHERE predicate."""
+        """Query entries with a raw PostgreSQL WHERE predicate.
+
+        Requires `DOCLING_AGENT_LIBRARY_DATABASE_URL` to be set. The predicate
+        is validated by `_validate_postgres_filter` before execution. See that
+        method's docstring for the security model.
+
+        Args:
+            postgres_filter: A single SQL WHERE predicate with no leading `WHERE`
+                keyword (e.g. `"project_id = 'alpha' AND page_count > 10"`).
+            limit: Maximum number of entries to return.
+
+        Returns:
+            Filtered list of `DocLibraryEntry` objects sorted by `updated_at` descending.
+
+        Raises:
+            RuntimeError: If no database URL is configured.
+            ValueError: If the filter is empty or contains forbidden tokens.
+        """
         if not self.database_url:
             raise RuntimeError("PostgreSQL filtering requires DOCLING_AGENT_LIBRARY_DATABASE_URL.")
         self._validate_postgres_filter(postgres_filter)
         return self._pg_query_entries_by_filter(postgres_filter=postgres_filter, limit=limit)
 
     def clear(self, *, project_id: str | None = None, all_projects: bool = False) -> int:
-        """Remove entries and stored archives for a project or the entire library.
+        """Remove entries and their stored dclx archives.
 
-        Returns the number of entries removed.
+        Args:
+            project_id: Project whose entries are removed; defaults to the
+                library's `project_id`. Ignored when `all_projects` is True.
+            all_projects: If True, remove every entry in the library regardless
+                of project.
+
+        Returns:
+            Number of entries removed.
         """
         if not all_projects:
             project_id = project_id or self.project_id
