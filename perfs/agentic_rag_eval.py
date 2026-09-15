@@ -186,6 +186,10 @@ class AgenticRAGEvaluator:
                 result = converter.convert(pdf_path)
                 document = result.document
 
+                # Hierarchize according to headings and validate the resulting tree.
+                document._hierarchize()
+                document.validate_tree(document.body, raise_on_error=True)
+
                 # Save as JSON
                 document.save_as_json(output_path)
 
