@@ -28,7 +28,9 @@ from typing import Final, Literal
 
 import pandas as pd
 import yaml
-from docling.document_converter import DocumentConverter
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import HeadingHierarchyOptions, PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.serializer.markdown import MarkdownParams
 from docling_core.types.doc.document import (
     DoclingDocument,
@@ -158,8 +160,10 @@ class AgenticRAGEvaluator:
         pdf_files = sorted(self.pdfs_dir.glob("*.pdf"))
         logger.info(f"Found {len(pdf_files)} PDF files to convert")
 
-        # Initialize Docling converter
-        converter = DocumentConverter()
+        # Enable native heading-level detection so the PDF pipeline assigns
+        # correct hierarchical levels (H1/H2/…) without a separate LLM step.
+        pdf_options = PdfPipelineOptions(heading_hierarchy_options=HeadingHierarchyOptions(enabled=True))
+        converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)})
 
         # Convert each PDF
         for pdf_path in tqdm(pdf_files, desc="Converting PDFs"):
