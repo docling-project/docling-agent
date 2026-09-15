@@ -29,7 +29,11 @@ from typing import Final, Literal
 import pandas as pd
 import yaml
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import HeadingHierarchyOptions, PdfPipelineOptions
+from docling.datamodel.pipeline_options import (
+    HeadingHierarchyOptions,
+    PdfPipelineOptions,
+    PictureDescriptionVlmEngineOptions,
+)
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.serializer.markdown import MarkdownParams
 from docling_core.types.doc.document import (
@@ -91,6 +95,7 @@ class AgenticRAGEvaluator:
         output_base_dir: Path,
         backend_config: BackendConfig,
         page_level: bool = False,
+        picture_description: bool = False,
         summarization_style: Literal["sentences", "keyphrases"] = "sentences",
         selector_algorithm: Literal["batch", "tree"] = "batch",
         eval_top_k: int = 10,
@@ -105,6 +110,9 @@ class AgenticRAGEvaluator:
             output_base_dir: Base directory for all outputs
             backend_config: Backend configuration for LLM inference
             page_level: Whether to use page-level summarization (default: False)
+            picture_description: Whether to run picture description during PDF conversion
+                using the default Granite vision model. Enabling this significantly
+                increases Step 1 processing time and requires a VLM. (default: False)
             summarization_style: "sentences" stores summaries in meta.summary;
                                  "keyphrases" stores keyword lists in meta.keywords (default: "sentences")
             selector_algorithm: "batch" uses ReasoningBasedPageSelector (flat page batches);
@@ -119,6 +127,7 @@ class AgenticRAGEvaluator:
         self.output_base_dir = Path(output_base_dir)
         self.backend_config = backend_config
         self.page_level = page_level
+        self.picture_description = picture_description
         self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
         self.selector_algorithm: Literal["batch", "tree"] = selector_algorithm
         self.eval_top_k = eval_top_k
@@ -163,6 +172,10 @@ class AgenticRAGEvaluator:
         # Enable native heading-level detection so the PDF pipeline assigns
         # correct hierarchical levels (H1/H2/…) without a separate LLM step.
         pdf_options = PdfPipelineOptions(heading_hierarchy_options=HeadingHierarchyOptions(enabled=True))
+        if self.picture_description:
+            logger.info("Picture description enabled — loading Granite vision model (this may take a moment)...")
+            pdf_options.do_picture_description = True
+            pdf_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset("granite_vision")
         converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)})
 
         # Convert each PDF
@@ -878,6 +891,15 @@ Examples:
         help="Use page-level summarization in Step 3 instead of element-level (default: False)",
     )
     parser.add_argument(
+        "--picture-description",
+        action="store_true",
+        help=(
+            "Enable picture description in Step 1 using the Granite vision model "
+            "(ibm-granite/granite-vision-3.3-2b). Significantly increases conversion time. "
+            "Overrides config file. (default: False)"
+        ),
+    )
+    parser.add_argument(
         "--summarization-style",
         choices=["sentences", "keyphrases"],
         default=None,
@@ -919,6 +941,9 @@ Examples:
     # Get page-level flag (command line overrides config)
     page_level = args.page_level or config.get("page_level", False)
 
+    # Get picture-description flag (command line overrides config)
+    picture_description = args.picture_description or config.get("picture_description", False)
+
     # Get summarization style (command line overrides config); validate and narrow the type
     _style_raw = args.summarization_style or config.get("summarization_style", "sentences")
     if _style_raw not in ("sentences", "keyphrases"):
@@ -944,6 +969,7 @@ Examples:
         output_base_dir=output_path,
         backend_config=backend_config,
         page_level=page_level,
+        picture_description=picture_description,
         summarization_style=summarization_style,
         selector_algorithm=selector_algorithm,
         eval_top_k=eval_top_k,
