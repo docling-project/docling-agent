@@ -19,6 +19,13 @@ page_level: false
 # available locally. Only useful if the dataset contains information-rich figures.
 picture_description: false
 
+# Enable chart extraction during PDF conversion in Step 1 (default: false)
+# When true, each detected chart is processed by ibm-granite/granite-vision-3.3-8b-v4
+# to produce CSV data (chart2csv) and a natural-language summary (chart2summary).
+# This significantly increases Step 1 processing time and requires a VLM to be
+# available locally. Only useful if the dataset contains data charts or graphs.
+chart_extraction: false
+
 # Summarization style for Step 3 (default: sentences)
 # - sentences: Full-sentence summaries stored in meta.summary (SummaryMetaField)
 # - keyphrases: Keyword/keyphrase lists stored in meta.keywords (KeywordsMetaField)
