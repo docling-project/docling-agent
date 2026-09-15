@@ -28,6 +28,7 @@ import pandas as pd
 import yaml
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
+    ChartExtractionModelOptions,
     HeadingHierarchyOptions,
     PdfPipelineOptions,
     PictureDescriptionVlmEngineOptions,
@@ -92,6 +93,7 @@ class AgenticRAGEvaluator:
         backend_config: BackendConfig,
         page_level: bool = False,
         picture_description: bool = False,
+        chart_extraction: bool = False,
         summarization_style: Literal["sentences", "keyphrases"] = "sentences",
         selector_algorithm: Literal["batch", "tree"] = "batch",
         eval_top_k: int = 10,
@@ -109,6 +111,10 @@ class AgenticRAGEvaluator:
             picture_description: Whether to run picture description during PDF conversion
                 using the default Granite vision model. Enabling this significantly
                 increases Step 1 processing time and requires a VLM. (default: False)
+            chart_extraction: Whether to run chart extraction during PDF conversion using
+                the Granite Vision v4 model. Produces CSV data and a natural-language
+                summary for each detected chart. Enabling this significantly increases
+                Step 1 processing time and requires a VLM. (default: False)
             summarization_style: "sentences" stores summaries in meta.summary;
                                  "keyphrases" stores keyword lists in meta.keywords (default: "sentences")
             selector_algorithm: "batch" uses ReasoningBasedPageSelector (flat page batches);
@@ -124,6 +130,7 @@ class AgenticRAGEvaluator:
         self.backend_config = backend_config
         self.page_level = page_level
         self.picture_description = picture_description
+        self.chart_extraction = chart_extraction
         self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
         self.selector_algorithm: Literal["batch", "tree"] = selector_algorithm
         self.eval_top_k = eval_top_k
@@ -171,6 +178,10 @@ class AgenticRAGEvaluator:
             logger.info("Picture description enabled — loading Granite vision model (this may take a moment)...")
             pdf_options.do_picture_description = True
             pdf_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset("granite_vision")
+        if self.chart_extraction:
+            logger.info("Chart extraction enabled — loading Granite Vision v4 model (this may take a moment)...")
+            pdf_options.do_chart_extraction = True
+            pdf_options.chart_extraction_options = ChartExtractionModelOptions(chart2summary=True)
         converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)})
 
         # Convert each PDF
@@ -820,6 +831,15 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--chart-extraction",
+        action="store_true",
+        help=(
+            "Enable chart extraction in Step 1 using the Granite Vision v4 model. "
+            "Produces CSV data and a natural-language summary for each detected chart. "
+            "Significantly increases conversion time. Overrides config file. (default: False)"
+        ),
+    )
+    parser.add_argument(
         "--summarization-style",
         choices=["sentences", "keyphrases"],
         default=None,
@@ -864,6 +884,9 @@ Examples:
     # Get picture-description flag (command line overrides config)
     picture_description = args.picture_description or config.get("picture_description", False)
 
+    # Get chart-extraction flag (command line overrides config)
+    chart_extraction = args.chart_extraction or config.get("chart_extraction", False)
+
     # Get summarization style (command line overrides config); validate and narrow the type
     _style_raw = args.summarization_style or config.get("summarization_style", "sentences")
     if _style_raw not in ("sentences", "keyphrases"):
@@ -890,6 +913,7 @@ Examples:
         backend_config=backend_config,
         page_level=page_level,
         picture_description=picture_description,
+        chart_extraction=chart_extraction,
         summarization_style=summarization_style,
         selector_algorithm=selector_algorithm,
         eval_top_k=eval_top_k,
