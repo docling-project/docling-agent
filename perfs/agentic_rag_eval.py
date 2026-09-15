@@ -8,15 +8,13 @@ structure and AI-generated summaries for intelligent Q&A.
 
 Pipeline:
 1. Convert PDFs to DoclingDocument objects (JSON format)
-2. Fix heading levels using DoclingEditingAgent
-3. Enrich documents with AI-generated summaries using DoclingEnrichingAgent
-4. Perform intelligent Q&A using DoclingRAGAgent and evaluate with NDCG@10
+2. Enrich documents with AI-generated summaries using DoclingEnrichingAgent
+3. Perform intelligent Q&A using DoclingRAGAgent and evaluate with NDCG@10
 
 Usage:
     python perfs/agentic_rag_eval.py --config perfs/agentic_rag_eval_config.yaml --step 1
     python perfs/agentic_rag_eval.py --config perfs/agentic_rag_eval_config.yaml --step 2
     python perfs/agentic_rag_eval.py --config perfs/agentic_rag_eval_config.yaml --step 3
-    python perfs/agentic_rag_eval.py --config perfs/agentic_rag_eval_config.yaml --step 4
 """
 
 import argparse
@@ -39,12 +37,10 @@ from docling_core.transforms.serializer.markdown import MarkdownParams
 from docling_core.types.doc.document import (
     DoclingDocument,
     ImageRefMode,
-    SectionHeaderItem,
 )
 from tqdm import tqdm
 
 from docling_agent.agents import (
-    DoclingEditingAgent,
     DoclingEnrichingAgent,
     ReasoningBasedPageSelector,
     TreeGuidedPageSelector,
@@ -117,7 +113,7 @@ class AgenticRAGEvaluator:
                                  "keyphrases" stores keyword lists in meta.keywords (default: "sentences")
             selector_algorithm: "batch" uses ReasoningBasedPageSelector (flat page batches);
                                  "tree" uses TreeGuidedPageSelector (hierarchical heading traversal,
-                                 requires element-level step-3 enrichment) (default: "batch")
+                                 requires element-level step-2 enrichment) (default: "batch")
             eval_top_k: Maximum pages to retrieve per query (default: 10)
             eval_batch_size: Pages per reasoning iteration for batch selector (default: 30)
             eval_early_stopping: Early stopping threshold for batch selector (default: 0.95)
@@ -140,9 +136,8 @@ class AgenticRAGEvaluator:
 
         # Define output directories for each step
         self.step1_dir = self.output_base_dir / "step1_converted"
-        self.step2_dir = self.output_base_dir / "step2_hierarchical"
-        self.step3_dir = self.output_base_dir / "step3_enriched"
-        self.step4_dir = self.output_base_dir / "step4_evaluation"
+        self.step2_dir = self.output_base_dir / "step2_enriched"
+        self.step3_dir = self.output_base_dir / "step3_evaluation"
 
         # Input directories from dataset
         self.pdfs_dir = self.dataset_path / "pdfs"
@@ -214,83 +209,8 @@ class AgenticRAGEvaluator:
 
         logger.info(f"Step 1 complete. Output saved to: {self.step1_dir}")
 
-    def step2_fix_heading_levels(self) -> None:
-        """Step 2: Fix heading levels using DoclingEditingAgent."""
-        logger.info("=" * 80)
-        logger.info("STEP 2: Fixing heading levels with DoclingEditingAgent")
-        logger.info("=" * 80)
-
-        self.step2_dir.mkdir(parents=True, exist_ok=True)
-
-        # Get all JSON files from step 1
-        json_files = sorted(self.step1_dir.glob("*.json"))
-        logger.info(f"Found {len(json_files)} documents to process")
-
-        # Initialize editing agent with backend
-        agent = DoclingEditingAgent(backend=self.backend, tools=[])
-
-        # Process each document
-        for json_path in tqdm(json_files, desc="Fixing heading levels"):
-            try:
-                output_path = self.step2_dir / json_path.name
-
-                # Skip if already processed
-                if output_path.exists():
-                    logger.info(f"Skipping {json_path.name} (already processed)")
-                    continue
-
-                logger.info(f"Processing {json_path.name}...")
-                start_time = time.time()
-
-                # Load document
-                document = DoclingDocument.load_from_json(json_path)
-
-                # Check if heading levels need fixing
-                # Typically, Docling assigns the same level to all headings with PDFs
-                heading_levels = set()
-                for item, _ in document.iterate_items():
-                    if isinstance(item, SectionHeaderItem):
-                        heading_levels.add(item.level)
-
-                if len(heading_levels) <= 1:
-                    logger.info(f"Document has flat heading structure (levels: {heading_levels}). Fixing with agent...")
-
-                    # Use agent to fix heading levels
-                    task = (
-                        "Ensure that the section headings have the correct hierarchical levels "
-                        "based on the document structure. Analyze the document and adjust heading "
-                        "levels so that main sections have lower level numbers and subsections "
-                        "have higher level numbers."
-                    )
-                    document = agent.run(task=task, document=document)
-
-                    # Call _hierarchize to reorganize document elements
-                    document._hierarchize()
-                    document.validate_tree(document.body, raise_on_error=True)
-
-                    logger.info("Heading levels fixed and document hierarchized")
-                else:
-                    logger.info(f"Document already has hierarchical structure (levels: {heading_levels})")
-                    # Call _hierarchize to reorganize document elements
-                    document._hierarchize()
-                    document.validate_tree(document.body, raise_on_error=True)
-
-                    logger.info("Document hierarchized")
-
-                # Save the hierarchical document
-                document.save_as_json(output_path)
-                document.save_as_markdown(output_path.with_suffix(".md"))
-
-                elapsed = time.time() - start_time
-                logger.info(f"Processed {json_path.name} in {elapsed:.2f}s")
-
-            except Exception as e:
-                logger.error(f"Failed to process {json_path.name}: {e}", exc_info=True)
-
-        logger.info(f"Step 2 complete. Output saved to: {self.step2_dir}")
-
-    def step3_enrich_with_summaries(self) -> None:
-        """Step 3: Enrich documents with AI-generated summaries.
+    def step2_enrich_with_summaries(self) -> None:
+        """Step 2: Enrich documents with AI-generated summaries.
 
         Supports two enrichment levels:
         - Element-level (default): Summarize individual document elements
@@ -308,13 +228,13 @@ class AgenticRAGEvaluator:
     def _enrich_element_level(self) -> None:
         """Enrich documents with element-level summaries or keyphrases."""
         logger.info("=" * 80)
-        logger.info(f"STEP 3: Enriching documents at element level (style={self.summarization_style!r})")
+        logger.info(f"STEP 2: Enriching documents at element level (style={self.summarization_style!r})")
         logger.info("=" * 80)
 
-        self.step3_dir.mkdir(parents=True, exist_ok=True)
+        self.step2_dir.mkdir(parents=True, exist_ok=True)
 
-        # Get all JSON files from step 2
-        json_files = sorted(self.step2_dir.glob("*.json"))
+        # Get all JSON files from step 1
+        json_files = sorted(self.step1_dir.glob("*.json"))
         logger.info(f"Found {len(json_files)} documents to enrich")
 
         # Initialize enriching agent with backend
@@ -323,7 +243,7 @@ class AgenticRAGEvaluator:
         # Process each document
         for json_path in tqdm(json_files, desc="Enriching documents"):
             try:
-                output_path = self.step3_dir / json_path.name
+                output_path = self.step2_dir / json_path.name
 
                 # Skip if already processed
                 if output_path.exists():
@@ -352,18 +272,18 @@ class AgenticRAGEvaluator:
             except Exception as e:
                 logger.error(f"Failed to enrich {json_path.name}: {e}", exc_info=True)
 
-        logger.info(f"Step 3 complete. Output saved to: {self.step3_dir}")
+        logger.info(f"Step 2 complete. Output saved to: {self.step2_dir}")
 
     def _enrich_page_level(self) -> None:
         """Enrich documents with page-level summaries or keyphrases."""
         logger.info("=" * 80)
-        logger.info(f"STEP 3: Enriching documents at page level (style={self.summarization_style!r})")
+        logger.info(f"STEP 2: Enriching documents at page level (style={self.summarization_style!r})")
         logger.info("=" * 80)
 
         self.step3_dir.mkdir(parents=True, exist_ok=True)
 
-        # Get all JSON files from step 2
-        json_files = sorted(self.step2_dir.glob("*.json"))
+        # Get all JSON files from step 1
+        json_files = sorted(self.step1_dir.glob("*.json"))
         logger.info(f"Found {len(json_files)} documents to enrich")
 
         # Initialize enriching agent
@@ -372,9 +292,9 @@ class AgenticRAGEvaluator:
         # Process each document
         for json_path in tqdm(json_files, desc="Enriching documents"):
             try:
-                output_path = self.step3_dir / json_path.name
+                output_path = self.step2_dir / json_path.name
 
-                # Load document (from output if exists for resume, otherwise from step2)
+                # Load document (from output if exists for resume, otherwise from step1)
                 if output_path.exists():
                     logger.info(f"Resuming enrichment for {json_path.name}...")
                     document = DoclingDocument.load_from_json(output_path)
@@ -406,10 +326,10 @@ class AgenticRAGEvaluator:
             except Exception as e:
                 logger.error(f"Failed to enrich {json_path.name}: {e}", exc_info=True)
 
-        logger.info(f"Step 3 complete. Output saved to: {self.step3_dir}")
+        logger.info(f"Step 2 complete. Output saved to: {self.step2_dir}")
 
-    def step4_evaluate_rag(self) -> None:
-        """Step 4: Evaluate RAG with NDCG@10 metric on ViDoRe benchmark.
+    def step3_evaluate_rag(self) -> None:
+        """Step 3: Evaluate RAG with NDCG@10 metric on ViDoRe benchmark.
 
         This method implements chunkless RAG evaluation by:
         1. Loading enriched documents with page and document summaries
@@ -419,13 +339,13 @@ class AgenticRAGEvaluator:
         5. Saving per-query results for resume capability
         """
         logger.info("=" * 80)
-        logger.info("STEP 4: Evaluating Agentic RAG with NDCG@10")
+        logger.info("STEP 3: Evaluating Agentic RAG with NDCG@10")
         logger.info("=" * 80)
 
-        self.step4_dir.mkdir(parents=True, exist_ok=True)
+        self.step3_dir.mkdir(parents=True, exist_ok=True)
 
         # Per-query results file for resume capability
-        query_results_file = self.step4_dir / "query_results.jsonl"
+        query_results_file = self.step3_dir / "query_results.jsonl"
 
         # Load already processed queries if resuming
         processed_queries = set()
@@ -458,10 +378,10 @@ class AgenticRAGEvaluator:
             logger.info(f"Previous processing time: {sum(previous_times):.2f}s")
 
         # Load enriched documents
-        json_files = sorted(self.step3_dir.glob("*.json"))
+        json_files = sorted(self.step2_dir.glob("*.json"))
         if not json_files:
-            logger.error(f"No enriched documents found in {self.step3_dir}")
-            logger.error("Please run Step 3 first")
+            logger.error(f"No enriched documents found in {self.step2_dir}")
+            logger.error("Please run Step 2 first")
             return
 
         logger.info(f"Loading {len(json_files)} enriched documents...")
@@ -766,19 +686,19 @@ class AgenticRAGEvaluator:
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        results_file = self.step4_dir / "evaluation_results.json"
+        results_file = self.step3_dir / "evaluation_results.json"
         with open(results_file, "w") as f:
             json.dump(results, f, indent=2)
 
         logger.info(f"Results saved to: {results_file}")
 
         # Save detailed retrieval results
-        detailed_file = self.step4_dir / "retrieval_results.json"
+        detailed_file = self.step3_dir / "retrieval_results.json"
         with open(detailed_file, "w") as f:
             json.dump(retrieval_results, f, indent=2)
 
         logger.info(f"Detailed retrieval results saved to: {detailed_file}")
-        logger.info(f"Step 4 complete. Output saved to: {self.step4_dir}")
+        logger.info(f"Step 3 complete. Output saved to: {self.step3_dir}")
 
     def _extract_document_summary(self, document: DoclingDocument) -> str:
         """Extract a document-level context string from the body meta.
@@ -857,7 +777,7 @@ Examples:
   python perfs/agentic_rag_eval.py --config perfs/agentic_rag_eval_config.yaml --step 1
 
   # Override dataset path
-  python perfs/agentic_rag_eval.py --config perfs/agentic_rag_eval_config.yaml --step 2 --dataset /path/to/dataset
+  python perfs/agentic_rag_eval.py --config perfs/agentic_rag_eval_config.yaml --step 1 --dataset /path/to/dataset
         """,
     )
     parser.add_argument(
@@ -869,9 +789,9 @@ Examples:
     parser.add_argument(
         "--step",
         type=int,
-        choices=[1, 2, 3, 4],
+        choices=[1, 2, 3],
         required=True,
-        help="Which step to run (1: convert PDFs, 2: fix headings, 3: enrich, 4: evaluate)",
+        help="Which step to run (1: convert PDFs, 2: enrich, 3: evaluate)",
     )
     parser.add_argument(
         "--dataset",
@@ -888,7 +808,7 @@ Examples:
     parser.add_argument(
         "--page-level",
         action="store_true",
-        help="Use page-level summarization in Step 3 instead of element-level (default: False)",
+        help="Use page-level summarization in Step 2 instead of element-level (default: False)",
     )
     parser.add_argument(
         "--picture-description",
@@ -904,7 +824,7 @@ Examples:
         choices=["sentences", "keyphrases"],
         default=None,
         help=(
-            "Style for Step 3 enrichment: 'sentences' stores summaries in meta.summary; "
+            "Style for Step 2 enrichment: 'sentences' stores summaries in meta.summary; "
             "'keyphrases' stores keyword lists in meta.keywords (overrides config file)"
         ),
     )
@@ -913,9 +833,9 @@ Examples:
         choices=["batch", "tree"],
         default=None,
         help=(
-            "Step 4 page selector: 'batch' uses flat batch reasoning (ReasoningBasedPageSelector); "
+            "Step 3 page selector: 'batch' uses flat batch reasoning (ReasoningBasedPageSelector); "
             "'tree' uses hierarchical heading traversal (TreeGuidedPageSelector, "
-            "requires element-level step-3 enrichment) (overrides config file)"
+            "requires element-level step-2 enrichment) (overrides config file)"
         ),
     )
 
@@ -982,11 +902,9 @@ Examples:
     if args.step == 1:
         evaluator.step1_convert_pdfs_to_docling()
     elif args.step == 2:
-        evaluator.step2_fix_heading_levels()
+        evaluator.step2_enrich_with_summaries()
     elif args.step == 3:
-        evaluator.step3_enrich_with_summaries()
-    elif args.step == 4:
-        evaluator.step4_evaluate_rag()
+        evaluator.step3_evaluate_rag()
 
 
 if __name__ == "__main__":
