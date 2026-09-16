@@ -20,6 +20,7 @@ Usage:
 import argparse
 import json
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import Final, Literal
@@ -33,6 +34,7 @@ from docling.datamodel.pipeline_options import (
     ChartExtractionModelOptions,
     HeadingHierarchyOptions,
     NemotronOcrOptions,
+    OcrAutoOptions,
     PdfPipelineOptions,
     PictureDescriptionVlmEngineOptions,
     ThreadedPdfPipelineOptions,
@@ -106,8 +108,13 @@ def _create_document_converter(ocr_lang: str, chart_extraction: bool, picture_de
     pipeline_options.generate_page_images = True  # required for page images in .dclx archives
 
     pipeline_options.do_ocr = True
-    pipeline_options.allow_external_plugins = True
-    pipeline_options.ocr_options = NemotronOcrOptions(lang=ocr_lang)
+    if sys.platform == "linux":
+        # On Linux, enforce Nemotron OCR with the dataset language.
+        pipeline_options.allow_external_plugins = True
+        pipeline_options.ocr_options = NemotronOcrOptions(lang=[ocr_lang])
+    else:
+        # On other platforms (e.g. macOS) use automatic engine selection.
+        pipeline_options.ocr_options = OcrAutoOptions()
 
     # Set acceleration options
     if is_cuda:
