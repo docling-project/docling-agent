@@ -28,7 +28,7 @@ import pandas as pd
 import torch
 import yaml
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
-from docling.datamodel.base_models import InputFormat
+from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.pipeline_options import (
     ChartExtractionModelOptions,
     HeadingHierarchyOptions,
@@ -39,10 +39,8 @@ from docling.datamodel.pipeline_options import (
 )
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.pipeline.threaded_standard_pdf_pipeline import StandardPdfPipeline, ThreadedStandardPdfPipeline
-from docling_core.transforms.serializer.markdown import MarkdownParams
 from docling_core.types.doc.document import (
     DoclingDocument,
-    ImageRefMode,
 )
 from tqdm import tqdm
 
@@ -72,20 +70,6 @@ try:
 except ImportError:
     HAS_RANX = False
     logger.warning("ranx library not found. Install with: pip install ranx")
-
-
-MD_PARAMS: Final = MarkdownParams(
-    image_mode=ImageRefMode.PLACEHOLDER,
-    image_placeholder="",
-    escape_underscores=False,
-    escape_html=False,
-    compact_tables=True,
-    traverse_pictures=True,
-)
-
-
-# ReasoningBasedPageSelector and TreeGuidedPageSelector are imported from
-# docling_agent.agents (defined in docling_agent/agent/rag.py).
 
 # Datasets whose primary language is French.  All others default to English.
 _FRENCH_DATASETS: Final = frozenset(
@@ -238,26 +222,46 @@ class AgenticRAGEvaluator:
         logger.info(f"Setting up the conversion pipeline (OCR language: {ocr_lang!r})")
         converter = _create_document_converter(ocr_lang, self.chart_extraction, self.picture_description)
 
+        # Conversion summary counters
+        n_success = n_partial = n_failed = 0
+
         # Convert each PDF
         for pdf_path in tqdm(pdf_files, desc="Converting PDFs"):
+            # Skip metadata.csv if present
+            if pdf_path.stem == "metadata":
+                continue
+
+            output_path = self.step1_dir / f"{pdf_path.stem}.json"
+
+            # Skip if already converted
+            if output_path.exists():
+                logger.info(f"Skipping {pdf_path.name} (already converted)")
+                n_success += 1
+                continue
+
+            start_time = time.time()
             try:
-                # Skip metadata.csv if present
-                if pdf_path.stem == "metadata":
+                # Convert PDF to DoclingDocument (soft errors are captured in result.status)
+                result = converter.convert(pdf_path, raises_on_error=False)
+                elapsed = time.time() - start_time
+
+                if result.status == ConversionStatus.FAILURE:
+                    n_failed += 1
+                    logger.warning(f"Failed to convert {pdf_path.name} in {elapsed:.2f}s: status={result.status}")
                     continue
 
-                output_path = self.step1_dir / f"{pdf_path.stem}.json"
-
-                # Skip if already converted
-                if output_path.exists():
-                    logger.info(f"Skipping {pdf_path.name} (already converted)")
-                    continue
-
-                logger.info(f"Converting {pdf_path.name}...")
-                start_time = time.time()
-
-                # Convert PDF to DoclingDocument
-                result = converter.convert(pdf_path)
                 document = result.document
+                num_pages = len(document.pages)
+
+                if result.status == ConversionStatus.PARTIAL_SUCCESS:
+                    n_partial += 1
+                    logger.warning(
+                        f"Partial conversion of {pdf_path.name} in {elapsed:.2f}s "
+                        f"({num_pages} pages, status={result.status})"
+                    )
+                else:
+                    n_success += 1
+                    logger.info(f"Converted {pdf_path.name} in {elapsed:.2f}s ({num_pages} pages)")
 
                 # Hierarchize according to headings and validate the resulting tree.
                 document._hierarchize()
@@ -271,13 +275,17 @@ class AgenticRAGEvaluator:
                     page.image = None
                 document.save_as_json(output_path)
 
-                elapsed = time.time() - start_time
-                logger.info(f"Converted {pdf_path.name} in {elapsed:.2f}s ({len(document.pages)} pages)")
-
             except Exception as e:
-                logger.error(f"Failed to convert {pdf_path.name}: {e}", exc_info=True)
+                elapsed = time.time() - start_time
+                n_failed += 1
+                logger.error(f"Error converting {pdf_path.name} in {elapsed:.2f}s: {e}", exc_info=True)
 
-        logger.info(f"Step 1 complete. Output saved to: {self.step1_dir}")
+        total = n_success + n_partial + n_failed
+        logger.info(
+            f"Step 1 complete — {total} files: "
+            f"{n_success} succeeded, {n_partial} partial, {n_failed} failed. "
+            f"Output saved to: {self.step1_dir}"
+        )
 
     def step2_enrich_with_summaries(self) -> None:
         """Step 2: Enrich documents with AI-generated summaries.
