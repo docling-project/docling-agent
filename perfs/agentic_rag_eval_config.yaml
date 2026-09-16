@@ -26,17 +26,23 @@ picture_description: false
 # available locally. Only useful if the dataset contains data charts or graphs.
 chart_extraction: false
 
-# Summarization style for Step 3 (default: sentences)
+# Use Nemotron OCR engine during PDF conversion in Step 1 (default: false)
+# When true, replaces the default OCR backend with Nemotron OCR, which provides
+# higher-quality text extraction for English documents.
+# Requires the nemotron-ocr model artifacts to be available locally.
+nemotron_ocr: false
+
+# Summarization style for Step 2 (default: sentences)
 # - sentences: Full-sentence summaries stored in meta.summary (SummaryMetaField)
 # - keyphrases: Keyword/keyphrase lists stored in meta.keywords (KeywordsMetaField)
 summarization_style: sentences
 
-# Step 4 page selector algorithm (default: batch)
-# - batch: ReasoningBasedPageSelector — evaluates pages in flat batches (works with page-level or element-level step 3)
-# - tree: TreeGuidedPageSelector — navigates the heading hierarchy (requires element-level step 3 enrichment)
+# Step 3 page selector algorithm (default: batch)
+# - batch: ReasoningBasedPageSelector — evaluates pages in flat batches (works with page-level or element-level step 2)
+# - tree: TreeGuidedPageSelector — navigates the heading hierarchy (requires element-level step 2 enrichment)
 selector_algorithm: batch
 
-# Evaluation parameters for Step 4
+# Evaluation parameters for Step 3
 evaluation:
   # Maximum number of pages to retrieve per query (for NDCG@K metric)
   top_k: 10
@@ -71,7 +77,7 @@ backend:
   # Model configuration for different tasks
   models:
     # Model for reasoning tasks (planning, analysis, decision-making)
-    # Used by: DoclingEditingAgent, ReasoningBasedPageSelector
+    # Used by: ReasoningBasedPageSelector
     reasoning: qwen2.5-7b-instruct-gguf
 
     # Model for writing tasks (content generation, summarization)
