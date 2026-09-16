@@ -30,6 +30,7 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
     ChartExtractionModelOptions,
     HeadingHierarchyOptions,
+    NemotronOcrOptions,
     PdfPipelineOptions,
     PictureDescriptionVlmEngineOptions,
 )
@@ -94,6 +95,7 @@ class AgenticRAGEvaluator:
         page_level: bool = False,
         picture_description: bool = False,
         chart_extraction: bool = False,
+        nemotron_ocr: bool = False,
         summarization_style: Literal["sentences", "keyphrases"] = "sentences",
         selector_algorithm: Literal["batch", "tree"] = "batch",
         eval_top_k: int = 10,
@@ -115,6 +117,9 @@ class AgenticRAGEvaluator:
                 the Granite Vision v4 model. Produces CSV data and a natural-language
                 summary for each detected chart. Enabling this significantly increases
                 Step 1 processing time and requires a VLM. (default: False)
+            nemotron_ocr: Whether to use the Nemotron OCR engine instead of the default
+                OCR backend. Recommended for high-quality OCR on English documents.
+                Requires the nemotron-ocr model artifacts to be available. (default: False)
             summarization_style: "sentences" stores summaries in meta.summary;
                                  "keyphrases" stores keyword lists in meta.keywords (default: "sentences")
             selector_algorithm: "batch" uses ReasoningBasedPageSelector (flat page batches);
@@ -131,6 +136,7 @@ class AgenticRAGEvaluator:
         self.page_level = page_level
         self.picture_description = picture_description
         self.chart_extraction = chart_extraction
+        self.nemotron_ocr = nemotron_ocr
         self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
         self.selector_algorithm: Literal["batch", "tree"] = selector_algorithm
         self.eval_top_k = eval_top_k
@@ -182,6 +188,9 @@ class AgenticRAGEvaluator:
             logger.info("Chart extraction enabled — loading Granite Vision v4 model (this may take a moment)...")
             pdf_options.do_chart_extraction = True
             pdf_options.chart_extraction_options = ChartExtractionModelOptions(chart2summary=True)
+        if self.nemotron_ocr:
+            logger.info("Nemotron OCR enabled...")
+            pdf_options.ocr_options = NemotronOcrOptions()
         converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)})
 
         # Convert each PDF
@@ -840,6 +849,15 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--nemotron-ocr",
+        action="store_true",
+        help=(
+            "Use Nemotron OCR engine in Step 1 instead of the default OCR backend. "
+            "Requires nemotron-ocr model artifacts to be available. "
+            "Overrides config file. (default: False)"
+        ),
+    )
+    parser.add_argument(
         "--summarization-style",
         choices=["sentences", "keyphrases"],
         default=None,
@@ -887,6 +905,9 @@ Examples:
     # Get chart-extraction flag (command line overrides config)
     chart_extraction = args.chart_extraction or config.get("chart_extraction", False)
 
+    # Get nemotron-ocr flag (command line overrides config)
+    nemotron_ocr = args.nemotron_ocr or config.get("nemotron_ocr", False)
+
     # Get summarization style (command line overrides config); validate and narrow the type
     _style_raw = args.summarization_style or config.get("summarization_style", "sentences")
     if _style_raw not in ("sentences", "keyphrases"):
@@ -914,6 +935,7 @@ Examples:
         page_level=page_level,
         picture_description=picture_description,
         chart_extraction=chart_extraction,
+        nemotron_ocr=nemotron_ocr,
         summarization_style=summarization_style,
         selector_algorithm=selector_algorithm,
         eval_top_k=eval_top_k,
