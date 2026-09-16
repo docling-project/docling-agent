@@ -26,11 +26,6 @@ picture_description: false
 # available locally. Only useful if the dataset contains data charts or graphs.
 chart_extraction: false
 
-# Use Nemotron OCR engine during PDF conversion in Step 1 (default: false)
-# When true, replaces the default OCR backend with Nemotron OCR, which provides
-# higher-quality text extraction for English documents.
-# Requires the nemotron-ocr model artifacts to be available locally.
-nemotron_ocr: false
 
 # Summarization style for Step 2 (default: sentences)
 # - sentences: Full-sentence summaries stored in meta.summary (SummaryMetaField)
