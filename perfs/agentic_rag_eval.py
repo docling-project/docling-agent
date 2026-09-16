@@ -25,7 +25,9 @@ from pathlib import Path
 from typing import Final, Literal
 
 import pandas as pd
+import torch
 import yaml
+from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
     ChartExtractionModelOptions,
@@ -33,8 +35,10 @@ from docling.datamodel.pipeline_options import (
     NemotronOcrOptions,
     PdfPipelineOptions,
     PictureDescriptionVlmEngineOptions,
+    ThreadedPdfPipelineOptions,
 )
 from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.pipeline.threaded_standard_pdf_pipeline import StandardPdfPipeline, ThreadedStandardPdfPipeline
 from docling_core.transforms.serializer.markdown import MarkdownParams
 from docling_core.types.doc.document import (
     DoclingDocument,
@@ -82,6 +86,62 @@ MD_PARAMS: Final = MarkdownParams(
 
 # ReasoningBasedPageSelector and TreeGuidedPageSelector are imported from
 # docling_agent.agents (defined in docling_agent/agent/rag.py).
+
+# Datasets whose primary language is French.  All others default to English.
+_FRENCH_DATASETS: Final = frozenset(
+    [
+        "vidore_v3_energy",
+        "vidore_v3_finance_fr",
+        "vidore_v3_physics",
+    ]
+)
+
+
+def _ocr_lang_for_dataset(dataset_path: Path) -> str:
+    """Return the Nemotron OCR language code for a ViDoRe V3 dataset.
+
+    Inspects the dataset directory name to determine the document language.
+    French datasets use `iso:fr`; everything else defaults to `english`.
+
+    Args:
+        dataset_path: Path to the ViDoRe dataset root directory.
+
+    Returns:
+        A Nemotron OCR language string (`"english"` or `"iso:fr"`).
+    """
+    return "iso:fr" if dataset_path.name in _FRENCH_DATASETS else "english"
+
+
+def _create_document_converter(ocr_lang: str, chart_extraction: bool, picture_description: bool) -> DocumentConverter:
+    """Create a DocumentConverter."""
+    is_cuda: bool = torch.cuda.is_available()
+    pipeline_cls: type = ThreadedStandardPdfPipeline if is_cuda else StandardPdfPipeline
+    pipeline_options = ThreadedPdfPipelineOptions() if is_cuda else PdfPipelineOptions()
+    pipeline_options.heading_hierarchy_options = HeadingHierarchyOptions(enabled=True)
+    pipeline_options.generate_parsed_pages = True  # only needed for the style fallback
+
+    pipeline_options.do_ocr = True
+    pipeline_options.allow_external_plugins = True
+    pipeline_options.ocr_options = NemotronOcrOptions(lang=ocr_lang)
+
+    # Set acceleration options
+    if is_cuda:
+        pipeline_options.accelerator_options = AcceleratorOptions(device=AcceleratorDevice.CUDA)
+        pipeline_options.ocr_batch_size = 16
+        pipeline_options.layout_batch_size = 64
+        pipeline_options.table_batch_size = 64
+
+    # Set enrichments
+    if picture_description:
+        pipeline_options.do_picture_description = True
+        pipeline_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset("granite_vision")
+    if chart_extraction:
+        pipeline_options.do_chart_extraction = True
+        pipeline_options.chart_extraction_options = ChartExtractionModelOptions(chart2summary=True)
+
+    return DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_cls=pipeline_cls, pipeline_options=pipeline_options)}
+    )
 
 
 class AgenticRAGEvaluator:
@@ -172,19 +232,10 @@ class AgenticRAGEvaluator:
         pdf_files = sorted(self.pdfs_dir.glob("*.pdf"))
         logger.info(f"Found {len(pdf_files)} PDF files to convert")
 
-        # Enable native heading-level detection so the PDF pipeline assigns
-        # correct hierarchical levels (H1/H2/…) without a separate LLM step.
-        pdf_options = PdfPipelineOptions(heading_hierarchy_options=HeadingHierarchyOptions(enabled=True))
-        if self.picture_description:
-            logger.info("Picture description enabled — loading Granite vision model (this may take a moment)...")
-            pdf_options.do_picture_description = True
-            pdf_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset("granite_vision")
-        if self.chart_extraction:
-            logger.info("Chart extraction enabled — loading Granite Vision v4 model (this may take a moment)...")
-            pdf_options.do_chart_extraction = True
-            pdf_options.chart_extraction_options = ChartExtractionModelOptions(chart2summary=True)
-        pdf_options.ocr_options = NemotronOcrOptions()
-        converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)})
+        # Get the converter — language is inferred from the dataset directory name.
+        ocr_lang = _ocr_lang_for_dataset(self.dataset_path)
+        logger.info(f"Setting up the conversion pipeline (OCR language: {ocr_lang!r})")
+        converter = _create_document_converter(ocr_lang, self.chart_extraction, self.picture_description)
 
         # Convert each PDF
         for pdf_path in tqdm(pdf_files, desc="Converting PDFs"):
