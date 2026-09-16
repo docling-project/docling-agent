@@ -119,6 +119,7 @@ def _create_document_converter(ocr_lang: str, chart_extraction: bool, picture_de
     pipeline_options = ThreadedPdfPipelineOptions() if is_cuda else PdfPipelineOptions()
     pipeline_options.heading_hierarchy_options = HeadingHierarchyOptions(enabled=True)
     pipeline_options.generate_parsed_pages = True  # only needed for the style fallback
+    pipeline_options.generate_page_images = True  # required for page images in .dclx archives
 
     pipeline_options.do_ocr = True
     pipeline_options.allow_external_plugins = True
@@ -262,7 +263,12 @@ class AgenticRAGEvaluator:
                 document._hierarchize()
                 document.validate_tree(document.body, raise_on_error=True)
 
-                # Save as JSON
+                # Save DocLang archive first (.dclx) — page images are included.
+                document.save_as_doclang_archive(output_path.with_suffix(".dclx"))
+
+                # Strip page images before saving JSON to keep it lightweight.
+                for page in document.pages.values():
+                    page.image = None
                 document.save_as_json(output_path)
 
                 elapsed = time.time() - start_time
