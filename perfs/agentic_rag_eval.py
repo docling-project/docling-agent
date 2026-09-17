@@ -254,7 +254,10 @@ class AgenticRAGEvaluator:
 
                 if result.status == ConversionStatus.FAILURE:
                     n_failed += 1
-                    logger.warning(f"Failed to convert {pdf_path.name} in {elapsed:.2f}s: status={result.status}")
+                    errors = "; ".join(str(e) for e in result.errors) if result.errors else "no error details"
+                    logger.warning(
+                        f"Failed to convert {pdf_path.name} in {elapsed:.2f}s: status={result.status} | {errors}"
+                    )
                     continue
 
                 document = result.document
