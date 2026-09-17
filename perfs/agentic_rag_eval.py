@@ -124,6 +124,7 @@ def _create_document_converter(ocr_lang: str, chart_extraction: bool, picture_de
         pipeline_options.table_batch_size = 64
 
     # Set enrichments
+    pipeline_options.do_picture_classification = False
     if picture_description:
         pipeline_options.do_picture_description = True
         pipeline_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset("granite_vision")
@@ -194,10 +195,11 @@ class AgenticRAGEvaluator:
         # Create backend instance
         self.backend = create_backend(backend_config)
 
-        # Define output directories for each step
-        self.step1_dir = self.output_base_dir / "step1_converted"
-        self.step2_dir = self.output_base_dir / "step2_enriched"
-        self.step3_dir = self.output_base_dir / "step3_evaluation"
+        # Define output directories for each step, namespaced by dataset name
+        dataset_name = Path(dataset_path).name
+        self.step1_dir = self.output_base_dir / "step1_converted" / dataset_name
+        self.step2_dir = self.output_base_dir / "step2_enriched" / dataset_name
+        self.step3_dir = self.output_base_dir / "step3_evaluation" / dataset_name
 
         # Input directories from dataset
         self.pdfs_dir = self.dataset_path / "pdfs"
