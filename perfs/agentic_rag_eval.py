@@ -31,7 +31,7 @@ import yaml
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.pipeline_options import (
-    ChartExtractionModelOptions,
+    ChartExtractionVlmEngineOptions,
     HeadingHierarchyOptions,
     NemotronOcrOptions,
     OcrAutoOptions,
@@ -130,7 +130,11 @@ def _create_document_converter(ocr_lang: str, chart_extraction: bool, picture_de
         pipeline_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset("granite_vision")
     if chart_extraction:
         pipeline_options.do_chart_extraction = True
-        pipeline_options.chart_extraction_options = ChartExtractionModelOptions(chart2summary=True)
+        pipeline_options.chart_extraction_options = ChartExtractionVlmEngineOptions.from_preset(
+            "granite_vision_v4",
+            chart2csv=False,
+            chart2summary=True,
+        )
 
     return DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_cls=pipeline_cls, pipeline_options=pipeline_options)}
@@ -166,8 +170,8 @@ class AgenticRAGEvaluator:
                 using the default Granite vision model. Enabling this significantly
                 increases Step 1 processing time and requires a VLM. (default: False)
             chart_extraction: Whether to run chart extraction during PDF conversion using
-                the Granite Vision v4 model. Produces CSV data and a natural-language
-                summary for each detected chart. Enabling this significantly increases
+                the Granite Vision v4 model. Produces a natural-language description
+                for each detected chart. Enabling this significantly increases
                 Step 1 processing time and requires a VLM. (default: False)
             summarization_style: "sentences" stores summaries in meta.summary;
                                  "keyphrases" stores keyword lists in meta.keywords (default: "sentences")
@@ -914,7 +918,7 @@ Examples:
         action="store_true",
         help=(
             "Enable chart extraction in Step 1 using the Granite Vision v4 model. "
-            "Produces CSV data and a natural-language summary for each detected chart. "
+            "Produces a natural-language description for each detected chart. "
             "Significantly increases conversion time. Overrides config file. (default: False)"
         ),
     )
