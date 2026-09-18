@@ -39,6 +39,9 @@ from docling.datamodel.pipeline_options import (
     PictureDescriptionVlmEngineOptions,
     ThreadedPdfPipelineOptions,
 )
+from docling.datamodel.vlm_engine_options import (
+    AutoInlineVlmEngineOptions,
+)
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.pipeline.threaded_standard_pdf_pipeline import StandardPdfPipeline, ThreadedStandardPdfPipeline
 from docling_core.types.doc.document import (
@@ -127,9 +130,14 @@ def _create_document_converter(ocr_lang: str, chart_extraction: bool, picture_de
     pipeline_options.do_picture_classification = False
     if picture_description:
         pipeline_options.do_picture_description = True
-        pipeline_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset(
-            "granite_vision",
-            prompt="Describe this image in a few sentences.",
+        prompt = "Describe this image in a few sentences."
+        model_spec = ChartExtractionVlmEngineOptions.get_preset("granite_vision_v4").model_spec.model_copy(
+            update={"prompt": prompt}
+        )
+        pipeline_options.picture_description_options = PictureDescriptionVlmEngineOptions(
+            model_spec=model_spec,
+            engine_options=AutoInlineVlmEngineOptions(),
+            prompt=prompt,
         )
     if chart_extraction:
         pipeline_options.do_chart_extraction = True
@@ -170,7 +178,7 @@ class AgenticRAGEvaluator:
             backend_config: Backend configuration for LLM inference
             page_level: Whether to use page-level summarization (default: False)
             picture_description: Whether to run picture description during PDF conversion
-                using the default Granite vision model. Enabling this significantly
+                using the Granite Vision model. Enabling this significantly
                 increases Step 1 processing time and requires a VLM. (default: False)
             chart_extraction: Whether to run chart extraction during PDF conversion using
                 the Granite Vision v4 model. Produces a natural-language description
@@ -911,8 +919,8 @@ Examples:
         "--picture-description",
         action="store_true",
         help=(
-            "Enable picture description in Step 1 using the Granite vision model "
-            "(ibm-granite/granite-vision-3.3-2b). Significantly increases conversion time. "
+            "Enable picture description in Step 1 using the Granite Vision model "
+            "(ibm-granite/granite-vision-4.1-4b). Significantly increases conversion time. "
             "Overrides config file. (default: False)"
         ),
     )
