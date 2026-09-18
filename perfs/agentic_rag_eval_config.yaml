@@ -14,7 +14,7 @@ output: ./scratch/agentic_rag_eval
 page_level: false
 
 # Enable picture description during PDF conversion in Step 1 (default: false)
-# When true, every image is captioned by ibm-granite/granite-vision-3.3-2b.
+# When true, every image is captioned by ibm-granite/granite-vision-4.1-4b.
 # This significantly increases Step 1 processing time and requires a VLM to be
 # available locally. Only useful if the dataset contains information-rich figures.
 picture_description: false
