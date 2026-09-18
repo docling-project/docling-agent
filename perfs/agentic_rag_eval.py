@@ -127,7 +127,10 @@ def _create_document_converter(ocr_lang: str, chart_extraction: bool, picture_de
     pipeline_options.do_picture_classification = False
     if picture_description:
         pipeline_options.do_picture_description = True
-        pipeline_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset("granite_vision")
+        pipeline_options.picture_description_options = PictureDescriptionVlmEngineOptions.from_preset(
+            "granite_vision",
+            prompt="Describe this image in a few sentences.",
+        )
     if chart_extraction:
         pipeline_options.do_chart_extraction = True
         pipeline_options.chart_extraction_options = ChartExtractionVlmEngineOptions.from_preset(
