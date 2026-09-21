@@ -346,7 +346,7 @@ Return no extra commentary. Include all operations that are materially requested
             threshold = min(min_text_length, 40)
 
         if should_enrich:
-            if not (node.meta and hasattr(node.meta, meta_attr) and getattr(node.meta, meta_attr)):
+            if not (node.meta and getattr(node.meta, meta_attr, None)):
                 text = collect_subtree_text(node, doc)
                 if len(text) >= threshold:
                     result = generate_fn(m=m, text=text, loop_budget=loop_budget)
@@ -383,7 +383,7 @@ Return no extra commentary. Include all operations that are materially requested
     ) -> None:
         """Generic method to enrich leaf items (tables, pictures) with metadata."""
         for item, _ in document.iterate_items():
-            if item.meta and hasattr(item.meta, meta_attr) and getattr(item.meta, meta_attr):
+            if item.meta and getattr(item.meta, meta_attr, None):
                 continue
             if isinstance(item, TableItem):
                 html = serialize_table_to_html(table=item, doc=document)
@@ -397,7 +397,9 @@ Return no extra commentary. Include all operations that are materially requested
                         item.meta = FloatingMeta()
                     set_meta_fn(item.meta, result)
             elif isinstance(item, PictureItem):
-                captions = [c.resolve(document).text for c in item.captions if hasattr(c.resolve(document), "text")]
+                captions = [
+                    c.resolve(document).text for c in item.captions if isinstance(c.resolve(document), TextItem)
+                ]
                 text = " ".join(captions)
                 result = generate_fn(m=m, text=text, loop_budget=loop_budget) if text else None
                 if result:
@@ -1006,8 +1008,8 @@ Return no extra commentary. Include all operations that are materially requested
             threshold = min(min_text_length, 40)
 
         if should_enrich:
-            already_has_summary = node.meta and hasattr(node.meta, "summary") and node.meta.summary
-            already_has_keywords = node.meta and hasattr(node.meta, "keywords") and node.meta.keywords
+            already_has_summary = node.meta is not None and node.meta.summary is not None
+            already_has_keywords = node.meta is not None and node.meta.keywords is not None
             if not (already_has_summary and already_has_keywords):
                 text = collect_subtree_text(node, doc)
                 if len(text) >= threshold:
@@ -1042,8 +1044,8 @@ Return no extra commentary. Include all operations that are materially requested
     ) -> None:
         """Set both ``meta.summary`` and ``meta.keywords`` on leaf items (tables, pictures)."""
         for item, _ in document.iterate_items():
-            already_has_summary = item.meta and hasattr(item.meta, "summary") and item.meta.summary
-            already_has_keywords = item.meta and hasattr(item.meta, "keywords") and item.meta.keywords
+            already_has_summary = item.meta is not None and item.meta.summary is not None
+            already_has_keywords = item.meta is not None and item.meta.keywords is not None
             if already_has_summary and already_has_keywords:
                 continue
 
@@ -1051,7 +1053,9 @@ Return no extra commentary. Include all operations that are materially requested
             if isinstance(item, TableItem):
                 text = f"HTML table:\n{serialize_table_to_html(table=item, doc=document)}"
             elif isinstance(item, PictureItem):
-                captions = [c.resolve(document).text for c in item.captions if hasattr(c.resolve(document), "text")]
+                captions = [
+                    c.resolve(document).text for c in item.captions if isinstance(c.resolve(document), TextItem)
+                ]
                 text = " ".join(captions) or None
 
             if not text:
@@ -1235,7 +1239,7 @@ Return no extra commentary. Include all operations that are materially requested
             )
 
         for item, _ in document.iterate_items():
-            if item.meta and getattr(item.meta, "entities", None):
+            if item.meta is not None and item.meta.entities:
                 continue
 
             if isinstance(item, TextItem):
@@ -1245,7 +1249,9 @@ Return no extra commentary. Include all operations that are materially requested
             elif isinstance(item, TableItem):
                 text = serialize_table_to_html(table=item, doc=document)
             elif isinstance(item, PictureItem):
-                captions = [c.resolve(document).text for c in item.captions if hasattr(c.resolve(document), "text")]
+                captions = [
+                    c.resolve(document).text for c in item.captions if isinstance(c.resolve(document), TextItem)
+                ]
                 text = " ".join(captions)
             else:
                 continue
@@ -1464,7 +1470,7 @@ Return no extra commentary. Include all operations that are materially requested
         if isinstance(item.meta, PictureMeta):
             return item.meta
 
-        summary = item.meta.summary if item.meta and getattr(item.meta, "summary", None) else None
+        summary = item.meta.summary if item.meta is not None else None
         item.meta = PictureMeta(summary=summary)
         return item.meta
 
@@ -1474,7 +1480,7 @@ Return no extra commentary. Include all operations that are materially requested
         if item.meta and item.meta.summary and item.meta.summary.text:
             parts.append(f"Summary: {item.meta.summary.text}")
 
-        captions = [c.resolve(document).text for c in item.captions if hasattr(c.resolve(document), "text")]
+        captions = [c.resolve(document).text for c in item.captions if isinstance(c.resolve(document), TextItem)]
         if captions:
             parts.append("Captions:\n" + "\n".join(f"- {caption}" for caption in captions))
 

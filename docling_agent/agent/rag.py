@@ -1092,12 +1092,12 @@ If no pages are relevant, respond with "No relevant pages."
         page_data: dict[int, str] = {}
 
         for item, _ in document.iterate_items():
-            if not (hasattr(item, "prov") and item.prov):
+            if not isinstance(item, DocItem) or not item.prov:
                 continue
             page_no = item.prov[0].page_no
             if page_no in page_data:
                 continue
-            if not (hasattr(item, "meta") and item.meta):
+            if item.meta is None:
                 continue
 
             text: str | None = None
@@ -1109,7 +1109,7 @@ If no pages are relevant, respond with "No relevant pages."
                         values = kw_data.get("values", [])
                         if values:
                             text = "; ".join(str(v) for v in values)
-                elif hasattr(item.meta, "keywords") and item.meta.keywords:
+                elif item.meta.keywords is not None:
                     kw_values = item.meta.keywords.values
                     if kw_values:
                         text = "; ".join(str(v) for v in kw_values)
@@ -1122,11 +1122,8 @@ If no pages are relevant, respond with "No relevant pages."
                         s = summary_data.get("text") or None
                         if s:
                             parts.append(s)
-                elif hasattr(item.meta, "summary") and item.meta.summary:
-                    summary_obj = item.meta.summary
-                    s = getattr(summary_obj, "text", None)
-                    if s:
-                        parts.append(s)
+                elif item.meta.summary is not None and item.meta.summary.text:
+                    parts.append(item.meta.summary.text)
                 # keywords part
                 if isinstance(item.meta, dict):
                     kw_data = item.meta.get("keywords", {})
@@ -1134,7 +1131,7 @@ If no pages are relevant, respond with "No relevant pages."
                         values = kw_data.get("values", [])
                         if values:
                             parts.append("; ".join(str(v) for v in values))
-                elif hasattr(item.meta, "keywords") and item.meta.keywords:
+                elif item.meta.keywords is not None:
                     kw_values = item.meta.keywords.values
                     if kw_values:
                         parts.append("; ".join(str(v) for v in kw_values))
@@ -1145,10 +1142,8 @@ If no pages are relevant, respond with "No relevant pages."
                     summary_data = item.meta.get("summary", {})
                     if isinstance(summary_data, dict):
                         text = summary_data.get("text") or None
-                elif hasattr(item.meta, "summary") and item.meta.summary:
-                    summary_obj = item.meta.summary
-                    if hasattr(summary_obj, "text"):
-                        text = summary_obj.text or None
+                elif item.meta.summary is not None:
+                    text = item.meta.summary.text or None
 
             if text:
                 page_data[page_no] = text
@@ -1476,7 +1471,7 @@ class TreeGuidedPageSelector:
 
     def _get_enrichment_text(self, item: NodeItem) -> str | None:
         """Return the enrichment string for a heading item, or ``None`` if absent."""
-        if not (hasattr(item, "meta") and item.meta):
+        if item.meta is None:
             return None
         if self.summarization_style == "keyphrases":
             if isinstance(item.meta, dict):
@@ -1485,7 +1480,7 @@ class TreeGuidedPageSelector:
                     values = kw_data.get("values", [])
                     if values:
                         return "; ".join(str(v) for v in values)
-            elif hasattr(item.meta, "keywords") and item.meta.keywords:
+            elif item.meta.keywords is not None:
                 kw_values = item.meta.keywords.values
                 if kw_values:
                     return "; ".join(str(v) for v in kw_values)
@@ -1503,11 +1498,9 @@ class TreeGuidedPageSelector:
                     if values:
                         parts.append("; ".join(str(v) for v in values))
             else:
-                if hasattr(item.meta, "summary") and item.meta.summary:
-                    s = getattr(item.meta.summary, "text", None)
-                    if s:
-                        parts.append(s)
-                if hasattr(item.meta, "keywords") and item.meta.keywords:
+                if item.meta.summary is not None and item.meta.summary.text:
+                    parts.append(item.meta.summary.text)
+                if item.meta.keywords is not None:
                     kw_values = item.meta.keywords.values
                     if kw_values:
                         parts.append("; ".join(str(v) for v in kw_values))
@@ -1517,10 +1510,8 @@ class TreeGuidedPageSelector:
                 summary_data = item.meta.get("summary", {})
                 if isinstance(summary_data, dict):
                     return summary_data.get("text") or None
-            elif hasattr(item.meta, "summary") and item.meta.summary:
-                text = getattr(item.meta.summary, "text", None)
-                if text:
-                    return text
+            elif item.meta.summary is not None:
+                return item.meta.summary.text or None
         return None
 
     def _get_heading_nodes(
