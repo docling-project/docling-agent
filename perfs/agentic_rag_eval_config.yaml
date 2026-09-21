@@ -27,10 +27,12 @@ picture_description: false
 chart_extraction: false
 
 
-# Summarization style for Step 2 (default: sentences)
+# Summarization style for Step 2 (default: full)
 # - sentences: Full-sentence summaries stored in meta.summary (SummaryMetaField)
 # - keyphrases: Keyword/keyphrase lists stored in meta.keywords (KeywordsMetaField)
-summarization_style: sentences
+# - full: Both prose summaries and keyword lists generated in a single inference call
+#         per element; results stored in meta.summary AND meta.keywords simultaneously
+summarization_style: full
 
 # Step 3 page selector algorithm (default: batch)
 # - batch: ReasoningBasedPageSelector — evaluates pages in flat batches (works with page-level or element-level step 2)

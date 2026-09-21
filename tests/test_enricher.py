@@ -285,8 +285,9 @@ def test_generate_document_level_summary(monkeypatch, test_document, enricher, m
     assert summary == "Document-level summary from first pages."
 
 
-def test_summarize_pages(monkeypatch, test_document, enricher):
-    """Regression test for _summarize_pages function."""
+def test_summarize_pages_sentences(monkeypatch, test_document, enricher):
+    """Regression test for _summarize_pages with style='sentences'."""
+    import copy
 
     def _fake_generate_summary(self, *, m, text, loop_budget=5, scope="section"):
         if scope == "document":
@@ -295,10 +296,9 @@ def test_summarize_pages(monkeypatch, test_document, enricher):
 
     monkeypatch.setattr(DoclingEnrichingAgent, "_generate_summary", _fake_generate_summary)
 
-    document = test_document
+    document = copy.deepcopy(test_document)
 
-    # Test page summarization
-    result_doc = enricher._summarize_pages(document=document)
+    result_doc = enricher._summarize_pages(document=document, style="sentences")
 
     # Verify document-level summary was added to body
     assert result_doc.body.meta is not None
@@ -316,8 +316,80 @@ def test_summarize_pages(monkeypatch, test_document, enricher):
         except StopIteration:
             continue
 
-    # At least some pages should have summaries
     assert pages_with_summaries > 0
+
+
+def test_summarize_pages_full(monkeypatch, test_document, enricher):
+    """Regression test for _summarize_pages with the default style='full'."""
+    import copy
+
+    def _fake_generate_summary_and_keywords(self, *, m, text, loop_budget=5, scope="section"):
+        return "Page summary.", ["keyword1", "keyword2", "keyword3"]
+
+    def _fake_generate_summary(self, *, m, text, loop_budget=5, scope="section"):
+        # Called only for the document-level summary (_generate_document_level_summary)
+        return "Overall document summary."
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_summary_and_keywords", _fake_generate_summary_and_keywords)
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_summary", _fake_generate_summary)
+
+    document = copy.deepcopy(test_document)
+
+    result_doc = enricher._summarize_pages(document=document)  # default style="full"
+
+    # Verify document-level summary was added to body
+    assert result_doc.body.meta is not None
+    assert result_doc.body.meta.summary is not None
+    assert result_doc.body.meta.summary.text == "Overall document summary."
+
+    # Verify page-level summaries AND keywords were added
+    pages_with_summaries = 0
+    pages_with_keywords = 0
+    for page_no in document.pages.keys():
+        try:
+            first_item, _ = next(iter(document.iterate_items(traverse_pictures=True, page_no=page_no)))
+            if hasattr(first_item, "meta") and first_item.meta:
+                if first_item.meta.summary:
+                    pages_with_summaries += 1
+                    assert first_item.meta.summary.text == "Page summary."
+                if first_item.meta.keywords:
+                    pages_with_keywords += 1
+                    assert first_item.meta.keywords.values == ["keyword1", "keyword2", "keyword3"]
+        except StopIteration:
+            continue
+
+    assert pages_with_summaries > 0
+    assert pages_with_keywords > 0
+
+
+def test_summarize_pages_keyphrases(monkeypatch, test_document, enricher):
+    """Regression test for _summarize_pages with style='keyphrases'."""
+    import copy
+
+    def _fake_generate_keywords(self, *, m, text, loop_budget=5):
+        return ["kw1", "kw2", "kw3"]
+
+    monkeypatch.setattr(DoclingEnrichingAgent, "_generate_keywords", _fake_generate_keywords)
+
+    document = copy.deepcopy(test_document)
+
+    result_doc = enricher._summarize_pages(document=document, style="keyphrases")
+
+    # No document-level summary for keyphrases style
+    body_has_summary = result_doc.body.meta is not None and result_doc.body.meta.summary is not None
+    assert not body_has_summary
+
+    pages_with_keywords = 0
+    for page_no in document.pages.keys():
+        try:
+            first_item, _ = next(iter(document.iterate_items(traverse_pictures=True, page_no=page_no)))
+            if hasattr(first_item, "meta") and first_item.meta and first_item.meta.keywords:
+                pages_with_keywords += 1
+                assert first_item.meta.keywords.values == ["kw1", "kw2", "kw3"]
+        except StopIteration:
+            continue
+
+    assert pages_with_keywords > 0
 
 
 def test_parse_spec_dict_with_find_json_dicts(enricher: DoclingEnrichingAgent) -> None:

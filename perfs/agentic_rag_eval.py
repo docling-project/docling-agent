@@ -163,7 +163,7 @@ class AgenticRAGEvaluator:
         page_level: bool = False,
         picture_description: bool = False,
         chart_extraction: bool = False,
-        summarization_style: Literal["sentences", "keyphrases"] = "sentences",
+        summarization_style: Literal["sentences", "keyphrases", "full"] = "full",
         selector_algorithm: Literal["batch", "tree"] = "batch",
         eval_top_k: int = 10,
         eval_batch_size: int = 30,
@@ -184,8 +184,9 @@ class AgenticRAGEvaluator:
                 the Granite Vision v4 model. Produces a natural-language description
                 for each detected chart. Enabling this significantly increases
                 Step 1 processing time and requires a VLM. (default: False)
-            summarization_style: "sentences" stores summaries in meta.summary;
-                                 "keyphrases" stores keyword lists in meta.keywords (default: "sentences")
+            summarization_style: ``"sentences"`` stores prose summaries in ``meta.summary``;
+                                 ``"keyphrases"`` stores keyword lists in ``meta.keywords``;
+                                 ``"full"`` stores both in a single inference call (default: ``"full"``)
             selector_algorithm: "batch" uses ReasoningBasedPageSelector (flat page batches);
                                  "tree" uses TreeGuidedPageSelector (hierarchical heading traversal,
                                  requires element-level step-2 enrichment) (default: "batch")
@@ -200,7 +201,7 @@ class AgenticRAGEvaluator:
         self.page_level = page_level
         self.picture_description = picture_description
         self.chart_extraction = chart_extraction
-        self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
+        self.summarization_style: Literal["sentences", "keyphrases", "full"] = summarization_style
         self.selector_algorithm: Literal["batch", "tree"] = selector_algorithm
         self.eval_top_k = eval_top_k
         self.eval_batch_size = eval_batch_size
@@ -364,6 +365,9 @@ class AgenticRAGEvaluator:
                 if self.summarization_style == "keyphrases":
                     # Extract keyphrases into meta.keywords for each element
                     document = agent._find_search_keywords(document=document)
+                elif self.summarization_style == "full":
+                    # Generate both summaries and keywords in a single pass
+                    document = agent._summarize_and_keyword_items(document=document)
                 else:
                     # Generate sentence summaries into meta.summary for each element
                     document = agent._summarize_items(document=document)
@@ -808,10 +812,13 @@ class AgenticRAGEvaluator:
     def _extract_document_summary(self, document: DoclingDocument) -> str:
         """Extract a document-level context string from the body meta.
 
-        For style="sentences" this is the prose summary stored in ``body.meta.summary``.
-        For style="keyphrases" there is no document-level summary (only page-level
-        keywords), so the method falls back to assembling a short string from
-        ``body.meta.keywords`` when present, and returns an empty string otherwise.
+        For ``"sentences"`` and ``"full"`` styles this is the prose summary stored in
+        ``body.meta.summary``.  For ``"full"`` the keywords stored in
+        ``body.meta.keywords`` are appended when a summary is absent or as a
+        supplement.  For ``"keyphrases"`` there is no document-level summary
+        (only page-level keywords), so the method falls back to assembling a short
+        string from ``body.meta.keywords`` when present, and returns an empty string
+        otherwise.
 
         Args:
             document: The enriched DoclingDocument
@@ -935,11 +942,13 @@ Examples:
     )
     parser.add_argument(
         "--summarization-style",
-        choices=["sentences", "keyphrases"],
+        choices=["sentences", "keyphrases", "full"],
         default=None,
         help=(
-            "Style for Step 2 enrichment: 'sentences' stores summaries in meta.summary; "
-            "'keyphrases' stores keyword lists in meta.keywords (overrides config file)"
+            "Style for Step 2 enrichment: 'sentences' stores prose summaries in meta.summary; "
+            "'keyphrases' stores keyword lists in meta.keywords; "
+            "'full' stores both summary and keywords in a single inference call per element "
+            "(default: 'full', overrides config file)"
         ),
     )
     parser.add_argument(
@@ -982,10 +991,10 @@ Examples:
     chart_extraction = args.chart_extraction or config.get("chart_extraction", False)
 
     # Get summarization style (command line overrides config); validate and narrow the type
-    _style_raw = args.summarization_style or config.get("summarization_style", "sentences")
-    if _style_raw not in ("sentences", "keyphrases"):
-        raise ValueError(f"summarization_style must be 'sentences' or 'keyphrases', got {_style_raw!r}")
-    summarization_style: Literal["sentences", "keyphrases"] = _style_raw  # type: ignore[assignment]
+    _style_raw = args.summarization_style or config.get("summarization_style", "full")
+    if _style_raw not in ("sentences", "keyphrases", "full"):
+        raise ValueError(f"summarization_style must be 'sentences', 'keyphrases', or 'full', got {_style_raw!r}")
+    summarization_style: Literal["sentences", "keyphrases", "full"] = _style_raw  # type: ignore[assignment]
 
     # Get selector algorithm (command line overrides config); validate and narrow the type
     _algo_raw = args.selector_algorithm or config.get("selector_algorithm", "batch")

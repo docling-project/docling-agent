@@ -814,7 +814,8 @@ class ReasoningBasedPageSelector:
         batch_size: Pages evaluated per reasoning iteration (candidates + new pages).
         early_stopping_threshold: Reserved for future use.
         summarization_style: ``"sentences"`` reads ``meta.summary``;
-            ``"keyphrases"`` reads ``meta.keywords``.
+            ``"keyphrases"`` reads ``meta.keywords``;
+            ``"full"`` reads both and concatenates them.
     """
 
     def __init__(
@@ -823,13 +824,13 @@ class ReasoningBasedPageSelector:
         k: int = 10,
         batch_size: int = 30,
         early_stopping_threshold: float = 0.95,  # reserved for future use; not active yet
-        summarization_style: Literal["sentences", "keyphrases"] = "sentences",
+        summarization_style: Literal["sentences", "keyphrases", "full"] = "sentences",
     ) -> None:
         self.backend = backend
         self.k = k
         self.batch_size = batch_size
         self.early_stopping_threshold = early_stopping_threshold  # reserved for future use
-        self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
+        self.summarization_style: Literal["sentences", "keyphrases", "full"] = summarization_style
 
     # ------------------------------------------------------------------
     # Public interface
@@ -971,6 +972,13 @@ class ReasoningBasedPageSelector:
                 "Each page is described by a set of keyphrases. "
                 "Use these keyphrases to judge how well the page content matches the query."
             )
+        elif self.summarization_style == "full":
+            context_label = "PAGE SUMMARIES AND KEYWORDS"
+            no_data_placeholder = "No enrichment available"
+            task_hint = (
+                "Each page is described by a prose summary followed by search keyphrases. "
+                "Use both to judge how well the page content matches the query."
+            )
         else:
             context_label = "PAGE SUMMARIES"
             no_data_placeholder = "No summary available"
@@ -1105,6 +1113,33 @@ If no pages are relevant, respond with "No relevant pages."
                     kw_values = item.meta.keywords.values
                     if kw_values:
                         text = "; ".join(str(v) for v in kw_values)
+            elif self.summarization_style == "full":
+                parts: list[str] = []
+                # summary part
+                if isinstance(item.meta, dict):
+                    summary_data = item.meta.get("summary", {})
+                    if isinstance(summary_data, dict):
+                        s = summary_data.get("text") or None
+                        if s:
+                            parts.append(s)
+                elif hasattr(item.meta, "summary") and item.meta.summary:
+                    summary_obj = item.meta.summary
+                    s = getattr(summary_obj, "text", None)
+                    if s:
+                        parts.append(s)
+                # keywords part
+                if isinstance(item.meta, dict):
+                    kw_data = item.meta.get("keywords", {})
+                    if isinstance(kw_data, dict):
+                        values = kw_data.get("values", [])
+                        if values:
+                            parts.append("; ".join(str(v) for v in values))
+                elif hasattr(item.meta, "keywords") and item.meta.keywords:
+                    kw_values = item.meta.keywords.values
+                    if kw_values:
+                        parts.append("; ".join(str(v) for v in kw_values))
+                if parts:
+                    text = " | ".join(parts)
             else:
                 if isinstance(item.meta, dict):
                     summary_data = item.meta.get("summary", {})
@@ -1174,6 +1209,12 @@ If no pages are relevant, respond with "No relevant pages."
             task_hint = (
                 "Each page is described by a set of keyphrases extracted from its content. "
                 "Use these keyphrases to judge how well the page content matches the query."
+            )
+        elif self.summarization_style == "full":
+            section_label = "PAGE SUMMARIES AND KEYWORDS"
+            task_hint = (
+                "Each page is described by a prose summary and search keyphrases. "
+                "Use both to judge how well the page content matches the query."
             )
         else:
             section_label = "PAGE SUMMARIES"
@@ -1278,7 +1319,8 @@ class TreeGuidedPageSelector:
         k: Maximum number of pages to return.
         max_iterations: Maximum drill-down iterations per document.
         summarization_style: ``"sentences"`` reads ``meta.summary``;
-            ``"keyphrases"`` reads ``meta.keywords``.
+            ``"keyphrases"`` reads ``meta.keywords``;
+            ``"full"`` reads both and concatenates them.
     """
 
     _MAX_NODES_PER_PROMPT: int = 40
@@ -1288,12 +1330,12 @@ class TreeGuidedPageSelector:
         backend: BaseBackend,
         k: int = 10,
         max_iterations: int = 8,
-        summarization_style: Literal["sentences", "keyphrases"] = "sentences",
+        summarization_style: Literal["sentences", "keyphrases", "full"] = "sentences",
     ) -> None:
         self.backend = backend
         self.k = k
         self.max_iterations = max_iterations
-        self.summarization_style: Literal["sentences", "keyphrases"] = summarization_style
+        self.summarization_style: Literal["sentences", "keyphrases", "full"] = summarization_style
 
     # ------------------------------------------------------------------
     # Public interface (mirrors ReasoningBasedPageSelector)
@@ -1447,6 +1489,29 @@ class TreeGuidedPageSelector:
                 kw_values = item.meta.keywords.values
                 if kw_values:
                     return "; ".join(str(v) for v in kw_values)
+        elif self.summarization_style == "full":
+            parts: list[str] = []
+            if isinstance(item.meta, dict):
+                summary_data = item.meta.get("summary", {})
+                if isinstance(summary_data, dict):
+                    s = summary_data.get("text") or None
+                    if s:
+                        parts.append(s)
+                kw_data = item.meta.get("keywords", {})
+                if isinstance(kw_data, dict):
+                    values = kw_data.get("values", [])
+                    if values:
+                        parts.append("; ".join(str(v) for v in values))
+            else:
+                if hasattr(item.meta, "summary") and item.meta.summary:
+                    s = getattr(item.meta.summary, "text", None)
+                    if s:
+                        parts.append(s)
+                if hasattr(item.meta, "keywords") and item.meta.keywords:
+                    kw_values = item.meta.keywords.values
+                    if kw_values:
+                        parts.append("; ".join(str(v) for v in kw_values))
+            return " | ".join(parts) if parts else None
         else:
             if isinstance(item.meta, dict):
                 summary_data = item.meta.get("summary", {})
@@ -1561,12 +1626,15 @@ class TreeGuidedPageSelector:
 
         Returns ``None`` if the response cannot be parsed.
         """
-        enrich_label = "KEYPHRASES" if self.summarization_style == "keyphrases" else "SUMMARY"
-        enrich_hint = (
-            "keyphrases extracted from their content"
-            if self.summarization_style == "keyphrases"
-            else "short prose summaries of their content"
-        )
+        if self.summarization_style == "keyphrases":
+            enrich_label = "KEYPHRASES"
+            enrich_hint = "keyphrases extracted from their content"
+        elif self.summarization_style == "full":
+            enrich_label = "SUMMARY AND KEYPHRASES"
+            enrich_hint = "a prose summary and search keyphrases"
+        else:
+            enrich_label = "SUMMARY"
+            enrich_hint = "short prose summaries of their content"
 
         frontier_lines = "\n".join(
             f"  ref={n['ref']!r}  page={n['page']}  children={n['n_children']}  "

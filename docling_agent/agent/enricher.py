@@ -455,32 +455,34 @@ Return no extra commentary. Include all operations that are materially requested
         self,
         *,
         document: DoclingDocument,
-        style: Literal["sentences", "keyphrases"] = "sentences",
+        style: Literal["sentences", "keyphrases", "full"] = "full",
         loop_budget: int = 5,
         save_callback: Callable[[DoclingDocument, int], None] | None = None,
         document_summary_pages: int = 3,
     ) -> DoclingDocument:
         """Summarize each page of the document independently.
 
-        Creates one summary (or keyphrase list) per page by serializing page content
-        and generating output with no conversation history between pages. This is
-        particularly useful for RAG applications where page-level enrichment serves
-        as the retrieval unit.
+        Creates per-page enrichment by serializing page content and generating
+        output with no conversation history between pages.  This is particularly
+        useful for RAG applications where page-level enrichment serves as the
+        retrieval unit.
 
         After page-level enrichment, generates a document-level summary from the
-        first N pages' actual content (only when style="sentences").
+        first N pages' actual content (for ``"sentences"`` and ``"full"`` styles).
 
         Args:
             document: Document to enrich with page summaries
-            style: "sentences" stores results in meta.summary (SummaryMetaField);
-                   "keyphrases" stores results in meta.keywords (KeywordsMetaField)
-            loop_budget: Retry budget for each summary generation
+            style: ``"sentences"`` stores prose summaries in ``meta.summary``;
+                   ``"keyphrases"`` stores keyword lists in ``meta.keywords``;
+                   ``"full"`` stores both in a single inference call per page
+            loop_budget: Retry budget for each generation call
             save_callback: Optional callback(document, page_no) called after each page for fault tolerance
             document_summary_pages: Number of initial pages to use for document summary (default: 3)
 
         Returns:
-            Document with page-level enrichment added to first item of each page,
-            and (for "sentences") a document-level summary added to the body element
+            Document with page-level enrichment added to the first item of each page,
+            and (for ``"sentences"`` and ``"full"``) a document-level summary added
+            to the body element
         """
 
         if not document.pages:
@@ -512,12 +514,15 @@ Return no extra commentary. Include all operations that are materially requested
                     log_warning(f"Page {page_no} has no NodeItem, skipping")
                     continue
 
-                # Skip if already enriched for the chosen style
+                # Skip if already fully enriched for the chosen style
                 if style == "sentences" and first_item.meta and first_item.meta.summary:
                     log_info(f"Page {page_no} already has summary, skipping")
                     continue
                 if style == "keyphrases" and first_item.meta and first_item.meta.keywords:
                     log_info(f"Page {page_no} already has keywords, skipping")
+                    continue
+                if style == "full" and first_item.meta and first_item.meta.summary and first_item.meta.keywords:
+                    log_info(f"Page {page_no} already has summary and keywords, skipping")
                     continue
 
                 page_text = serializer.serialize(pages={page_no}).text
@@ -540,6 +545,27 @@ Return no extra commentary. Include all operations that are materially requested
                             save_callback(document, page_no)
                     else:
                         log_warning(f"Failed to generate keywords for page {page_no}")
+                elif style == "full":
+                    summary, keywords = self._generate_summary_and_keywords(
+                        m=m,
+                        text=page_text,
+                        loop_budget=loop_budget,
+                    )
+                    enriched = False
+                    if not first_item.meta:
+                        first_item.meta = BaseMeta()
+                    if summary:
+                        first_item.meta.summary = SummaryMetaField(text=summary)
+                        enriched = True
+                    else:
+                        log_warning(f"Failed to generate summary component for page {page_no}")
+                    if keywords:
+                        first_item.meta.keywords = KeywordsMetaField(values=keywords)
+                        enriched = True
+                    else:
+                        log_warning(f"Failed to generate keywords component for page {page_no}")
+                    if enriched and save_callback:
+                        save_callback(document, page_no)
                 else:
                     summary = self._generate_summary(
                         m=m,
@@ -556,8 +582,8 @@ Return no extra commentary. Include all operations that are materially requested
                     else:
                         log_warning(f"Failed to generate summary for page {page_no}")
 
-        # Generate document-level summary from first N pages (sentences style only)
-        if style == "sentences":
+        # Generate document-level summary from first N pages (sentences / full styles)
+        if style in ("sentences", "full"):
             with self._timed_stage("generate document-level summary"):
                 doc_summary = self._generate_document_level_summary(
                     document=document,
@@ -741,6 +767,87 @@ Return no extra commentary. Include all operations that are materially requested
                 log_warning(f"Generated {len(keywords)} keywords, expected 3-7")
         return None
 
+    def _generate_summary_and_keywords(
+        self,
+        *,
+        m: BaseSession,
+        text: str,
+        loop_budget: int = 5,
+        scope: Literal["section", "document"] = "section",
+    ) -> tuple[str | None, list[str] | None]:
+        """Generate a prose summary and a keyword list in a single inference call.
+
+        The model is asked to return both outputs in a structured ``SUMMARY: …`` /
+        ``KEYWORDS: …`` format so that a single round-trip populates both
+        ``meta.summary`` and ``meta.keywords``.
+
+        Args:
+            m: Backend session
+            text: Text to summarize and keyword-extract
+            loop_budget: Retry budget for validation
+            scope: ``"section"`` for element-level, ``"document"`` for document-level
+
+        Returns:
+            ``(summary_text, keyword_list)`` — either component may be ``None`` if
+            the model response for that part could not be parsed.
+        """
+        if scope == "document":
+            summary_instruction = (
+                "Based on the content from the first pages shown below, write a 2-3 sentence summary "
+                "that captures the ENTIRE DOCUMENT's main purpose and key themes. "
+                "This should be a document-level overview, not just a summary of these specific pages."
+            )
+        else:
+            summary_instruction = "Summarize the following content in two or three succinct sentences."
+
+        task_prompt = (
+            f"{summary_instruction} "
+            "Then extract the 3-7 most important search keywords or short phrases from the same content. "
+            "Return ONLY the following two-part format with no extra text or markdown:\n"
+            "SUMMARY: <your 2-3 sentence summary here>\n"
+            "KEYWORDS: <keyword1; keyword2; keyword3; ...>"
+        )
+
+        def _validate_combined(content: str) -> bool:
+            has_summary = bool(re.search(r"(?i)^SUMMARY\s*:", content, re.MULTILINE))
+            has_keywords = bool(re.search(r"(?i)^KEYWORDS\s*:", content, re.MULTILINE))
+            return has_summary and has_keywords
+
+        raw = self._generate_content(
+            m=m,
+            text=text,
+            task_prompt=task_prompt,
+            requirement_description=(
+                "Return exactly two lines: "
+                "'SUMMARY: <2-3 sentences>' and 'KEYWORDS: <3-7 terms separated by semicolons>'"
+            ),
+            validation_fn=_validate_combined,
+            loop_budget=loop_budget,
+        )
+
+        if not raw:
+            return None, None
+
+        summary_text: str | None = None
+        keywords: list[str] | None = None
+
+        summary_match = re.search(r"(?i)^SUMMARY\s*:\s*(.+)", raw, re.MULTILINE)
+        if summary_match:
+            candidate = summary_match.group(1).strip()
+            if candidate:
+                summary_text = candidate
+
+        keywords_match = re.search(r"(?i)^KEYWORDS\s*:\s*(.+)", raw, re.MULTILINE)
+        if keywords_match:
+            kw_raw = keywords_match.group(1).strip()
+            parsed = [k.strip() for k in kw_raw.split(";") if k.strip()]
+            if 3 <= len(parsed) <= 7:
+                keywords = parsed
+            else:
+                log_warning(f"Combined call: extracted {len(parsed)} keywords, expected 3-7")
+
+        return summary_text, keywords
+
     # ------------------------------------------------------------------
     # Keywords
     # ------------------------------------------------------------------
@@ -826,6 +933,138 @@ Return no extra commentary. Include all operations that are materially requested
             generate_fn=self._generate_keywords,
             set_meta_fn=set_keywords,
         )
+
+    def _summarize_and_keyword_items(
+        self,
+        *,
+        document: DoclingDocument,
+        fix_heading_levels: bool = True,
+        min_text_length: int = 40,
+        loop_budget: int = 5,
+    ) -> DoclingDocument:
+        """Enrich documents with both prose summaries and keyword lists in a single pass.
+
+        Combines ``_summarize_items`` and ``_find_search_keywords`` into one tree
+        walk so that each element is enriched with both ``meta.summary`` and
+        ``meta.keywords`` using a single inference call per node.
+
+        Args:
+            document: Document to enrich
+            fix_heading_levels: Whether to normalise heading levels first (default: True)
+            min_text_length: Minimum text length to trigger enrichment (default: 40)
+            loop_budget: Retry budget per element (default: 5)
+
+        Returns:
+            Enriched document with both ``meta.summary`` and ``meta.keywords`` populated
+        """
+        if fix_heading_levels:
+            with self._timed_stage("full: fix heading levels"):
+                self._fix_heading_levels(document=document)
+
+        with self._timed_stage("full: build hierarchy"):
+            hier_doc = make_hierarchical_document(document)
+
+        m = self._create_extraction_session()
+
+        with self._timed_stage("full: section summary+keywords"):
+            self._walk_and_enrich_full(
+                node=hier_doc.body,
+                doc=hier_doc,
+                m=m,
+                loop_budget=loop_budget,
+                min_text_length=min_text_length,
+            )
+        with self._timed_stage("full: leaf summary+keywords"):
+            self._enrich_leaf_items_full(
+                m=m,
+                document=hier_doc,
+                loop_budget=loop_budget,
+            )
+
+        return hier_doc
+
+    def _walk_and_enrich_full(
+        self,
+        *,
+        node: NodeItem,
+        doc: DoclingDocument,
+        m: BaseSession,
+        loop_budget: int,
+        min_text_length: int,
+    ) -> None:
+        """Walk the document tree and set both ``meta.summary`` and ``meta.keywords`` per node."""
+        should_enrich = False
+        threshold = min_text_length
+
+        if isinstance(node, TitleItem | SectionHeaderItem):
+            should_enrich = True
+        elif isinstance(node, TextItem):
+            should_enrich = node.label != DocItemLabel.CAPTION
+            threshold = min(min_text_length, 40)
+        elif isinstance(node, GroupItem):
+            should_enrich = node.self_ref != "#/body"
+            threshold = min(min_text_length, 40)
+
+        if should_enrich:
+            already_has_summary = node.meta and hasattr(node.meta, "summary") and node.meta.summary
+            already_has_keywords = node.meta and hasattr(node.meta, "keywords") and node.meta.keywords
+            if not (already_has_summary and already_has_keywords):
+                text = collect_subtree_text(node, doc)
+                if len(text) >= threshold:
+                    summary, keywords = self._generate_summary_and_keywords(m=m, text=text, loop_budget=loop_budget)
+                    if summary or keywords:
+                        if node.meta is None:
+                            node.meta = BaseMeta()
+                        if summary and not already_has_summary:
+                            node.meta.summary = SummaryMetaField(text=summary)
+                        if keywords and not already_has_keywords:
+                            node.meta.keywords = KeywordsMetaField(values=keywords)
+
+        for child_ref in node.children or []:
+            try:
+                child = child_ref.resolve(doc)
+                self._walk_and_enrich_full(
+                    node=child,
+                    doc=doc,
+                    m=m,
+                    loop_budget=loop_budget,
+                    min_text_length=min_text_length,
+                )
+            except Exception as exc:
+                log_warning("Could not resolve child", child_ref=child_ref, exception=exc)
+
+    def _enrich_leaf_items_full(
+        self,
+        *,
+        m: BaseSession,
+        document: DoclingDocument,
+        loop_budget: int,
+    ) -> None:
+        """Set both ``meta.summary`` and ``meta.keywords`` on leaf items (tables, pictures)."""
+        for item, _ in document.iterate_items():
+            already_has_summary = item.meta and hasattr(item.meta, "summary") and item.meta.summary
+            already_has_keywords = item.meta and hasattr(item.meta, "keywords") and item.meta.keywords
+            if already_has_summary and already_has_keywords:
+                continue
+
+            text: str | None = None
+            if isinstance(item, TableItem):
+                text = f"HTML table:\n{serialize_table_to_html(table=item, doc=document)}"
+            elif isinstance(item, PictureItem):
+                captions = [c.resolve(document).text for c in item.captions if hasattr(c.resolve(document), "text")]
+                text = " ".join(captions) or None
+
+            if not text:
+                continue
+
+            summary, keywords = self._generate_summary_and_keywords(m=m, text=text, loop_budget=loop_budget)
+            if summary or keywords:
+                if item.meta is None:
+                    item.meta = FloatingMeta() if isinstance(item, TableItem) else PictureMeta()
+                if summary and not already_has_summary:
+                    item.meta.summary = SummaryMetaField(text=summary)
+                if keywords and not already_has_keywords:
+                    item.meta.keywords = KeywordsMetaField(values=keywords)
 
     # ------------------------------------------------------------------
     # Entity Detection
