@@ -47,6 +47,23 @@ from docling_agent.backends.base import BaseBackend
 from docling_agent.logging import log_debug, log_info, log_warning
 
 
+def _shorten(text: str, max_chars: int) -> str:
+    """Collapse whitespace and truncate text to max_chars on a word boundary.
+
+    Args:
+        text: Free-form text, possibly spanning several lines
+        max_chars: Maximum length of the returned string, ellipsis included
+
+    Returns:
+        The single-line text, truncated with an ellipsis when it exceeds max_chars
+    """
+    text = " ".join(text.split())
+    if len(text) <= max_chars:
+        return text
+    cut = text.rfind(" ", 0, max_chars)
+    return text[: cut if cut > 0 else max_chars - 1].rstrip() + "…"
+
+
 class DoclingRAGAgent(BaseDoclingAgent):
     """Chunkless RAG agent using document structure and per-node summaries.
 
@@ -72,6 +89,11 @@ class DoclingRAGAgent(BaseDoclingAgent):
         "Always ground your answer in the document content. "
         "Do not hallucinate or add information not present in the retrieved sections."
     )
+
+    # Bounds for the exploration history fed back into the section-selection prompt:
+    # only the most recent iterations are shown, each with its reason cut short.
+    _HISTORY_WINDOW: ClassVar[int] = 5
+    _HISTORY_REASON_MAX_CHARS: ClassVar[int] = 200
 
     def __init__(
         self,
@@ -212,7 +234,6 @@ class DoclingRAGAgent(BaseDoclingAgent):
     def _rag_loop(self, *, query: str, doc: DoclingDocument) -> RAGResult:
         m = self._create_reasoning_session(system_prompt=self._RAG_SYSTEM_PROMPT)
 
-        visited: set[str] = set()
         iterations: list[RAGIteration] = []
 
         outline_text = create_document_outline(doc, format=OutlineFormat.MARKDOWN)
@@ -244,7 +265,7 @@ class DoclingRAGAgent(BaseDoclingAgent):
             return RAGResult(answer=full_text, iterations=[], converged=True)
 
         for i in range(self.max_iterations):
-            unvisited = valid_refs - visited
+            unvisited = valid_refs - {it.section_ref for it in iterations}
             if not unvisited:
                 log_info("All sections visited; stopping early.")
                 self._rprint(Text("All sections visited — stopping early.", style="yellow"))
@@ -257,9 +278,8 @@ class DoclingRAGAgent(BaseDoclingAgent):
                 query=query,
                 outline_text=outline_text,
                 valid_refs=valid_refs,
-                visited=visited,
+                iterations=iterations,
             )
-            visited.add(selection.section_ref)
 
             self._rprint(
                 Panel(
@@ -435,16 +455,38 @@ class DoclingRAGAgent(BaseDoclingAgent):
         query: str,
         outline_text: str,
         valid_refs: set[str],
-        visited: set[str],
+        iterations: list[RAGIteration],
     ) -> SectionSelection:
+        """Ask the model which unvisited section to consult next.
+
+        The prompt carries a compact history of the previous iterations (section,
+        reason, whether it was enough to answer) so the model steers away from
+        ground already covered. Visited sections are derived from the same list.
+
+        Args:
+            m: Reasoning session shared across the RAG loop
+            query: The user query
+            outline_text: Document outline with per-section summaries
+            valid_refs: All selectable section refs of the document
+            iterations: Iterations already performed on this document, oldest first
+
+        Returns:
+            The selected section and the model's reason; falls back to the first
+            unvisited section when the model output cannot be parsed
+        """
+        visited = {it.section_ref for it in iterations}
         unvisited = sorted(valid_refs - visited)
+        history_text = self._format_exploration_history(iterations)
 
         prompt = (
             f"Query: {query}\n\n"
             f"Document outline (with summaries):\n{outline_text}\n\n"
-            f"Already consulted section refs: {sorted(visited) or 'none'}\n\n"
+            f"Exploration history (most recent last):\n{history_text}\n\n"
             f"Unvisited section refs to choose from: {unvisited}\n\n"
             "Select the single most relevant UNVISITED section ref to consult next. "
+            "Use the exploration history: build on what the consulted sections established, "
+            "target what your previous answer attempts reported as still missing, and avoid "
+            "sections that cover the same ground as ones that were not helpful. "
             "Return a JSON object in a ```json``` block with exactly two keys:\n"
             '  "reason": your chain-of-thought for why this section is relevant (string)\n'
             '  "section_ref": the exact ref string from the unvisited list above (string)'
@@ -482,6 +524,33 @@ class DoclingRAGAgent(BaseDoclingAgent):
             # Rejection sampling exhausted without a valid response; pick first unvisited
             return SectionSelection(reason="fallback", section_ref=unvisited[0])
         return SectionSelection(reason=d["reason"], section_ref=d["section_ref"])
+
+    def _format_exploration_history(self, iterations: list[RAGIteration]) -> str:
+        """Render the last iterations as one indented line each, oldest first.
+
+        Only the last ``_HISTORY_WINDOW`` iterations are listed and each reason is
+        cut to ``_HISTORY_REASON_MAX_CHARS``, so the block stays small however long
+        the loop runs. The ``response`` field is deliberately left out: it is the
+        longest and noisiest one, and the shared session already holds it.
+
+        Args:
+            iterations: Iterations already performed on this document, oldest first
+
+        Returns:
+            The history block, or ``"  none"`` before the first iteration
+        """
+        if not iterations:
+            return "  none"
+        window = iterations[-self._HISTORY_WINDOW :]
+        lines = [
+            f"  - {it.section_ref}: {_shorten(it.reason, self._HISTORY_REASON_MAX_CHARS)}"
+            f" -> {'helpful' if it.can_answer else 'not helpful'}"
+            for it in window
+        ]
+        omitted = len(iterations) - len(window)
+        if omitted:
+            lines.insert(0, f"  ({omitted} earlier iteration(s) omitted)")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Section content
