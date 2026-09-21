@@ -693,32 +693,36 @@ Return no extra commentary. Include all operations that are materially requested
         loop_budget: int = 5,
         scope: Literal["section", "document"] = "section",
     ) -> str | None:
-        """Generate summary as readable sentences.
+        """Generate a prose summary covering all points in the content.
 
         Args:
             m: Backend session
             text: Text to summarize
             loop_budget: Retry budget for validation
-            scope: Summary scope - "section" for section-level, "document" for document-level
+            scope: ``"section"`` for element/page-level content;
+                   ``"document"`` for a high-level overview from introductory pages
 
         Returns:
             Generated summary or None if generation fails
         """
 
         def _validate_summary(content: str) -> bool:
-            sentences = [s.strip() for s in content.split(".") if s.strip()]
-            return 1 <= len(sentences) <= 5
+            return bool(content.strip())
 
         if scope == "document":
             task_prompt = (
-                "Based on the content from the first pages shown below, write a 2-3 sentence summary "
-                "that captures the ENTIRE DOCUMENT's main purpose and key themes. "
-                "This should be a document-level overview, not just a summary of these specific pages. "
+                "You are given the opening pages of a document.\n"
+                "Write a concise description of what the entire document is about: "
+                "its purpose, scope, and the main topics it covers. "
+                "Do not summarise only the pages shown — infer the document's overall subject and intent. "
                 "Return only plain text with no markdown formatting."
             )
-        else:  # section
+        else:  # section / page
             task_prompt = (
-                "Summarize the following content in two or three succinct sentences. "
+                "You are given a chunk of document content (a section, page, or element).\n"
+                "Write a concise description of everything covered in this content, "
+                "capturing all its main points without omitting any type of information. "
+                "Be as concise as possible while remaining complete. "
                 "Return only plain text with no markdown formatting."
             )
 
@@ -726,7 +730,7 @@ Return no extra commentary. Include all operations that are materially requested
             m=m,
             text=text,
             task_prompt=task_prompt,
-            requirement_description="Write 2-3 succinct sentences summarizing the content. Return plain text only.",
+            requirement_description="Write a concise plain-text description covering all main points. Return plain text only.",
             validation_fn=_validate_summary,
             loop_budget=loop_budget,
         )
@@ -739,21 +743,20 @@ Return no extra commentary. Include all operations that are materially requested
         loop_budget: int = 5,
     ) -> list[str] | None:
         def _validate_keywords(content: str) -> bool:
-            keywords = [k.strip() for k in content.split(";") if k.strip()]
-            return 3 <= len(keywords) <= 7
+            return bool([k.strip() for k in content.split(";") if k.strip()])
 
         result = self._generate_content(
             m=m,
             text=text,
             task_prompt=(
-                "Extract the most important concepts and facts from this content as search keywords. "
-                "Use 3-7 concise keywords or short phrases separated by semicolons. "
-                "Focus on key concepts, technical terms, entities, actions, and important topics "
-                "that would be useful for search and retrieval. "
-                "Return only the keywords separated by semicolons, no explanations or markdown."
+                "You are given a chunk of document content.\n"
+                "Extract the key concepts, entities, technical terms, and topics that best represent "
+                "this content for search and retrieval. "
+                "Include specific terms a reader would search for to find this content. "
+                "Return only the keywords or short phrases separated by semicolons, no explanations or markdown."
             ),
             requirement_description=(
-                "Provide 3-7 keywords or short phrases separated by semicolons. "
+                "Provide keywords or short phrases separated by semicolons. "
                 "Example: 'machine learning; neural networks; deep learning; transformers; AI models'"
             ),
             validation_fn=_validate_keywords,
@@ -761,12 +764,10 @@ Return no extra commentary. Include all operations that are materially requested
         )
 
         if result:
-            # Parse semicolon-separated keywords
             keywords = [k.strip() for k in result.split(";") if k.strip()]
-            if 3 <= len(keywords) <= 7:
+            if keywords:
                 return keywords
-            else:
-                log_warning(f"Generated {len(keywords)} keywords, expected 3-7")
+            log_warning("Combined call: no keywords parsed from response")
         return None
 
     def _generate_summary_and_keywords(
@@ -787,7 +788,8 @@ Return no extra commentary. Include all operations that are materially requested
             m: Backend session
             text: Text to summarize and keyword-extract
             loop_budget: Retry budget for validation
-            scope: ``"section"`` for element-level, ``"document"`` for document-level
+            scope: ``"section"`` for element/page-level content;
+                   ``"document"`` for a high-level overview from introductory pages
 
         Returns:
             ``(summary_text, keyword_list)`` — either component may be ``None`` if
@@ -795,18 +797,25 @@ Return no extra commentary. Include all operations that are materially requested
         """
         if scope == "document":
             summary_instruction = (
-                "Based on the content from the first pages shown below, write a 2-3 sentence summary "
-                "that captures the ENTIRE DOCUMENT's main purpose and key themes. "
-                "This should be a document-level overview, not just a summary of these specific pages."
+                "You are given the opening pages of a document.\n"
+                "Write a concise description of what the entire document is about: "
+                "its purpose, scope, and the main topics it covers. "
+                "Do not summarise only the pages shown — infer the document's overall subject and intent."
             )
         else:
-            summary_instruction = "Summarize the following content in two or three succinct sentences."
+            summary_instruction = (
+                "You are given a chunk of document content (a section, page, or element).\n"
+                "Write a concise description of everything covered in this content, "
+                "capturing all its main points without omitting any type of information. "
+                "Be as concise as possible while remaining complete."
+            )
 
         task_prompt = (
-            f"{summary_instruction} "
-            "Then extract the 3-7 most important search keywords or short phrases from the same content. "
+            f"{summary_instruction}\n"
+            "Also extract the key concepts, entities, technical terms, and topics that best represent "
+            "this content for search and retrieval.\n\n"
             "Return ONLY the following two-part format with no extra text or markdown:\n"
-            "SUMMARY: <your 2-3 sentence summary here>\n"
+            "SUMMARY: <your concise description here>\n"
             "KEYWORDS: <keyword1; keyword2; keyword3; ...>"
         )
 
@@ -820,8 +829,8 @@ Return no extra commentary. Include all operations that are materially requested
             text=text,
             task_prompt=task_prompt,
             requirement_description=(
-                "Return exactly two lines: "
-                "'SUMMARY: <2-3 sentences>' and 'KEYWORDS: <3-7 terms separated by semicolons>'"
+                "Return exactly two labelled lines: "
+                "'SUMMARY: <concise description>' and 'KEYWORDS: <terms separated by semicolons>'"
             ),
             validation_fn=_validate_combined,
             loop_budget=loop_budget,
@@ -843,10 +852,10 @@ Return no extra commentary. Include all operations that are materially requested
         if keywords_match:
             kw_raw = keywords_match.group(1).strip()
             parsed = [k.strip() for k in kw_raw.split(";") if k.strip()]
-            if 3 <= len(parsed) <= 7:
+            if parsed:
                 keywords = parsed
             else:
-                log_warning(f"Combined call: extracted {len(parsed)} keywords, expected 3-7")
+                log_warning("Combined call: no keywords parsed from response")
 
         return summary_text, keywords
 
