@@ -1,16 +1,21 @@
+# Docling Agent
+
+[![CI](https://github.com/docling-project/docling-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/docling-project/docling-agent/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/docling-agent)](https://pypi.org/project/docling-agent/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/docling-agent)](https://pypi.org/project/docling-agent/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Pydantic v2](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/pydantic/pydantic/main/docs/badge/v2.json)](https://pydantic.dev)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
-[![License MIT](https://img.shields.io/github/license/docling-agent-project/docling-agent)](https://opensource.org/licenses/MIT)
+[![License MIT](https://img.shields.io/github/license/docling-project/docling-agent)](https://opensource.org/licenses/MIT)
+[![PyPI Downloads](https://static.pepy.tech/badge/docling-agent/month)](https://pepy.tech/projects/docling-agent)
+[![Chat with Dosu](https://dosu.dev/dosu-chat-badge.svg)](https://app.dosu.dev/097760a8-135e-4789-8234-90c8837d7f1c/ask?utm_source=github)
 [![LF AI & Data](https://img.shields.io/badge/LF%20AI%20%26%20Data-003778?logo=linuxfoundation&logoColor=fff&color=0094ff&labelColor=003778)](https://lfaidata.foundation/projects/)
 
-# Docling-Agent
-
-Docling-agent simplifies agentic operation on documents, such as writing, editing, summarizing, etc.
+Docling Agent is a Python library for AI-powered document workflows — writing, editing, extracting structured data, and enriching documents with metadata.
 
 > [!NOTE]
-> **This package is still immature and work-in-progress. We are happy to get comments, suggestions, code contributions, etc!**
+> **This package is under active development. Feedback, suggestions, and contributions are very welcome.**
 
 ## Features
 
@@ -23,32 +28,21 @@ Docling-agent simplifies agentic operation on documents, such as writing, editin
 - [Run tracing](#trace-what-an-agent-did): Get timing, model and sub-agent traces for a run with `run_with_trace(...)`, and export a whole session to one JSON file.
 - Optional tools: Integrate external tools (e.g., MCP) when available.
 
-Quick start (writing):
-
-```python
-from docling_agent.agents import BackendConfig, DoclingWritingAgent, ModelConfig, create_backend
-
-backend = create_backend(
-    BackendConfig(
-        type="ollama",
-        base_url="http://localhost:11434",
-        models=ModelConfig(reasoning="qwen3:8b", writing="qwen3:8b"),
-    )
-)
-agent = DoclingWritingAgent(backend=backend, tools=[])
-doc = agent.run("Write a one-page summary about polymers in food packaging.")
-doc.save_as_html("report.html")
-```
-
 ## Installation
 
-**Coming soon**
+```bash
+pip install docling-agent
+```
 
-## Getting started
+Requires Python 3.11 or higher.
 
-Below are three minimal, end-to-end examples mirroring the scripts in the examples folder. Each snippet shows how to initialize an agent, run a task, and save the result.
+## Getting Started
 
-### Write a new document (see [example](examples/example_01_write_report.py)):
+Each snippet shows how to initialise an agent, run a task, and save the result.
+
+### Write a New Document
+
+Generate well-structured reports from natural prompts and export to JSON, Markdown, or HTML ([example](examples/example_01_write_report.py)).
 
 ```python
 from docling_agent.agents import BackendConfig, DoclingWritingAgent, ModelConfig, create_backend
@@ -65,9 +59,9 @@ doc = agent.run("Write a brief report on polymers in food packaging with a small
 doc.save_as_html("./scratch/report.html")
 ```
 
-### Edit an existing document (see [example](examples/example_02_edit_report.py)):
+### Edit an Existing Document
 
-Use natural-language tasks to update a Docling JSON. You can run multiple tasks to iteratively refine content, structure, or formatting.
+Use natural-language tasks to update a Docling Document ([example](examples/example_02_edit_report.py)). Run multiple tasks to iteratively refine content, structure, or formatting.
 
 ```python
 from pathlib import Path
@@ -88,9 +82,9 @@ updated = agent.run(task="Put polymer abbreviations in a separate column in the 
 updated.save_as_html("./scratch/updated_table.html")
 ```
 
-### Extract structured data with a schema (see [example](examples/example_03_extract_schema.py)):
+### Extract Structured Data with a Schema
 
-Define a simple schema and provide a list of files (PDFs/images). The agent produces an HTML report with extracted fields.
+Define a simple schema and provide a list of files (PDFs/images); the agent produces an HTML report with extracted fields ([example](examples/example_03_extract_schema.py)).
 
 ```python
 from pathlib import Path
@@ -110,9 +104,9 @@ report = agent.run(task=str(schema), sources=sources)
 report.save_as_html("./scratch/invoices_extraction_report.html")
 ```
 
-### Enrich an existing document (see [example](examples/example_04_enrich_document.py)):
+### Enrich an Existing Document
 
-Run enrichment passes like summaries, keywords, entities, and classifications on a Docling JSON.
+Run enrichment passes — summaries, keywords, entities, and classifications — on a Docling Document ([example](examples/example_04_enrich_document.py)).
 
 ```python
 from pathlib import Path
@@ -133,7 +127,7 @@ enriched = agent.run(task="Summarize each paragraph, table, and section header."
 enriched.save_as_html("./scratch/enriched_summaries.html")
 ```
 
-### Trace what an agent did:
+### Trace What an Agent Did
 
 Every agent has `run_with_trace()` next to `run()`. It returns an `AgentTrace` (timing, model and
 the produced document) instead of just the document. The orchestrator uses `run_task_with_trace()`,
@@ -159,7 +153,7 @@ logging:
 
 ## Backend Configuration
 
-Task files now select the backend explicitly:
+Task files select the backend via an explicit `backend` block:
 
 ```yaml
 backend:
@@ -179,36 +173,21 @@ Typical defaults:
 - `litellm`: routed model names like `openai/gpt-4.1-mini`
 - `llama-server`: GGUF model names as loaded by llama.cpp's `llama-server` (default `http://localhost:8080/v1`)
 
-## Documentation
-
-**Coming soon**
-
 ## Examples
 
-Go hands-on with our [examples](https://docling-project.github.io/docling/examples/),
-demonstrating how to address different application use cases with Docling.
+Explore the [`examples/`](examples/) folder for end-to-end scripts covering document writing, editing, extraction, enrichment, RAG querying, and more.
 
-## Integrations
-
-To further accelerate your AI application development, check out Docling's native
-[integrations](https://docling-project.github.io/docling/integrations/) with popular frameworks
-and tools.
-
-## Get help and support
-
-Please feel free to connect with us using the [discussion section](https://github.com/docling-project/docling/discussions).
-
-## Technical report
+## Technical Report
 
 For more details on Docling's inner workings, check out the [Docling Technical Report](https://arxiv.org/abs/2408.09869).
 
 ## Contributing
 
-Please read [Contributing to Docling](https://github.com/docling-project/docling/blob/main/CONTRIBUTING.md) for details.
+Please read [Contributing to Docling Agent](CONTRIBUTING.md) for details.
 
 ## References
 
-If you use Docling or Docling-agent in your projects, please consider citing the following:
+If you use Docling or Docling Agent in your projects, please consider citing the following:
 
 ```bib
 @techreport{Docling,
@@ -225,7 +204,7 @@ If you use Docling or Docling-agent in your projects, please consider citing the
 
 ## License
 
-The Docling codebase is under MIT license.
+The Docling Agent codebase is under MIT license.
 For individual model usage, please refer to the model licenses found in the original packages.
 
 ## LF AI & Data
