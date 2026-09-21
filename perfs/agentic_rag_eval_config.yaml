@@ -13,17 +13,31 @@ output: ./scratch/agentic_rag_eval
 # - true: Summarize entire pages at once (faster but less granular)
 page_level: false
 
-# Summarization style for Step 3 (default: sentences)
+# Enable picture description during PDF conversion in Step 1 (default: false)
+# When true, every image is captioned by ibm-granite/granite-vision-4.1-4b.
+# This significantly increases Step 1 processing time and requires a VLM to be
+# available locally. Only useful if the dataset contains information-rich figures.
+picture_description: false
+
+# Enable chart extraction during PDF conversion in Step 1 (default: false)
+# When true, each detected chart is processed by ibm-granite/granite-vision-4.1-4b
+# to produce a natural-language description (chart2summary).
+# This significantly increases Step 1 processing time and requires a VLM to be
+# available locally. Only useful if the dataset contains data charts or graphs.
+chart_extraction: false
+
+
+# Summarization style for Step 2 (default: sentences)
 # - sentences: Full-sentence summaries stored in meta.summary (SummaryMetaField)
 # - keyphrases: Keyword/keyphrase lists stored in meta.keywords (KeywordsMetaField)
 summarization_style: sentences
 
-# Step 4 page selector algorithm (default: batch)
-# - batch: ReasoningBasedPageSelector — evaluates pages in flat batches (works with page-level or element-level step 3)
-# - tree: TreeGuidedPageSelector — navigates the heading hierarchy (requires element-level step 3 enrichment)
+# Step 3 page selector algorithm (default: batch)
+# - batch: ReasoningBasedPageSelector — evaluates pages in flat batches (works with page-level or element-level step 2)
+# - tree: TreeGuidedPageSelector — navigates the heading hierarchy (requires element-level step 2 enrichment)
 selector_algorithm: batch
 
-# Evaluation parameters for Step 4
+# Evaluation parameters for Step 3
 evaluation:
   # Maximum number of pages to retrieve per query (for NDCG@K metric)
   top_k: 10
@@ -58,7 +72,7 @@ backend:
   # Model configuration for different tasks
   models:
     # Model for reasoning tasks (planning, analysis, decision-making)
-    # Used by: DoclingEditingAgent, ReasoningBasedPageSelector
+    # Used by: ReasoningBasedPageSelector
     reasoning: qwen2.5-7b-instruct-gguf
 
     # Model for writing tasks (content generation, summarization)

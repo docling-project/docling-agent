@@ -55,6 +55,9 @@ vlm = [
 ]
 evaluation = [
     "ranx>=0.3.21",
+    "ocrmac>=1.0.0,<2.0.0; sys_platform == 'darwin'",
+    "nemotron-ocr>=2.0.0; sys_platform == 'linux' and python_version == '3.12' and platform_machine == 'x86_64'",
+    "transformers>=5.4,<5.9",  # workaround until docling-project/docling#4205 is fixed 
 ]
 
 [dependency-groups]
