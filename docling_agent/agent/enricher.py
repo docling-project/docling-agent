@@ -416,21 +416,58 @@ Return no extra commentary. Include all operations that are materially requested
         loop_budget: int,
         min_text_length: int,
     ) -> None:
-        """Walk document tree and add summaries to sections."""
+        """Walk the document tree post-order and add summaries to sections.
 
-        def set_summary(meta: BaseMeta, result: Any) -> None:
-            meta.summary = SummaryMetaField(text=result)
+        Nodes with children are summarized from their children's summaries (``scope="parent"``).
+        Leaf nodes are summarized from their raw content (``scope="section"``).
+        """
+        for child_ref in node.children or []:
+            try:
+                child = child_ref.resolve(doc)
+                self._walk_and_summarize(
+                    node=child,
+                    doc=doc,
+                    m=m,
+                    loop_budget=loop_budget,
+                    min_text_length=min_text_length,
+                )
+            except Exception as exc:
+                log_warning("Could not resolve child", child_ref=child_ref, exception=exc)
 
-        self._walk_and_enrich(
-            node=node,
-            doc=doc,
-            m=m,
-            loop_budget=loop_budget,
-            min_text_length=min_text_length,
-            meta_attr="summary",
-            generate_fn=self._generate_summary,
-            set_meta_fn=set_summary,
-        )
+        should_enrich = False
+        threshold = min_text_length
+
+        if isinstance(node, TitleItem | SectionHeaderItem):
+            should_enrich = True
+        elif isinstance(node, TextItem):
+            should_enrich = node.label != DocItemLabel.CAPTION
+            threshold = min(min_text_length, 40)
+        elif isinstance(node, GroupItem):
+            should_enrich = node.self_ref != "#/body"
+            threshold = min(min_text_length, 40)
+
+        if not should_enrich:
+            return
+        if node.meta is not None and node.meta.summary is not None:
+            return  # skip: already enriched (e.g. from a previous partial run)
+
+        has_children = bool(node.children)
+        if has_children:
+            context = self._collect_child_summaries(node, doc)
+            if context:
+                summary = self._generate_summary(m=m, text=context, loop_budget=loop_budget, scope="parent")
+                if summary:
+                    if node.meta is None:
+                        node.meta = BaseMeta()
+                    node.meta.summary = SummaryMetaField(text=summary)
+        else:
+            text = collect_subtree_text(node, doc)
+            if len(text) >= threshold:
+                summary = self._generate_summary(m=m, text=text, loop_budget=loop_budget, scope="section")
+                if summary:
+                    if node.meta is None:
+                        node.meta = BaseMeta()
+                    node.meta.summary = SummaryMetaField(text=summary)
 
     def _summarize_leaf_items(
         self,
@@ -691,19 +728,21 @@ Return no extra commentary. Include all operations that are materially requested
         m: BaseSession,
         text: str,
         loop_budget: int = 5,
-        scope: Literal["section", "document"] = "section",
+        scope: Literal["section", "parent", "document"] = "section",
     ) -> str | None:
         """Generate a prose summary covering all points in the content.
 
         Args:
             m: Backend session
-            text: Text to summarize
+            text: Content to summarize. Pass raw text for ``"section"``/``"document"``
+                  scopes, or the output of ``_collect_child_summaries`` for ``"parent"``.
             loop_budget: Retry budget for validation
-            scope: ``"section"`` for element/page-level content;
-                   ``"document"`` for a high-level overview from introductory pages
+            scope: Controls the prompt framing. ``"section"`` for a leaf element;
+                   ``"parent"`` for a node whose children are already summarized;
+                   ``"document"`` for a high-level overview from opening pages.
 
         Returns:
-            Generated summary or None if generation fails
+            Generated summary, or None if generation fails
         """
 
         def _validate_summary(content: str) -> bool:
@@ -714,10 +753,20 @@ Return no extra commentary. Include all operations that are materially requested
                 "You are given the opening pages of a document.\n"
                 "Write a concise description of what the entire document is about: "
                 "its purpose, scope, and the main topics it covers. "
-                "Do not summarise only the pages shown — infer the document's overall subject and intent. "
+                "Do not summarize only the pages shown — infer the document's overall subject and intent. "
                 "Return only plain text with no markdown formatting."
             )
-        else:  # section / page
+        elif scope == "parent":
+            task_prompt = (
+                "You are given a section of a document. "
+                "The input contains the section's own opening text (possibly empty) "
+                "followed by the titles and summaries of its subsections.\n"
+                "Write a concise description of everything covered across the whole section, "
+                "synthesizing all subsection content without omitting any topic. "
+                "Be as concise as possible while remaining complete. "
+                "Return only plain text with no markdown formatting."
+            )
+        else:  # section / page — leaf node, raw content
             task_prompt = (
                 "You are given a chunk of document content (a section, page, or element).\n"
                 "Write a concise description of everything covered in this content, "
@@ -776,7 +825,7 @@ Return no extra commentary. Include all operations that are materially requested
         m: BaseSession,
         text: str,
         loop_budget: int = 5,
-        scope: Literal["section", "document"] = "section",
+        scope: Literal["section", "parent", "document"] = "section",
     ) -> tuple[str | None, list[str] | None]:
         """Generate a prose summary and a keyword list in a single inference call.
 
@@ -786,10 +835,13 @@ Return no extra commentary. Include all operations that are materially requested
 
         Args:
             m: Backend session
-            text: Text to summarize and keyword-extract
+            text: Content to summarize and keyword-extract. Pass raw text for
+                  ``"section"``/``"document"`` scopes, or the output of
+                  ``_collect_child_summaries`` for ``"parent"``.
             loop_budget: Retry budget for validation
-            scope: ``"section"`` for element/page-level content;
-                   ``"document"`` for a high-level overview from introductory pages
+            scope: Controls the prompt framing. ``"section"`` for a leaf element;
+                   ``"parent"`` for a node whose children are already summarized;
+                   ``"document"`` for a high-level overview from opening pages.
 
         Returns:
             ``(summary_text, keyword_list)`` — either component may be ``None`` if
@@ -800,9 +852,18 @@ Return no extra commentary. Include all operations that are materially requested
                 "You are given the opening pages of a document.\n"
                 "Write a concise description of what the entire document is about: "
                 "its purpose, scope, and the main topics it covers. "
-                "Do not summarise only the pages shown — infer the document's overall subject and intent."
+                "Do not summarize only the pages shown — infer the document's overall subject and intent."
             )
-        else:
+        elif scope == "parent":
+            summary_instruction = (
+                "You are given a section of a document. "
+                "The input contains the section's own opening text (possibly empty) "
+                "followed by the titles and summaries of its subsections.\n"
+                "Write a concise description of everything covered across the whole section, "
+                "synthesizing all subsection content without omitting any topic. "
+                "Be as concise as possible while remaining complete."
+            )
+        else:  # section / page — leaf node, raw content
             summary_instruction = (
                 "You are given a chunk of document content (a section, page, or element).\n"
                 "Write a concise description of everything covered in this content, "
@@ -858,6 +919,40 @@ Return no extra commentary. Include all operations that are materially requested
                 log_warning("Combined call: no keywords parsed from response")
 
         return summary_text, keywords
+
+    @staticmethod
+    def _collect_child_summaries(node: NodeItem, doc: DoclingDocument) -> str:
+        """Return a ``scope="parent"`` context string built from the direct children of *node*.
+
+        Each child contributes either its ``meta.summary`` text or its raw text
+        (fallback when no summary exists yet), optionally preceded by a heading label.
+
+        Args:
+            node: Parent node whose children to collect.
+            doc: Document the node belongs to.
+
+        Returns:
+            Multi-line string for use as the ``text`` argument to the generation
+            methods, or an empty string if the node has no children.
+        """
+        parts: list[str] = []
+        for child_ref in node.children or []:
+            try:
+                child = child_ref.resolve(doc)
+            except Exception:
+                continue
+
+            heading = child.text if isinstance(child, (TitleItem, SectionHeaderItem)) and child.text else None
+
+            if child.meta is not None and child.meta.summary is not None and child.meta.summary.text:
+                entry = child.meta.summary.text
+            else:
+                entry = collect_subtree_text(child, doc)
+
+            if entry:
+                parts.append(f"[Subsection: {heading}]\n{entry}" if heading else entry)
+
+        return "\n\n".join(parts)
 
     # ------------------------------------------------------------------
     # Keywords
@@ -1003,34 +1098,11 @@ Return no extra commentary. Include all operations that are materially requested
         loop_budget: int,
         min_text_length: int,
     ) -> None:
-        """Walk the document tree and set both ``meta.summary`` and ``meta.keywords`` per node."""
-        should_enrich = False
-        threshold = min_text_length
+        """Walk the document tree post-order and set both ``meta.summary`` and ``meta.keywords`` per node.
 
-        if isinstance(node, TitleItem | SectionHeaderItem):
-            should_enrich = True
-        elif isinstance(node, TextItem):
-            should_enrich = node.label != DocItemLabel.CAPTION
-            threshold = min(min_text_length, 40)
-        elif isinstance(node, GroupItem):
-            should_enrich = node.self_ref != "#/body"
-            threshold = min(min_text_length, 40)
-
-        if should_enrich:
-            already_has_summary = node.meta is not None and node.meta.summary is not None
-            already_has_keywords = node.meta is not None and node.meta.keywords is not None
-            if not (already_has_summary and already_has_keywords):
-                text = collect_subtree_text(node, doc)
-                if len(text) >= threshold:
-                    summary, keywords = self._generate_summary_and_keywords(m=m, text=text, loop_budget=loop_budget)
-                    if summary or keywords:
-                        if node.meta is None:
-                            node.meta = BaseMeta()
-                        if summary and not already_has_summary:
-                            node.meta.summary = SummaryMetaField(text=summary)
-                        if keywords and not already_has_keywords:
-                            node.meta.keywords = KeywordsMetaField(values=keywords)
-
+        Nodes with children are enriched from their children's summaries (``scope="parent"``).
+        Leaf nodes are enriched from their raw content (``scope="section"``).
+        """
         for child_ref in node.children or []:
             try:
                 child = child_ref.resolve(doc)
@@ -1043,6 +1115,55 @@ Return no extra commentary. Include all operations that are materially requested
                 )
             except Exception as exc:
                 log_warning("Could not resolve child", child_ref=child_ref, exception=exc)
+
+        # Now enrich this node (children are already enriched)
+        should_enrich = False
+        threshold = min_text_length
+
+        if isinstance(node, TitleItem | SectionHeaderItem):
+            should_enrich = True
+        elif isinstance(node, TextItem):
+            should_enrich = node.label != DocItemLabel.CAPTION
+            threshold = min(min_text_length, 40)
+        elif isinstance(node, GroupItem):
+            should_enrich = node.self_ref != "#/body"
+            threshold = min(min_text_length, 40)
+
+        if not should_enrich:
+            return
+
+        already_has_summary = node.meta is not None and node.meta.summary is not None
+        already_has_keywords = node.meta is not None and node.meta.keywords is not None
+        if already_has_summary and already_has_keywords:
+            return  # skip: already enriched (e.g. from a previous partial run)
+
+        has_children = bool(node.children)
+        if has_children:
+            context = self._collect_child_summaries(node, doc)
+            if context:
+                summary, keywords = self._generate_summary_and_keywords(
+                    m=m, text=context, loop_budget=loop_budget, scope="parent"
+                )
+                if summary or keywords:
+                    if node.meta is None:
+                        node.meta = BaseMeta()
+                    if summary and not already_has_summary:
+                        node.meta.summary = SummaryMetaField(text=summary)
+                    if keywords and not already_has_keywords:
+                        node.meta.keywords = KeywordsMetaField(values=keywords)
+        else:
+            text = collect_subtree_text(node, doc)
+            if len(text) >= threshold:
+                summary, keywords = self._generate_summary_and_keywords(
+                    m=m, text=text, loop_budget=loop_budget, scope="section"
+                )
+                if summary or keywords:
+                    if node.meta is None:
+                        node.meta = BaseMeta()
+                    if summary and not already_has_summary:
+                        node.meta.summary = SummaryMetaField(text=summary)
+                    if keywords and not already_has_keywords:
+                        node.meta.keywords = KeywordsMetaField(values=keywords)
 
     def _enrich_leaf_items_full(
         self,
