@@ -456,6 +456,9 @@ Return no extra commentary. Include all operations that are materially requested
         if has_children:
             context = self._collect_child_summaries(node, doc)
             if context:
+                title = node.text if isinstance(node, (TitleItem, SectionHeaderItem)) and node.text else None
+                if title:
+                    context = f"Section Title: {title}\n\n{context}"
                 summary = self._generate_summary(m=m, text=context, loop_budget=loop_budget, scope="parent")
                 if summary:
                     if node.meta is None:
@@ -760,8 +763,8 @@ Return no extra commentary. Include all operations that are materially requested
         elif scope == "parent":
             task_prompt = (
                 "You are given a section of a document. "
-                "The input contains the section's own opening text (possibly empty) "
-                "followed by the titles and summaries of its subsections.\n"
+                "The input starts with an optional 'Section Title:' line giving the section's heading, "
+                "followed by the summaries of its subsections.\n"
                 "Write a concise description of everything covered across the whole section, "
                 "synthesizing all subsection content without omitting any topic. "
                 "Be as concise as possible while remaining complete. "
@@ -858,8 +861,8 @@ Return no extra commentary. Include all operations that are materially requested
         elif scope == "parent":
             summary_instruction = (
                 "You are given a section of a document. "
-                "The input contains the section's own opening text (possibly empty) "
-                "followed by the titles and summaries of its subsections.\n"
+                "The input starts with an optional 'Section Title:' line giving the section's heading, "
+                "followed by the summaries of its subsections.\n"
                 "Write a concise description of everything covered across the whole section, "
                 "synthesizing all subsection content without omitting any topic. "
                 "Be as concise as possible while remaining complete."
@@ -1145,6 +1148,9 @@ Return no extra commentary. Include all operations that are materially requested
         if has_children:
             context = self._collect_child_summaries(node, doc)
             if context:
+                title = node.text if isinstance(node, (TitleItem, SectionHeaderItem)) and node.text else None
+                if title:
+                    context = f"Section Title: {title}\n\n{context}"
                 summary, keywords = self._generate_summary_and_keywords(
                     m=m, text=context, loop_budget=loop_budget, scope="parent"
                 )
