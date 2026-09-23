@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, ClassVar, Literal, Protocol, cast
+from typing import Any, ClassVar, Final, Literal, Protocol, cast
 
 from docling_core.transforms.serializer.markdown import (
     ImageRefMode,
@@ -76,6 +76,13 @@ class _ValidationFn(Protocol):
 
     def __call__(self, content: str) -> bool: ...
 
+
+_MIN_TEXT_LENGTH_FOR_SUMMARY: Final[int] = 500
+"""Minimum character length of a text node to trigger an LLM summarization call.
+
+Nodes below this threshold receive no summary entry at all.
+Calibration: ~100 English words ≈ 100 tokens ≈ 500 chars.
+"""
 
 # Mapping from routing names and short names to method names
 _OP_ALIASES: dict[str, str] = {
@@ -279,7 +286,7 @@ Return no extra commentary. Include all operations that are materially requested
         *,
         document: DoclingDocument,
         fix_heading_levels: bool = True,
-        min_text_length: int = 40,
+        min_text_length: int = _MIN_TEXT_LENGTH_FOR_SUMMARY,
         loop_budget: int = 5,
     ) -> DoclingDocument:
         if fix_heading_levels:
@@ -334,21 +341,18 @@ Return no extra commentary. Include all operations that are materially requested
     ) -> None:
         """Generic method to walk document tree and enrich nodes with metadata."""
         should_enrich = False
-        threshold = min_text_length
 
         if isinstance(node, TitleItem | SectionHeaderItem):
             should_enrich = True
         elif isinstance(node, TextItem):
             should_enrich = node.label != DocItemLabel.CAPTION
-            threshold = min(min_text_length, 40)
         elif isinstance(node, GroupItem):
             should_enrich = node.self_ref != "#/body"
-            threshold = min(min_text_length, 40)
 
         if should_enrich:
             if not (node.meta and getattr(node.meta, meta_attr, None)):
                 text = collect_subtree_text(node, doc)
-                if len(text) >= threshold:
+                if len(text) >= min_text_length:
                     result = generate_fn(m=m, text=text, loop_budget=loop_budget)
                     if result:
                         if node.meta is None:
@@ -418,8 +422,8 @@ Return no extra commentary. Include all operations that are materially requested
     ) -> None:
         """Walk the document tree post-order and add summaries to sections.
 
-        Nodes with children are summarized from their children's summaries (``scope="parent"``).
-        Leaf nodes are summarized from their raw content (``scope="section"``).
+        Nodes with children are summarized from their children's summaries (`scope=parent`).
+        Leaf nodes below `min_text_length` receive no summary.
         """
         for child_ref in node.children or []:
             try:
@@ -435,16 +439,13 @@ Return no extra commentary. Include all operations that are materially requested
                 log_warning("Could not resolve child", child_ref=child_ref, exception=exc)
 
         should_enrich = False
-        threshold = min_text_length
 
         if isinstance(node, TitleItem | SectionHeaderItem):
             should_enrich = True
         elif isinstance(node, TextItem):
             should_enrich = node.label != DocItemLabel.CAPTION
-            threshold = min(min_text_length, 40)
         elif isinstance(node, GroupItem):
             should_enrich = node.self_ref != "#/body"
-            threshold = min(min_text_length, 40)
 
         if not should_enrich:
             return
@@ -462,7 +463,7 @@ Return no extra commentary. Include all operations that are materially requested
                     node.meta.summary = SummaryMetaField(text=summary)
         else:
             text = collect_subtree_text(node, doc)
-            if len(text) >= threshold:
+            if len(text) >= min_text_length:
                 summary = self._generate_summary(m=m, text=text, loop_budget=loop_budget, scope="section")
                 if summary:
                     if node.meta is None:
@@ -507,20 +508,20 @@ Return no extra commentary. Include all operations that are materially requested
         retrieval unit.
 
         After page-level enrichment, generates a document-level summary from the
-        first N pages' actual content (for ``"sentences"`` and ``"full"`` styles).
+        first N pages' actual content (for `sentences` and `full` styles).
 
         Args:
             document: Document to enrich with page summaries
-            style: ``"sentences"`` stores prose summaries in ``meta.summary``;
-                   ``"keyphrases"`` stores keyword lists in ``meta.keywords``;
-                   ``"full"`` stores both in a single inference call per page
+            style: `sentences` stores prose summaries in `meta.summary`;
+                   `keyphrases` stores keyword lists in `meta.keywords`;
+                   `full` stores both in a single inference call per page
             loop_budget: Retry budget for each generation call
             save_callback: Optional callback(document, page_no) called after each page for fault tolerance
             document_summary_pages: Number of initial pages to use for document summary (default: 3)
 
         Returns:
             Document with page-level enrichment added to the first item of each page,
-            and (for ``"sentences"`` and ``"full"``) a document-level summary added
+            and (for `sentences` and `full`) a document-level summary added
             to the body element
         """
 
@@ -734,12 +735,12 @@ Return no extra commentary. Include all operations that are materially requested
 
         Args:
             m: Backend session
-            text: Content to summarize. Pass raw text for ``"section"``/``"document"``
-                  scopes, or the output of ``_collect_child_summaries`` for ``"parent"``.
+            text: Content to summarize. Pass raw text for `section`/`document`
+                  scopes, or the output of `_collect_child_summaries` for `parent`.
             loop_budget: Retry budget for validation
-            scope: Controls the prompt framing. ``"section"`` for a leaf element;
-                   ``"parent"`` for a node whose children are already summarized;
-                   ``"document"`` for a high-level overview from opening pages.
+            scope: Controls the prompt framing. `section` for a leaf element;
+                   `parent` for a node whose children are already summarized;
+                   `document` for a high-level overview from opening pages.
 
         Returns:
             Generated summary, or None if generation fails
@@ -829,22 +830,22 @@ Return no extra commentary. Include all operations that are materially requested
     ) -> tuple[str | None, list[str] | None]:
         """Generate a prose summary and a keyword list in a single inference call.
 
-        The model is asked to return both outputs in a structured ``SUMMARY: …`` /
-        ``KEYWORDS: …`` format so that a single round-trip populates both
-        ``meta.summary`` and ``meta.keywords``.
+        The model is asked to return both outputs in a structured `SUMMARY: …` /
+        `KEYWORDS: …` format so that a single round-trip populates both
+        `meta.summary` and `meta.keywords`.
 
         Args:
             m: Backend session
             text: Content to summarize and keyword-extract. Pass raw text for
-                  ``"section"``/``"document"`` scopes, or the output of
-                  ``_collect_child_summaries`` for ``"parent"``.
+                  `section`/`document` scopes, or the output of
+                  `_collect_child_summaries` for `parent`.
             loop_budget: Retry budget for validation
-            scope: Controls the prompt framing. ``"section"`` for a leaf element;
-                   ``"parent"`` for a node whose children are already summarized;
-                   ``"document"`` for a high-level overview from opening pages.
+            scope: Controls the prompt framing. `section` for a leaf element;
+                   `parent` for a node whose children are already summarized;
+                   `document` for a high-level overview from opening pages.
 
         Returns:
-            ``(summary_text, keyword_list)`` — either component may be ``None`` if
+            `(summary_text, keyword_list)` — either component may be `None` if
             the model response for that part could not be parsed.
         """
         if scope == "document":
@@ -922,9 +923,9 @@ Return no extra commentary. Include all operations that are materially requested
 
     @staticmethod
     def _collect_child_summaries(node: NodeItem, doc: DoclingDocument) -> str:
-        """Return a ``scope="parent"`` context string built from the direct children of *node*.
+        """Return a `scope=parent` context string built from the direct children of *node*.
 
-        Each child contributes either its ``meta.summary`` text or its raw text
+        Each child contributes either its `meta.summary` text or its raw text
         (fallback when no summary exists yet), optionally preceded by a heading label.
 
         Args:
@@ -932,7 +933,7 @@ Return no extra commentary. Include all operations that are materially requested
             doc: Document the node belongs to.
 
         Returns:
-            Multi-line string for use as the ``text`` argument to the generation
+            Multi-line string for use as the `text` argument to the generation
             methods, or an empty string if the node has no children.
         """
         parts: list[str] = []
@@ -1045,23 +1046,28 @@ Return no extra commentary. Include all operations that are materially requested
         *,
         document: DoclingDocument,
         fix_heading_levels: bool = True,
-        min_text_length: int = 40,
+        min_text_length: int = _MIN_TEXT_LENGTH_FOR_SUMMARY,
         loop_budget: int = 5,
     ) -> DoclingDocument:
         """Enrich documents with both prose summaries and keyword lists in a single pass.
 
-        Combines ``_summarize_items`` and ``_find_search_keywords`` into one tree
-        walk so that each element is enriched with both ``meta.summary`` and
-        ``meta.keywords`` using a single inference call per node.
+        Combines `_summarize_items` and `_find_search_keywords` into one tree
+        walk so that each element is enriched with both `meta.summary` and
+        `meta.keywords` using a single inference call per node.
+
+        Leaf nodes shorter than `min_text_length` receive no summary, but keywords
+        are always extracted when text is available.
 
         Args:
             document: Document to enrich
             fix_heading_levels: Whether to normalise heading levels first (default: True)
-            min_text_length: Minimum text length to trigger enrichment (default: 40)
+            min_text_length: Minimum character length to trigger summary generation.
+                Nodes below this threshold receive no summary. Keywords are always
+                extracted regardless of this threshold (default: `_MIN_TEXT_LENGTH_FOR_SUMMARY`)
             loop_budget: Retry budget per element (default: 5)
 
         Returns:
-            Enriched document with both ``meta.summary`` and ``meta.keywords`` populated
+            Enriched document with both `meta.summary` and `meta.keywords` populated
         """
         if fix_heading_levels:
             with self._timed_stage("full: fix heading levels"):
@@ -1098,10 +1104,11 @@ Return no extra commentary. Include all operations that are materially requested
         loop_budget: int,
         min_text_length: int,
     ) -> None:
-        """Walk the document tree post-order and set both ``meta.summary`` and ``meta.keywords`` per node.
+        """Walk the document tree post-order and set both `meta.summary` and `meta.keywords` per node.
 
-        Nodes with children are enriched from their children's summaries (``scope="parent"``).
-        Leaf nodes are enriched from their raw content (``scope="section"``).
+        Nodes with children are enriched from their children's summaries (`scope=parent`).
+        Leaf nodes shorter than `min_text_length` receive no summary, but keywords are
+        always extracted when text is available.
         """
         for child_ref in node.children or []:
             try:
@@ -1118,16 +1125,13 @@ Return no extra commentary. Include all operations that are materially requested
 
         # Now enrich this node (children are already enriched)
         should_enrich = False
-        threshold = min_text_length
 
         if isinstance(node, TitleItem | SectionHeaderItem):
             should_enrich = True
         elif isinstance(node, TextItem):
             should_enrich = node.label != DocItemLabel.CAPTION
-            threshold = min(min_text_length, 40)
         elif isinstance(node, GroupItem):
             should_enrich = node.self_ref != "#/body"
-            threshold = min(min_text_length, 40)
 
         if not should_enrich:
             return
@@ -1153,17 +1157,18 @@ Return no extra commentary. Include all operations that are materially requested
                         node.meta.keywords = KeywordsMetaField(values=keywords)
         else:
             text = collect_subtree_text(node, doc)
-            if len(text) >= threshold:
-                summary, keywords = self._generate_summary_and_keywords(
-                    m=m, text=text, loop_budget=loop_budget, scope="section"
-                )
-                if summary or keywords:
-                    if node.meta is None:
-                        node.meta = BaseMeta()
-                    if summary and not already_has_summary:
-                        node.meta.summary = SummaryMetaField(text=summary)
-                    if keywords and not already_has_keywords:
-                        node.meta.keywords = KeywordsMetaField(values=keywords)
+            if not text:
+                return
+            summary, keywords = self._generate_summary_and_keywords(
+                m=m, text=text, loop_budget=loop_budget, scope="section"
+            )
+            if summary or keywords:
+                if node.meta is None:
+                    node.meta = BaseMeta()
+                if summary and not already_has_summary and len(text) >= min_text_length:
+                    node.meta.summary = SummaryMetaField(text=summary)
+                if keywords and not already_has_keywords:
+                    node.meta.keywords = KeywordsMetaField(values=keywords)
 
     def _enrich_leaf_items_full(
         self,
@@ -1172,7 +1177,7 @@ Return no extra commentary. Include all operations that are materially requested
         document: DoclingDocument,
         loop_budget: int,
     ) -> None:
-        """Set both ``meta.summary`` and ``meta.keywords`` on leaf items (tables, pictures)."""
+        """Set both `meta.summary` and `meta.keywords` on leaf items (tables, pictures)."""
         for item, _ in document.iterate_items():
             already_has_summary = item.meta is not None and item.meta.summary is not None
             already_has_keywords = item.meta is not None and item.meta.keywords is not None
