@@ -603,7 +603,12 @@ class DoclingRAGAgent(BaseDoclingAgent):
 
         view_linear_context(m)
 
-        d = find_json_dicts(answer)[0]
+        dicts = find_json_dicts(answer)
+        d = dicts[0] if dicts else {}
+        if not isinstance(d.get("can_answer"), bool) or not isinstance(d.get("response"), str):
+            # Rejection sampling exhausted without a valid response; move on to the next section
+            log_warning(f"Unparseable answer for section {section_ref!r}, treating as cannot-answer")
+            return AnswerAttempt(can_answer=False, response="No usable answer could be extracted from this section.")
         return AnswerAttempt(can_answer=d["can_answer"], response=d["response"])
 
     # ------------------------------------------------------------------
