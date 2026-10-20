@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 
-from docling_core.experimental.serializer.outline import OutlineFormat
+from docling_core.experimental.serializer.outline import OutlineFormat, OutlineMode
 from docling_core.types.base import _JSON_POINTER_REGEX
 from docling_core.types.doc.document import (
     ContentLayer,
@@ -173,7 +173,9 @@ class DoclingEditingAgent(BaseDoclingAgent):
         log_info(f"task: {task}")
 
         # TODO: check best format for describing the outline (MARKDOWN vs JSON) for short and long documents
-        outline = create_document_outline(doc=document, format=OutlineFormat.MARKDOWN)
+        # The full outline (not only the table of contents) lists the refs of text items and tables,
+        # which the update_content and rewrite_content operations need to target.
+        outline = create_document_outline(doc=document, mode=OutlineMode.OUTLINE, format=OutlineFormat.MARKDOWN)
         log_debug(f"outline: {outline}")
 
         context = rf"""Given the current outline of the document:

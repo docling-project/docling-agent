@@ -6,6 +6,8 @@ from docling_core.types.doc.document import (
     DocItemLabel,
     DoclingDocument,
     SectionHeaderItem,
+    TableCell,
+    TableData,
     TextItem,
     TitleItem,
 )
@@ -63,6 +65,40 @@ class TestRewriteContentOperation:
             RewriteContentOperation(operation="rewrite_content", refs=["#/texts/1", "invalid-ref"])
         # Pydantic's built-in pattern validation error message
         assert "String should match pattern" in str(exc_info.value)
+
+
+class TestIdentifyDocumentItems:
+    """Test the operation planning step of the DoclingEditingAgent."""
+
+    def test_outline_exposes_table_refs(self, monkeypatch):
+        """The planning prompt lists tables, so the model can target them with update_content."""
+        document = DoclingDocument(name="form")
+        document.add_title(text="Assessment Form")
+        cells = [
+            TableCell(
+                text=text,
+                start_row_offset_idx=0,
+                end_row_offset_idx=1,
+                start_col_offset_idx=col,
+                end_col_offset_idx=col + 1,
+            )
+            for col, text in enumerate(["Field", "Value"])
+        ]
+        table = document.add_table(data=TableData(num_rows=1, num_cols=2, table_cells=cells))
+        prompts = []
+
+        def answer_with_table_ref(self, prompt, *, requirements=None, retry_budget=1):
+            prompts.append(prompt)
+            return f'```json\n{{"operation": "update_content", "ref": "{table.self_ref}"}}\n```'
+
+        monkeypatch.setattr(MockSession, "instruct", answer_with_table_ref)
+
+        op = DoclingEditingAgent(backend=MockBackend(), tools=[])._identify_document_items(
+            task="Fill in the Value column of the table", document=document
+        )
+
+        assert table.self_ref in prompts[0]
+        assert op == UpdateContentOperation(operation="update_content", ref=table.self_ref)
 
 
 class TestRewriteContent:
