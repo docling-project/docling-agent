@@ -50,7 +50,14 @@ class DoclingExtractingAgent(BaseDoclingAgent):
         # Imported here because DocumentExtractor pulls in the VLM stack (PyTorch, transformers),
         # which importing docling_agent should not require when this agent is not used.
         from docling.datamodel.base_models import InputFormat
-        from docling.document_extractor import DocumentExtractor
+
+        try:
+            from docling.document_extractor import DocumentExtractor
+        except ImportError as exc:
+            raise ImportError(
+                "DoclingExtractingAgent runs a vision-language model locally. "
+                "Install the vlm extra with: pip install 'docling-agent[vlm]'"
+            ) from exc
 
         self._extractor: DocumentExtractor = DocumentExtractor(allowed_formats=[InputFormat.IMAGE, InputFormat.PDF])
         self._last_results: dict[str, list[Any]] = {}

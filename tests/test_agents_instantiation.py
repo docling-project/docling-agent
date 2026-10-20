@@ -1,3 +1,6 @@
+import importlib.util
+import sys
+
 import pytest
 
 from docling_agent.backends import create_backend
@@ -34,6 +37,7 @@ def test_instantiate_docling_editing_agent():
         pytest.fail(f"DoclingEditingAgent instantiation raised: {e}")
 
 
+@pytest.mark.skipif(importlib.util.find_spec("torch") is None, reason="requires the vlm extra")
 def test_instantiate_docling_extracting_agent():
     from docling_agent.agent.extractor import DoclingExtractingAgent
 
@@ -41,6 +45,15 @@ def test_instantiate_docling_extracting_agent():
         _ = DoclingExtractingAgent(backend=_backend(), tools=[])
     except Exception as e:
         pytest.fail(f"DoclingExtractingAgent instantiation raised: {e}")
+
+
+def test_extracting_agent_names_the_vlm_extra_when_missing(monkeypatch):
+    from docling_agent.agent.extractor import DoclingExtractingAgent
+
+    # A None entry in sys.modules makes the import fail as if the VLM stack were not installed
+    monkeypatch.setitem(sys.modules, "docling.document_extractor", None)
+    with pytest.raises(ImportError, match=r"docling-agent\[vlm\]"):
+        DoclingExtractingAgent(backend=_backend(), tools=[])
 
 
 def test_instantiate_docling_enriching_agent():

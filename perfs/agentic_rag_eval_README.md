@@ -221,13 +221,13 @@ scratch/agentic_rag_eval/
 
 ## Requirements
 
-In addition to the standard `docling-agent` dependencies:
+Install `docling-agent` with the `evaluation` extra, which adds local PDF conversion with the VLM models and the metrics libraries:
 
 ```bash
-pip install ranx pandas pyarrow tqdm
+pip install 'docling-agent[evaluation]'
 ```
 
-- `docling` — PDF conversion.
+- `docling-slim[standard,models-vlm-inline]` — PDF conversion, picture description, and chart extraction.
 - `docling-core` — `DoclingDocument` manipulation.
 - `docling-agent` — Editing, enriching, and RAG agents.
 - `ranx` — NDCG computation.

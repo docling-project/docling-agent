@@ -16,6 +16,7 @@ from docling_agent.agent.enricher import DoclingEnrichingAgent
 from docling_agent.agent.library import DocLibraryEntry, DoclingLibrary
 from docling_agent.agent.orchestrator import DoclingOrchestratorAgent
 from docling_agent.agent.writer import DoclingWritingAgent
+from docling_agent.conversion import LocalSourceConverter, local_conversion_available
 from docling_agent.task_model import AddTask, ClearTask, ListTask, ViewTask, WriteTask
 
 
@@ -143,14 +144,21 @@ def test_add_mode_adds_sources_to_library(
     assert entries[0].doc_id in markdown
 
 
-def test_build_source_converter_applies_named_presets(orchestrator: DoclingOrchestratorAgent) -> None:
+@pytest.mark.skipif(not local_conversion_available(), reason="requires the local extra")
+def test_build_source_converter_applies_named_presets(
+    monkeypatch: pytest.MonkeyPatch, orchestrator: DoclingOrchestratorAgent
+) -> None:
+    monkeypatch.setenv("DOCLING_AGENT_CONVERSION_MODE", "local")
     fast = orchestrator._build_source_converter("fast")
     standard = orchestrator._build_source_converter("standard")
     expensive = orchestrator._build_source_converter("expensive")
+    assert isinstance(fast, LocalSourceConverter)
+    assert isinstance(standard, LocalSourceConverter)
+    assert isinstance(expensive, LocalSourceConverter)
 
-    fast_pdf = fast.format_to_options[InputFormat.PDF].pipeline_options
-    standard_pdf = standard.format_to_options[InputFormat.PDF].pipeline_options
-    expensive_pdf = expensive.format_to_options[InputFormat.PDF].pipeline_options
+    fast_pdf = fast.converter.format_to_options[InputFormat.PDF].pipeline_options
+    standard_pdf = standard.converter.format_to_options[InputFormat.PDF].pipeline_options
+    expensive_pdf = expensive.converter.format_to_options[InputFormat.PDF].pipeline_options
 
     assert fast_pdf.do_ocr is False
     assert fast_pdf.do_table_structure is False
