@@ -27,9 +27,10 @@ jobs:
           path: ~/.cache/huggingface
           key: huggingface-cache-py${{ matrix.python-version }}
       - name: Install uv and set the python version
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
+          activate-environment: true
           enable-cache: true
       - name: pre-commit cache key
         run: echo "PY=$(python -VV | sha256sum | cut -d' ' -f1)" >> "$GITHUB_ENV"
@@ -57,9 +58,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install uv and set the python version
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
+          activate-environment: true
           enable-cache: true
       - name: Install dependencies without extras
         run: uv sync --frozen
@@ -76,9 +78,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install uv and set the python version
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
+          activate-environment: true
           enable-cache: true
       - name: Install dependencies
         run: uv sync --all-extras
@@ -106,9 +109,10 @@ jobs:
           name: python-package-distributions
           path: dist/
       - name: Install uv and set the python version
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
+          activate-environment: true
           enable-cache: true
       - name: Install package
         run: uv pip install dist/*.whl
