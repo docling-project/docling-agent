@@ -5,10 +5,9 @@ from __future__ import annotations
 import time
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 from docling.datamodel.base_models import ConversionStatus, FormatToMimeType, InputFormat
-from docling.document_converter import DocumentConverter
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
 from docling_core.types.doc.document import (
     DocItemLabel,
@@ -29,6 +28,7 @@ from docling_agent.agent.extractor import DoclingExtractingAgent
 from docling_agent.agent.library import DocLibraryEntry, DoclingLibrary
 from docling_agent.agent.rag import DoclingRAGAgent
 from docling_agent.agent.writer import DoclingWritingAgent
+from docling_agent.conversion import ConversionPreset, SourceConverter, create_source_converter
 from docling_agent.logging import log_error, log_info, log_warning
 from docling_agent.task_model import (
     AddTask,
@@ -256,30 +256,26 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
 
         # Batch-convert all uncached files
         if raw_to_convert:
-            converter = self._build_source_converter(conversion)
-            for p in raw_to_convert:
-                source_key = str(p.resolve())
-                try:
-                    conv = converter.convert(p)
-                    if conv.status == ConversionStatus.SUCCESS:
-                        doc = conv.document
-                        entry = library.store(
-                            doc,
-                            source_key,
-                            project_id=task.project_id,
-                            original_mimetype=self._mimetype_for_input_format(conv.input.format),
-                            conversion_pipeline=self._pipeline_name_for_input_format(
-                                converter=converter,
-                                input_format=conv.input.format,
-                                conversion=conversion,
-                            ),
-                        )
-                        results.append((doc, entry.doc_id))
-                        log_info(f"Converted and cached: {p.name} → {entry.doc_id}")
-                    else:
-                        log_warning(f"Conversion failed for {p.name}: {conv.status}")
-                except Exception as exc:
-                    log_error(f"Error converting {p}: {exc}")
+            with self._build_source_converter(conversion) as converter:
+                for p in raw_to_convert:
+                    source_key = str(p.resolve())
+                    try:
+                        conv = converter.convert(p)
+                        if conv.status == ConversionStatus.SUCCESS:
+                            doc = conv.document
+                            entry = library.store(
+                                doc,
+                                source_key,
+                                project_id=task.project_id,
+                                original_mimetype=self._mimetype_for_input_format(conv.input.format),
+                                conversion_pipeline=converter.pipeline_name(conv.input.format),
+                            )
+                            results.append((doc, entry.doc_id))
+                            log_info(f"Converted and cached: {p.name} → {entry.doc_id}")
+                        else:
+                            log_warning(f"Conversion failed for {p.name}: {conv.status}")
+                    except Exception as exc:
+                        log_error(f"Error converting {p}: {exc}")
 
         log_info(f"Resolved {len(results)} document(s)")
         return results
@@ -756,46 +752,19 @@ class DoclingOrchestratorAgent(BaseDoclingAgent):
         mimetypes = FormatToMimeType.get(input_format, [])
         return mimetypes[0] if mimetypes else None
 
-    def _pipeline_name_for_input_format(
-        self,
-        *,
-        converter: DocumentConverter,
-        input_format: InputFormat,
-        conversion: Literal["fast", "standard", "expensive"],
-    ) -> str:
-        format_option = converter.format_to_options.get(input_format)
-        if format_option is None:
-            return f"unknown:{conversion}"
-        return f"{format_option.pipeline_cls.__name__}:{conversion}"
-
-    def _source_conversion_preset(self, task: AgentTask) -> Literal["fast", "standard", "expensive"]:
+    def _source_conversion_preset(self, task: AgentTask) -> ConversionPreset:
         if isinstance(task, AddTask):
             return task.conversion
         return "standard"
 
-    def _build_source_converter(self, conversion: Literal["fast", "standard", "expensive"]) -> DocumentConverter:
-        converter = DocumentConverter()
-        for format_option in converter.format_to_options.values():
-            pipeline_options = format_option.pipeline_options
-            if pipeline_options is None:
-                continue
-            if hasattr(pipeline_options, "do_ocr"):
-                pipeline_options.do_ocr = conversion != "fast"
-            if hasattr(pipeline_options, "do_table_structure"):
-                pipeline_options.do_table_structure = conversion != "fast"
-            if hasattr(pipeline_options, "do_picture_classification"):
-                pipeline_options.do_picture_classification = True
-            if hasattr(pipeline_options, "do_chart_extraction"):
-                pipeline_options.do_chart_extraction = conversion == "expensive"
-            if hasattr(pipeline_options, "generate_page_images"):
-                pipeline_options.generate_page_images = True
-        return converter
+    def _build_source_converter(self, conversion: ConversionPreset) -> SourceConverter:
+        return create_source_converter(conversion)
 
     def _cache_entry_matches_conversion(
         self,
         entry: DocLibraryEntry,
         *,
-        conversion: Literal["fast", "standard", "expensive"],
+        conversion: ConversionPreset,
     ) -> bool:
         for run in entry.status.pipelines:
             if run.name.endswith(f":{conversion}"):

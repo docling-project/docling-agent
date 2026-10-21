@@ -34,7 +34,7 @@ classifiers = [
 ]
 requires-python = ">=3.11,<4.0"
 dependencies = [
-    "docling>=2.61.0",
+    "docling-slim[service-client,format-html,format-markdown]~=2.140",
     "docling-core>=2.79.0",
     "pydantic~=2.10",
     "pydantic-settings~=2.4",
@@ -50,14 +50,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Convert source files in-process (PDF, DOCX, images, ...) instead of with a Docling service.
+local = [
+    "docling-slim[standard]~=2.140",
+]
+# Run the DoclingExtractingAgent, which uses a vision-language model locally.
 vlm = [
-    "docling[vlm]~=2.53",
+    "docling-slim[standard,models-vlm-inline]~=2.140",
 ]
 evaluation = [
+    "docling-slim[standard,models-vlm-inline]~=2.140",
     "ranx>=0.3.21",
     "ocrmac>=1.0.0,<2.0.0; sys_platform == 'darwin'",
     "nemotron-ocr>=2.0.0; sys_platform == 'linux' and python_version == '3.12' and platform_machine == 'x86_64'",
-    "transformers>=5.4,<5.9",  # workaround until docling-project/docling#4205 is fixed 
 ]
 
 [dependency-groups]

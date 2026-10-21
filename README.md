@@ -36,6 +36,27 @@ pip install docling-agent
 
 Requires Python 3.11 or higher.
 
+The base install builds on [`docling-slim`](https://pypi.org/project/docling-slim/) and needs no PyTorch or local models. The agents work on `DoclingDocument`s, and source files (PDF, DOCX, images, ...) are converted by a [Docling Serve](https://github.com/docling-project/docling-serve) endpoint, such as Docling for IBM watsonx. Extras add capabilities that run locally:
+
+| Extra | Install | Adds |
+|-------|---------|------|
+| `local` | `pip install 'docling-agent[local]'` | Convert source files in-process with the Docling models |
+| `vlm` | `pip install 'docling-agent[vlm]'` | `DoclingExtractingAgent`, which runs a vision-language model locally (includes `local`) |
+| `evaluation` | `pip install 'docling-agent[evaluation]'` | Dependencies of the evaluation scripts in [`perfs/`](perfs/) |
+
+### Converting Source Files
+
+Tasks that ingest files, such as the `add` mode of the `docling-agent` CLI, pick the converter from these environment variables (also read from a `.env` file):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOCLING_AGENT_CONVERSION_MODE` | `auto` | `remote`, `local`, or `auto`: remote when a service URL is set, local otherwise |
+| `DOCLING_AGENT_SERVICE_URL` | | Base URL of the Docling Serve endpoint |
+| `DOCLING_AGENT_SERVICE_API_KEY` | | API key for the endpoint |
+| `DOCLING_AGENT_SERVICE_TIMEOUT` | `300` | Timeout in seconds for a remote conversion |
+
+The `fast`, `standard`, and `expensive` conversion presets apply the same pipeline options locally and remotely.
+
 ## Getting Started
 
 Each snippet shows how to initialise an agent, run a task, and save the result.
@@ -84,7 +105,7 @@ updated.save_as_html("./scratch/updated_table.html")
 
 ### Extract Structured Data with a Schema
 
-Define a simple schema and provide a list of files (PDFs/images); the agent produces an HTML report with extracted fields ([example](examples/example_03_extract_schema.py)).
+Define a simple schema and provide a list of files (PDFs/images); the agent produces an HTML report with extracted fields ([example](examples/example_03_extract_schema.py)). This agent runs a vision-language model locally and needs the `vlm` extra.
 
 ```python
 from pathlib import Path
@@ -175,7 +196,7 @@ Typical defaults:
 
 ## Examples
 
-Explore the [`examples/`](examples/) folder for end-to-end scripts covering document writing, editing, extraction, enrichment, RAG querying, and more.
+Explore the [`examples/`](examples/) folder for end-to-end scripts covering document writing, editing, extraction, enrichment, RAG querying, and more. The examples that convert files with a local `DocumentConverter` (06 and 07) need the `local` extra, and the extraction example (03) needs the `vlm` extra.
 
 ## Technical Report
 

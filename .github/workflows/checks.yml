@@ -48,6 +48,26 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
 
+  run-slim-tests:
+    # The base install depends on docling-slim only: no PyTorch, no local models.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install dependencies without extras
+        run: uv sync --frozen
+      - name: Check that the local model stack is not installed
+        run: uv run --no-sync python -c "import importlib.util as u, sys; sys.exit(any(u.find_spec(m) for m in ('torch', 'docling_ibm_models')))"
+      - name: Run tests
+        run: uv run --no-sync pytest -m "not slow" tests
+
   build-package:
     runs-on: ubuntu-latest
     strategy:
