@@ -4,7 +4,12 @@ from pathlib import Path
 from docling_core.experimental.serializer.outline import OutlineMode
 from docling_core.types.doc.document import DoclingDocument, SectionHeaderItem
 
-from docling_agent.agent.base_functions import create_document_outline, find_json_dicts, make_hierarchical_document
+from docling_agent.agent.base_functions import (
+    convert_html_to_docling_table,
+    create_document_outline,
+    find_json_dicts,
+    make_hierarchical_document,
+)
 
 from .test_data_gen_flag import GEN_TEST_DATA
 
@@ -118,6 +123,37 @@ def test_find_json_dicts_with_invalid_json():
 
     # Should return empty list and log a warning
     assert result == []
+
+
+HTML_TABLE_BLOCK = """```html
+<table>
+<tr><th>Year</th><th>Revenue</th></tr>
+<tr><td>2024</td><td>12</td></tr>
+</table>
+```"""
+
+
+def test_convert_html_to_docling_table_ignores_prose_mentioning_tags():
+    """Test that only the html code block is converted, not the prose around it."""
+    text = f"I updated the <table> below and removed the 2023 row.\n\n{HTML_TABLE_BLOCK}"
+
+    tables = convert_html_to_docling_table(text)
+
+    assert tables is not None
+    assert len(tables) == 1
+    assert [cell.text for cell in tables[0].data.table_cells] == ["Year", "Revenue", "2024", "12"]
+
+
+def test_convert_html_to_docling_table_ignores_tables_outside_code_block():
+    """Test that a table quoted outside the html code block is not returned."""
+    text = f"Original table:\n<table><tr><td>old</td></tr></table>\n\nUpdated table:\n{HTML_TABLE_BLOCK}"
+
+    tables = convert_html_to_docling_table(text)
+
+    assert tables is not None
+    assert len(tables) == 1
+    assert tables[0].data.num_rows == 2
+    assert tables[0].data.num_cols == 2
 
 
 def test_make_hierarchical_document():
