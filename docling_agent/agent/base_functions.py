@@ -199,7 +199,7 @@ def convert_html_to_docling_table(text: str) -> list[TableItem] | None:
     try:
         converter = DocumentConverter(allowed_formats=[InputFormat.HTML])
 
-        buff = BytesIO(text.encode("utf-8"))
+        buff = BytesIO(text_.encode("utf-8"))
         doc_stream = DocumentStream(name="tmp.html", stream=buff)
 
         conv: ConversionResult = converter.convert(doc_stream)
